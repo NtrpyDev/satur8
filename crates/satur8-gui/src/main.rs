@@ -2,7 +2,8 @@
 //!
 //! Sidebar + per-game profile rows with the game's real Steam icon, a satur8
 //! slider and an enable toggle; a before/after preview built from the game's own
-//! Steam art with the saturation applied; an output selector and an activity log.
+//! Steam art with the saturation applied; desktop vibrance settings and an
+//! activity log.
 //! Reads/writes the same `profiles.toml` the CLI and daemon use.
 //!
 //! Game art comes from the user's *local* Steam cache - nothing is bundled.
@@ -131,16 +132,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 let mut st = state.borrow_mut();
                 st.profiles.default_saturation = sat;
                 save(&st.profiles);
-                // Desktop vibrance is meant to affect the desktop: apply it live.
-                let identity = (sat - 1.0).abs() < 1e-3;
                 if let Some(b) = st.backend.as_mut() {
-                    let _ = if identity {
-                        b.reset(&all_outputs())
-                    } else {
-                        b.apply(&all_outputs(), Saturation::new(sat))
-                    };
+                    let _ = apply_or_reset(b.as_mut(), sat);
                 }
-                st.previewing = !identity;
+                // This is an explicit desktop setting, not a temporary preview.
+                st.previewing = false;
             }
             if let Some(ui) = w.upgrade() {
                 ui.set_default_percent(percent.round() as i32);
@@ -304,9 +300,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let activity = activity.clone();
         move || {
             let mut st = state.borrow_mut();
-            if let Some(b) = st.backend.as_mut() {
-                let _ = b.reset(&all_outputs());
-            }
+            restore_desktop_default(&mut st);
             st.previewing = false;
             log(&activity, false, "Restored desktop");
         }
@@ -323,9 +317,7 @@ fn main() -> Result<(), slint::PlatformError> {
         move || {
             let mut st = state.borrow_mut();
             if st.previewing {
-                if let Some(b) = st.backend.as_mut() {
-                    let _ = b.reset(&all_outputs());
-                }
+                restore_desktop_default(&mut st);
                 st.previewing = false;
             }
             slint::CloseRequestResponse::HideWindow
@@ -339,6 +331,19 @@ fn main() -> Result<(), slint::PlatformError> {
 
 fn all_outputs() -> Output {
     Output { id: "all".into(), human_name: "All outputs".into() }
+}
+fn apply_or_reset(backend: &mut dyn Backend, sat: f32) -> Result<(), satur8_core::BackendError> {
+    if (sat - 1.0).abs() < 1e-3 {
+        backend.reset(&all_outputs())
+    } else {
+        backend.apply(&all_outputs(), Saturation::new(sat))
+    }
+}
+fn restore_desktop_default(st: &mut State) {
+    let sat = st.profiles.default_saturation;
+    if let Some(b) = st.backend.as_mut() {
+        let _ = apply_or_reset(b.as_mut(), sat);
+    }
 }
 fn percent_to_sat(percent: f32) -> f32 {
     (1.0 + percent / 100.0).clamp(0.0, 4.0)

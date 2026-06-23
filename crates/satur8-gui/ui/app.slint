@@ -1,4 +1,4 @@
-import { Button, Slider, ComboBox, ListView, Switch, ScrollView } from "std-widgets.slint";
+import { Button, Slider, ListView, Switch, ScrollView } from "std-widgets.slint";
 
 export struct GameRow {
     name: string,
@@ -453,7 +453,7 @@ export component AppWindow inherits Window {
                             Text { text: (default-percent > 0 ? "+" : "") + default-percent + "%"; color: Pal.accent; font-weight: 700; width: 52px; vertical-alignment: center; }
                         }
                         HorizontalLayout {
-                            Button { text: "↺ Restore desktop to normal"; clicked => { root.restore-output(); } }
+                            Button { text: "↺ Restore desktop to normal"; clicked => { root.default-changed(0); } }
                             Rectangle { horizontal-stretch: 1; }
                         }
                     }
