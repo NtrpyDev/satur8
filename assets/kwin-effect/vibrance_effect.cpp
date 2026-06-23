@@ -26,19 +26,37 @@ static constexpr float kLumaB = 0.0722f;
 // out before mixing and multiply it back afterwards. KWin prepends the right
 // #version / precision header for the active GL(ES) profile; we only supply the
 // body, matching KWin's own generated MapTexture fragment interface.
+//
+// When `linearize` is set we do the blend in linear light (sRGB -> linear ->
+// mix -> sRGB), which is more physically correct; the default matches
+// VibranceGUI's perceptual, gamma-space behaviour so numbers feel familiar.
 static const QByteArray kFragment = QByteArrayLiteral(
     "uniform sampler2D sampler;\n"
     "uniform float vibrance;\n"
     "uniform vec3 luma;\n"
+    "uniform int linearize;\n"
     "in vec2 texcoord0;\n"
     "out vec4 fragColor;\n"
+    "\n"
+    "vec3 toLinear(vec3 c) {\n"
+    "    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));\n"
+    "}\n"
+    "vec3 toSrgb(vec3 c) {\n"
+    "    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));\n"
+    "}\n"
     "\n"
     "void main(void)\n"
     "{\n"
     "    vec4 tex = texture(sampler, texcoord0);\n"
     "    vec3 rgb = (tex.a > 0.0) ? tex.rgb / tex.a : tex.rgb;\n"
-    "    float y = dot(rgb, luma);\n"
-    "    rgb = clamp(mix(vec3(y), rgb, vibrance), 0.0, 1.0);\n"
+    "    if (linearize != 0) {\n"
+    "        rgb = toLinear(rgb);\n"
+    "        float y = dot(rgb, luma);\n"
+    "        rgb = toSrgb(clamp(mix(vec3(y), rgb, vibrance), 0.0, 1.0));\n"
+    "    } else {\n"
+    "        float y = dot(rgb, luma);\n"
+    "        rgb = clamp(mix(vec3(y), rgb, vibrance), 0.0, 1.0);\n"
+    "    }\n"
     "    fragColor = vec4(rgb * tex.a, tex.a);\n"
     "}\n");
 
@@ -108,6 +126,7 @@ void VibranceEffect::drawWindow(const KWin::RenderTarget &renderTarget,
         manager->pushShader(m_shader.get());
         m_shader->setUniform("vibrance", static_cast<float>(m_saturation));
         m_shader->setUniform("luma", QVector3D(kLumaR, kLumaG, kLumaB));
+        m_shader->setUniform("linearize", m_linear ? 1 : 0);
         manager->popShader();
     }
     KWin::OffscreenEffect::drawWindow(renderTarget, viewport, w, mask, deviceRegion, data);
@@ -135,6 +154,20 @@ void VibranceEffect::setSaturation(double saturation)
 double VibranceEffect::saturation() const
 {
     return m_saturation;
+}
+
+void VibranceEffect::setLinearLight(bool enabled)
+{
+    if (m_linear == enabled) {
+        return;
+    }
+    m_linear = enabled;
+    KWin::effects->addRepaintFull();
+}
+
+bool VibranceEffect::linearLight() const
+{
+    return m_linear;
 }
 
 KWIN_EFFECT_FACTORY(VibranceEffect, "metadata.json")

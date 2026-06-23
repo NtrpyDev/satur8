@@ -86,6 +86,19 @@ pub trait Backend {
     fn outputs(&self) -> Vec<Output>;
     fn apply(&mut self, output: &Output, saturation: Saturation) -> Result<(), BackendError>;
     fn reset(&mut self, output: &Output) -> Result<(), BackendError>;
+
+    /// Blend in linear light instead of gamma-encoded sRGB (more physically
+    /// correct, subtly different look). Only the per-pixel shader backends can
+    /// honor this; matrix/hardware backends (CTM, NV-CONTROL) work in their
+    /// native space and ignore it. Default: no-op so every backend accepts it.
+    fn set_linear_light(&mut self, _enabled: bool) -> Result<(), BackendError> {
+        Ok(())
+    }
+
+    /// Whether this backend can honor [`set_linear_light`](Backend::set_linear_light).
+    fn supports_linear_light(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug)]

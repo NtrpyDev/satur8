@@ -27,12 +27,25 @@ struct Cli {
 enum Command {
     /// Set the saturation now (loads the backend if needed). 1.0 = unchanged,
     /// >1 = more vivid, 0 = greyscale. Range 0.0..=4.0.
-    Set { saturation: f32 },
+    Set {
+        saturation: f32,
+        /// Blend in linear light (more correct) instead of gamma sRGB.
+        #[arg(long)]
+        linear: bool,
+        /// Target a specific output id (see `vibrance outputs`); default all.
+        #[arg(long)]
+        output: Option<String>,
+    },
     /// Turn vibrance on using a saturation value (default 1.5).
     On {
         #[arg(default_value_t = 1.5)]
         saturation: f32,
+        /// Blend in linear light (more correct) instead of gamma sRGB.
+        #[arg(long)]
+        linear: bool,
     },
+    /// List the outputs the active backend can target.
+    Outputs,
     /// Turn vibrance off and release any per-frame cost.
     Off,
     /// Apply vibrance, launch a game, and restore on exit. The Steam launch
@@ -70,8 +83,13 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Set { saturation } => cmd_set(saturation),
-        Command::On { saturation } => cmd_set(saturation),
+        Command::Set {
+            saturation,
+            linear,
+            output,
+        } => cmd_set(saturation, linear, output),
+        Command::On { saturation, linear } => cmd_set(saturation, linear, None),
+        Command::Outputs => cmd_outputs(),
         Command::Off => cmd_off(),
         Command::Run {
             profile,
@@ -95,15 +113,46 @@ fn main() -> Result<()> {
     }
 }
 
-fn cmd_set(saturation: f32) -> Result<()> {
+fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> {
     let clamped = Saturation::new(saturation);
     let mut backend = select_backend()?;
+
+    // Pick the target output: a named one (validated against the backend) or all.
+    let target = match &output {
+        Some(id) => backend
+            .outputs()
+            .into_iter()
+            .find(|o| &o.id == id)
+            .with_context(|| {
+                format!("no output '{id}' on the {} backend (see `vibrance outputs`)", backend.name())
+            })?,
+        None => all_outputs(),
+    };
+
     backend
-        .apply(&all_outputs(), clamped)
+        .apply(&target, clamped)
         .with_context(|| "applying saturation")?;
+
+    if linear {
+        if backend.supports_linear_light() {
+            backend
+                .set_linear_light(true)
+                .with_context(|| "enabling linear-light blending")?;
+        } else {
+            eprintln!(
+                "note: the {} backend works in its native color space and ignores --linear",
+                backend.name()
+            );
+        }
+    } else {
+        let _ = backend.set_linear_light(false);
+    }
+
     println!(
-        "vibrance: saturation {:.2} via {} backend{}",
+        "vibrance: saturation {:.2}{} on {} via {} backend{}",
         clamped.get(),
+        if linear && backend.supports_linear_light() { " (linear light)" } else { "" },
+        target.human_name,
         backend.name(),
         cost_suffix(backend.cost())
     );
@@ -112,6 +161,15 @@ fn cmd_set(saturation: f32) -> Result<()> {
             "note: requested {saturation:.2} was clamped to {:.2} (valid range 0.0..=4.0)",
             clamped.get()
         );
+    }
+    Ok(())
+}
+
+fn cmd_outputs() -> Result<()> {
+    let backend = select_backend()?;
+    println!("outputs on the {} backend:", backend.name());
+    for o in backend.outputs() {
+        println!("  {:<8} {}", o.id, o.human_name);
     }
     Ok(())
 }

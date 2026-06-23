@@ -114,6 +114,23 @@ impl KwinBackend {
         Ok(Saturation::new(v as f32))
     }
 
+    /// Toggle linear-light blending in the effect (a no-op until the effect is
+    /// loaded; the value is re-sent on the next apply path anyway).
+    pub fn set_linear(&self, enabled: bool) -> Result<(), BackendError> {
+        self.conn
+            .call_method(
+                Some(KWIN_SERVICE),
+                EFFECT_PATH,
+                Some(EFFECT_IFACE),
+                "setLinearLight",
+                &enabled,
+            )
+            .map(|_| ())
+            .map_err(|e| {
+                BackendError::Apply(format!("couldn't set linear light (effect loaded?): {e}"))
+            })
+    }
+
     fn set_saturation(&self, sat: Saturation) -> Result<(), BackendError> {
         self.conn
             .call_method(
@@ -156,6 +173,14 @@ impl Backend for KwinBackend {
         // Identity then unload, so we leave no GPU pass running.
         let _ = self.set_saturation(Saturation::IDENTITY);
         self.unload()
+    }
+
+    fn set_linear_light(&mut self, enabled: bool) -> Result<(), BackendError> {
+        self.set_linear(enabled)
+    }
+
+    fn supports_linear_light(&self) -> bool {
+        true
     }
 }
 

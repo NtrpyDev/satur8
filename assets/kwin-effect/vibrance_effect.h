@@ -55,6 +55,9 @@ public Q_SLOTS:
     /// 0 = greyscale. Clamped to vibrance-core's 0..=4 range.
     Q_SCRIPTABLE void setSaturation(double saturation);
     Q_SCRIPTABLE double saturation() const;
+    /// Blend in linear light (more correct) instead of gamma-encoded sRGB.
+    Q_SCRIPTABLE void setLinearLight(bool enabled);
+    Q_SCRIPTABLE bool linearLight() const;
 
 private:
     void redirectWindow(KWin::EffectWindow *w);
@@ -62,5 +65,6 @@ private:
 
     std::unique_ptr<KWin::GLShader> m_shader;
     double m_saturation = 1.0;
+    bool m_linear = false;
     bool m_shaderFailed = false;
 };

@@ -337,14 +337,22 @@ pub trait Backend {
 - **M7 - polish:** linear-light option, multi-monitor, per-output profiles,
   investigate native KWin CTM path to make KDE zero-cost.
 
-## 10. Open questions to resolve early (don't guess - verify on the box)
-- Does current KWin (6.x) expose any per-output color/CTM API a client can use?
-  If yes, KDE skips the shader and goes zero-cost. **Test before committing to
-  the shader as permanent.**
-- Does the AMD 9070 XT + RADV honor DRM CTM on this kernel under X11? (sanity
-  baseline for B2.)
-- gamescope reshade vibrance quality + measured latency on a 240Hz panel.
-- Confirm KWin effect cost is actually negligible at 1440p/240Hz in CS2.
+## 10. Open questions (findings as of the M1-M7 build, verified on the box)
+- **Does current KWin (6.x) expose a per-output color/CTM API a client can use?**
+  **No (KWin 6.7.0).** The only color D-Bus surface is `org.kde.KWin.NightLight`,
+  which exposes *colour temperature* only (no CTM, no saturation, read-mostly).
+  There is no generic client shader/CTM path. So the compositor effect
+  (`OffscreenEffect` + GLSL, what we ship) remains the realistic KDE path; KWin
+  cannot be moved to zero-cost CTM today. Re-check on future KWin releases.
+- **Does the AMD RX 9070 XT honor DRM CTM on this kernel?** **Yes.** A read-only
+  probe (`vibrance doctor` / `vibrance-drm-ctm::probe_ctm`) finds 4 CTM-capable
+  CRTCs on the amdgpu card. Setting it still requires DRM master, i.e. a TTY /
+  bare-KMS session (on Wayland KWin owns master); the zero-cost path is real
+  there.
+- gamescope reshade vibrance quality + measured latency on a 240Hz panel. (Open;
+  the fallback shader is implemented and loads, perf not yet measured.)
+- Confirm KWin effect cost is actually negligible at 1440p/240Hz in CS2. (Open;
+  needs an in-game measurement pass.)
 
 ## 11. Anti-cheat note for the README (user-facing, must be accurate)
 State plainly: this tool only changes the **display color pipeline** (compositor
