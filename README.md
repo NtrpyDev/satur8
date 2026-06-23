@@ -3,7 +3,48 @@
 Per-game **digital vibrance / saturation** for Linux - the thing VibranceGUI
 does on Windows, built for Wayland and X11.
 
-> **Status: early scaffold.** See [`PLAN.md`](PLAN.md) for the full design.
+> **Status: working.** KDE Plasma Wayland is fully implemented and verified;
+> other backends are implemented and gated by environment. See [`PLAN.md`](PLAN.md)
+> for the full design.
+
+## Install
+
+```sh
+packaging/install.sh            # per-user install (no root)
+packaging/install.sh --system   # system install (KWin effect to the system Qt plugin dir)
+```
+
+This builds the Rust binaries (`vibrance`, `vibrance-daemon`, `vibrance-tray`),
+the KWin effect, and installs the KWin focus script, GNOME extension, a systemd
+user unit, and a desktop entry. An Arch [`PKGBUILD`](packaging/PKGBUILD) is
+provided too.
+
+## Usage
+
+```sh
+vibrance on 1.5                         # boost saturation now
+vibrance off                            # restore, release all per-frame cost
+vibrance status                         # environment + backend + current state
+vibrance doctor                         # diagnose backends (incl. DRM CTM probe)
+
+# Per-game, as a Steam launch option (apply on launch, restore on exit):
+vibrance run --profile cs2 -- %command%
+
+# Profiles:
+vibrance profile add cs2 1.6 --exe cs2 --steam-app-id 730
+vibrance profile list
+
+# Universal fallback for niche compositors:
+vibrance run --via gamescope --saturation 1.5 -- <game>
+```
+
+Always-on, follow-focus mode (KDE): enable the daemon + the KWin focus script:
+
+```sh
+systemctl --user enable --now vibrance-daemon
+kwriteconfig6 --file kwinrc --group Plugins --key vibrance-focusEnabled true
+qdbus6 org.kde.KWin /KWin reconfigure
+```
 
 ## What it is
 
@@ -33,14 +74,20 @@ per-frame CPU or GPU cost - it matters because CS2 is CPU-bound. On KDE Wayland
 (the first supported target) it uses a tiny single-purpose compositor shader; the
 roadmap moves KDE to the zero-cost path if/when KWin exposes it.
 
-## Supported environments (planned)
+## Supported environments
 
-| Environment | Backend | Cost |
-|---|---|---|
-| KDE Plasma Wayland | KWin saturation effect | ~free (one GPU pass) |
-| X11 (AMD/Intel/nouveau) | DRM CTM | **zero** |
-| Hyprland | Hyprland CTM protocol | **zero** |
-| Anything (fallback) | gamescope + reshade | small |
+| Environment | Backend | Cost | Status |
+|---|---|---|---|
+| KDE Plasma Wayland | KWin saturation effect | ~free (one GPU pass) | implemented, verified |
+| GNOME Wayland (any GPU) | Shell extension shader | ~free | implemented |
+| Hyprland | screen shader via hyprctl | ~free | implemented |
+| X11 + NVIDIA | NV-CONTROL Digital Vibrance | **zero** | implemented |
+| Bare KMS / TTY | DRM CTM | **zero** | implemented |
+| Niche wlroots (Sway, ...) | gamescope + reshade | small | implemented (fallback) |
+
+"Verified" means exercised end-to-end on real hardware; the others are
+implemented against each platform's documented interface and gated by
+environment detection.
 
 ## License
 

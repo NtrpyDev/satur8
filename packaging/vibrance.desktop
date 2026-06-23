@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Vibrance
+GenericName=Digital Vibrance
+Comment=Per-game saturation boost, applied in the compositor (never in the game)
+Exec=vibrance-tray
+Icon=preferences-desktop-color
+Terminal=false
+Categories=Utility;Settings;
+Keywords=vibrance;saturation;color;gaming;

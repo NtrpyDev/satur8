@@ -1,0 +1,16 @@
+[Unit]
+Description=Vibrance focus daemon (per-game digital vibrance)
+Documentation=https://github.com/REPLACE/vibrance
+# Only meaningful inside a graphical session.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/vibrance-daemon
+Restart=on-failure
+RestartSec=2
+# Event-driven: it sleeps until the KWin script forwards a focus change.
+
+[Install]
+WantedBy=graphical-session.target

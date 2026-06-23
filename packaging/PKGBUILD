@@ -1,0 +1,53 @@
+# Maintainer: Vibrance <ntrpydev@pm.me>
+pkgname=vibrance
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Per-game digital vibrance for Linux: compositor/scanout saturation boost, never injected into the game"
+arch=('x86_64')
+url="https://github.com/REPLACE/vibrance"
+license=('GPL-3.0-or-later')
+depends=('gcc-libs')
+# KWin backend (effect): kwin at runtime; build needs the KDE/KWin SDK.
+optdepends=('kwin: KDE Plasma Wayland backend (saturation effect)'
+            'gamescope: universal fallback backend for niche compositors'
+            'nvidia-settings: NVIDIA X11 Digital Vibrance backend')
+makedepends=('rust' 'cmake' 'kwin' 'extra-cmake-modules' 'qt6-base' 'kcoreaddons')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$pkgname-$pkgver"
+    cargo build --release --locked
+    cmake -S assets/kwin-effect -B build-kwin -DCMAKE_BUILD_TYPE=Release \
+        -DVIBRANCE_PLUGIN_INSTALL_DIR="/usr/lib/qt6/plugins/kwin/effects/plugins"
+    cmake --build build-kwin
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+
+    install -Dm755 target/release/vibrance "$pkgdir/usr/bin/vibrance"
+    install -Dm755 target/release/vibrance-daemon "$pkgdir/usr/bin/vibrance-daemon"
+
+    # KWin effect (system Qt plugin path, where KWin scans).
+    install -Dm755 build-kwin/vibrance.so \
+        "$pkgdir/usr/lib/qt6/plugins/kwin/effects/plugins/vibrance.so"
+
+    # KWin focus-forwarder script.
+    install -d "$pkgdir/usr/share/kwin/scripts/vibrance-focus"
+    cp -r assets/kwin-script/. "$pkgdir/usr/share/kwin/scripts/vibrance-focus/"
+
+    # GNOME Shell extension.
+    install -d "$pkgdir/usr/share/gnome-shell/extensions/vibrance@vibrance.github.io"
+    cp -r assets/gnome-extension/vibrance@vibrance.github.io/. \
+        "$pkgdir/usr/share/gnome-shell/extensions/vibrance@vibrance.github.io/"
+
+    # gamescope fallback shader.
+    install -Dm644 assets/gamescope/Vibrance.fx \
+        "$pkgdir/usr/share/gamescope/reshade/Shaders/Vibrance.fx"
+
+    install -Dm644 packaging/vibrance-daemon.service \
+        "$pkgdir/usr/lib/systemd/user/vibrance-daemon.service"
+    install -Dm644 packaging/vibrance.desktop "$pkgdir/usr/share/applications/vibrance.desktop"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
