@@ -65,6 +65,6 @@ pub fn preview_path(app_id: u32) -> Option<PathBuf> {
     let dir = cache_dir(app_id)?;
     first_existing(
         &dir,
-        &["library_hero.jpg", "header.jpg", "library_600x900.jpg"],
+        &["header.jpg", "library_hero.jpg", "library_600x900.jpg"],
     )
 }

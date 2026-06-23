@@ -109,6 +109,13 @@ fn main() -> Result<(), slint::PlatformError> {
 
     ui.set_default_percent(sat_to_percent(state.borrow().profiles.default_saturation));
 
+    // Off-screen screenshot helper: jump straight to a page (0..3).
+    if let Ok(n) = std::env::var("VIBRANCE_GUI_NAV") {
+        if let Ok(n) = n.parse::<i32>() {
+            ui.set_nav(n);
+        }
+    }
+
     // ---------------- callbacks ----------------
     ui.on_default_changed({
         let state = state.clone();
