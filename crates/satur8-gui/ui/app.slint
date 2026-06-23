@@ -474,12 +474,16 @@ export component AppWindow inherits Window {
                 Card {
                     VerticalLayout {
                         padding: 16px;
-                        spacing: 6px;
+                        spacing: 8px;
                         Text { text: "Auto-apply per game"; font-weight: 600; color: Pal.ink; }
-                        Text { text: "Profiles apply only while the game runs - set this as the game's Steam launch option:"; color: Pal.muted; font-size: 12px; wrap: word-wrap; }
-                        Text { text: "satur8 run --profile <name> -- %command%"; color: Pal.ink; font-size: 13px; }
-                        Text { text: "Or follow window focus automatically:"; color: Pal.muted; font-size: 12px; }
-                        Text { text: "systemctl --user enable --now satur8-daemon"; color: Pal.ink; font-size: 13px; }
+                        Text {
+                            text: "Satur8 watches the focused game window and applies the matching profile automatically. No Steam launch options are required.";
+                            color: Pal.muted; font-size: 12px; wrap: word-wrap;
+                        }
+                        Text {
+                            text: "When you leave the game, Satur8 restores your desktop vibrance setting.";
+                            color: Pal.muted; font-size: 12px; wrap: word-wrap;
+                        }
                     }
                 }
                 Rectangle { vertical-stretch: 1; }
