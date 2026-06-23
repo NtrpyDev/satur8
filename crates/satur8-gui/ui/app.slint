@@ -170,7 +170,7 @@ export component AppWindow inherits Window {
     in-out property <bool> has-image: false;
     in-out property <string> backend-name: "none";
     in-out property <bool> backend-ok: false;
-    in-out property <string> current-profile-name: "—";
+    in-out property <string> current-profile-name: "-";
     in-out property <int> current-percent: 0;
     in-out property <int> default-percent: 0;
     in-out property <int> nav: 0;
@@ -482,13 +482,17 @@ export component AppWindow inherits Window {
                         }
                         Rectangle { height: 4px; }
                         Rectangle {
-                            height: 50px;
+                            height: 66px;
                             background: Pal.note; border-radius: 8px;
-                            HorizontalLayout {
+                            VerticalLayout {
                                 padding: 10px;
                                 Text {
                                     text: "Preview applies to your whole desktop temporarily so you can eyeball it. Click Restore to undo. " + outputs-note;
-                                    color: Pal.muted; font-size: 11px; wrap: word-wrap; vertical-alignment: center;
+                                    color: Pal.muted;
+                                    font-size: 11px;
+                                    wrap: word-wrap;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
                                 }
                             }
                         }
@@ -558,35 +562,63 @@ export component AppWindow inherits Window {
                 padding: 24px;
                 spacing: 14px;
                 Text { text: "About"; font-size: 20px; font-weight: 700; color: Pal.ink; }
-                Card {
+                ScrollView {
+                    vertical-stretch: 1;
                     VerticalLayout {
-                        padding: 18px;
-                        spacing: 10px;
-                        Text { text: "Satur8"; font-size: 28px; font-weight: 800; color: Pal.ink; }
-                        Text {
-                            text: "Per-game digital vibrance for Linux. Satur8 watches focused game windows, applies the matching saturation profile, and restores your desktop setting when you leave the game.";
-                            color: Pal.muted; font-size: 14px; wrap: word-wrap;
+                        spacing: 14px;
+                        Card {
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 10px;
+                                Text { text: "Satur8"; font-size: 28px; font-weight: 800; color: Pal.ink; }
+                                Text {
+                                    text: "Per-game digital vibrance for Linux. Satur8 watches focused game windows, applies the matching saturation profile, and restores your desktop setting when you leave the game.";
+                                    color: Pal.muted; font-size: 14px; wrap: word-wrap;
+                                }
+                            }
                         }
-                        Text {
-                            text: "It changes the display color pipeline after the game renders. It does not inject into, read, or modify the game process.";
-                            color: Pal.muted; font-size: 14px; wrap: word-wrap;
+                        Card {
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 8px;
+                                Text { text: "Why it is different"; font-size: 16px; font-weight: 700; color: Pal.ink; }
+                                Text {
+                                    text: "Satur8 changes the display color pipeline after the game renders. It does not inject into, read, or modify the game process.";
+                                    color: Pal.muted; font-size: 13px; wrap: word-wrap;
+                                }
+                                Text {
+                                    text: "That makes it a cleaner fit for games with trusted or anti-cheat modes than shader injectors like vkBasalt or ReShade-style tools.";
+                                    color: Pal.muted; font-size: 13px; wrap: word-wrap;
+                                }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 8px;
+                                Text { text: "Built in Rust"; font-size: 16px; font-weight: 700; color: Pal.ink; }
+                                Text {
+                                    text: "The CLI, GUI, daemon, tray, profile model, and backends are written in Rust so the app stays native, small, and event-driven with no garbage collector running while you play.";
+                                    color: Pal.muted; font-size: 13px; wrap: word-wrap;
+                                }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 12px;
+                                Text { text: "Links"; font-size: 16px; font-weight: 700; color: Pal.ink; }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    Button { text: "satur8.app"; clicked => { root.open-link("https://satur8.app"); } }
+                                    Button { text: "Twitter / X  @NtrpyDev"; clicked => { root.open-link("https://x.com/NtrpyDev"); } }
+                                    Button { text: "GitHub  NtrpyDev/satur8"; clicked => { root.open-link("https://github.com/NtrpyDev/satur8"); } }
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+                            }
                         }
                     }
                 }
-                Card {
-                    VerticalLayout {
-                        padding: 18px;
-                        spacing: 12px;
-                        Text { text: "Links"; font-size: 16px; font-weight: 700; color: Pal.ink; }
-                        HorizontalLayout {
-                            spacing: 10px;
-                            Button { text: "Twitter / X  @NtrpyDev"; clicked => { root.open-link("https://x.com/NtrpyDev"); } }
-                            Button { text: "GitHub  NtrpyDev/satur8"; clicked => { root.open-link("https://github.com/NtrpyDev/satur8"); } }
-                            Rectangle { horizontal-stretch: 1; }
-                        }
-                    }
-                }
-                Rectangle { vertical-stretch: 1; }
             }
         }
     }
