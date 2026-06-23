@@ -18,13 +18,13 @@ export struct LogRow {
 }
 
 global Pal {
-    out property <color> accent: #0d9488;
-    out property <color> accent-soft: #d6f1ec;
-    out property <color> bg: #f3f2f0;
-    out property <color> card: #ffffff;
-    out property <color> line: #e7e6e3;
-    out property <color> ink: #2b2f33;
-    out property <color> muted: #8a9099;
+    out property <color> accent: #0f9f8f;
+    out property <color> accent-soft: #c5e4de;
+    out property <color> bg: #d8dad6;
+    out property <color> card: #eef0ec;
+    out property <color> line: #c9cec8;
+    out property <color> ink: #242a2f;
+    out property <color> muted: #6f7780;
 }
 
 component BrandLogo inherits HorizontalLayout {
@@ -58,7 +58,7 @@ component NavItem inherits Rectangle {
     height: 38px;
     width: nav-label.preferred-width + 30px;
     border-radius: 10px;
-    background: active ? Pal.accent : (touch.has-hover ? Pal.accent-soft : transparent);
+    background: active ? Pal.accent : (touch.has-hover ? #e2e6e1 : transparent);
     touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
         padding-left: 15px;
@@ -157,7 +157,7 @@ export component AppWindow inherits Window {
                     height: 32px;
                     width: pill.preferred-width + 28px;
                     border-radius: 16px;
-                    background: backend-ok ? Pal.accent-soft : #fbe3e3;
+                    background: backend-ok ? Pal.accent-soft : #efd5d2;
                     pill := HorizontalLayout {
                         padding-left: 14px; padding-right: 14px; spacing: 8px;
                         Rectangle {
@@ -230,7 +230,7 @@ export component AppWindow inherits Window {
                                                 spacing: 2px;
                                                 for r[i] in running: Rectangle {
                                                     height: 30px; border-radius: 6px;
-                                                    background: rt.has-hover ? Pal.accent-soft : transparent;
+                                                    background: rt.has-hover ? #e2e6e1 : transparent;
                                                     rt := TouchArea { clicked => { root.add-running(i); running-popup.close(); } }
                                                     HorizontalLayout {
                                                         padding-left: 8px;
@@ -420,7 +420,7 @@ export component AppWindow inherits Window {
                         Rectangle { height: 4px; }
                         Rectangle {
                             height: 50px;
-                            background: #f7f7f5; border-radius: 8px;
+                            background: #e2e5e0; border-radius: 8px;
                             HorizontalLayout {
                                 padding: 10px;
                                 Text {

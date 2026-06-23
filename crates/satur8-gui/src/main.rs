@@ -535,6 +535,23 @@ fn save(profiles: &Profiles) {
     let dir = config_dir();
     let _ = std::fs::create_dir_all(&dir);
     if let Ok(toml) = profiles.to_toml() {
-        let _ = std::fs::write(dir.join("profiles.toml"), toml);
+        if std::fs::write(dir.join("profiles.toml"), toml).is_ok() {
+            reload_daemon_profiles();
+        }
     }
+}
+
+fn reload_daemon_profiles() {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return;
+    };
+    let Ok(proxy) = zbus::blocking::Proxy::new(
+        &conn,
+        "org.satur8.Daemon",
+        "/org/satur8/Daemon",
+        "org.satur8.Daemon",
+    ) else {
+        return;
+    };
+    let _: Result<(), _> = proxy.call("Reload", &());
 }

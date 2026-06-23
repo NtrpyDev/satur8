@@ -81,11 +81,23 @@ impl Profiles {
 
     /// Find a profile by window class / app id (case-insensitive).
     pub fn match_window_class(&self, class: &str) -> Option<&Profile> {
+        let class = class.trim();
+        let class_norm = normalize_game_id(class);
+        let steam_app_id = class_norm
+            .strip_prefix("steam_app_")
+            .and_then(|id| id.parse::<u32>().ok());
+
         self.profiles.iter().find(|p| {
             p.match_rule
                 .window_class
                 .as_deref()
-                .is_some_and(|c| c.eq_ignore_ascii_case(class))
+                .is_some_and(|c| normalize_game_id(c) == class_norm)
+                || p.match_rule
+                    .exe
+                    .as_deref()
+                    .is_some_and(|e| normalize_game_id(e) == class_norm)
+                || p.name.eq_ignore_ascii_case(class)
+                || steam_app_id.is_some_and(|app_id| p.match_rule.steam_app_id == Some(app_id))
         })
     }
 
@@ -110,6 +122,13 @@ impl Profiles {
     pub fn from_toml(s: &str) -> Result<Profiles, toml::de::Error> {
         toml::from_str(s)
     }
+}
+
+fn normalize_game_id(id: &str) -> String {
+    id.trim()
+        .trim_end_matches(".exe")
+        .trim_end_matches(".x86_64")
+        .to_ascii_lowercase()
 }
 
 #[cfg(test)]
@@ -144,6 +163,15 @@ mod tests {
         let p = sample();
         assert_eq!(p.match_steam_app_id(730).unwrap().saturation, 1.6);
         assert!(p.match_steam_app_id(570).is_none());
+    }
+
+    #[test]
+    fn window_class_falls_back_to_exe_and_steam_app_id() {
+        let p = sample();
+        assert_eq!(p.match_window_class("cs2").unwrap().name, "cs2");
+        assert_eq!(p.match_window_class("cs2.x86_64").unwrap().name, "cs2");
+        assert_eq!(p.match_window_class("steam_app_730").unwrap().name, "cs2");
+        assert!(p.match_window_class("dota2").is_none());
     }
 
     #[test]

@@ -20,6 +20,7 @@ satur8-nv-control = { workspace = true }
 satur8-gnome = { workspace = true }
 slint = "1.16"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+zbus = { workspace = true }
 
 [build-dependencies]
 slint-build = "1.16"
