@@ -150,13 +150,51 @@ can launch the game inside gamescope with a vibrance reshade effect. Works
 everywhere gamescope works; costs an extra composite pass + a little latency, so
 it is the fallback, not the default.
 
+### B5. NV-CONTROL backend - **NVIDIA on X11, native**
+The NVIDIA proprietary driver exposes a real "Digital Vibrance" control via the
+NV-CONTROL X extension (`nvidia-settings -a "[gpu:0]/DigitalVibrance=N"`, range
+roughly -1024..1023). This is the exact feature VibranceGUI drives on Windows,
+available on Linux X11. It is the native path for NVIDIA users on X11 (the DRM
+CTM in B2 is unreliable on the proprietary driver). NVIDIA on Wayland has no
+native hook, so it falls back to B4 (gamescope).
+
 ### Backend selection order at runtime
 ```
-KDE Wayland   -> B1 (KWin effect)   [later: CTM if KWin exposes it]
-Hyprland      -> B3 (Hyprland CTM)
-X11 (any DE)  -> B2 (DRM CTM)
-anything else -> B4 (gamescope wrapper), else clear error explaining options
+KDE Wayland         -> B1 (KWin effect)   [later: CTM if KWin exposes it]
+Hyprland            -> B3 (Hyprland CTM)
+X11 + AMD/Intel/nv  -> B2 (DRM CTM)
+X11 + NVIDIA prop   -> B5 (NV-CONTROL DigitalVibrance)
+GNOME/other Wayland -> B4 (gamescope wrapper)   [no native hook today]
+anything else       -> B4 (gamescope wrapper), else clear error w/ options
 ```
+
+### Who can actually run this (the "all Linux users" answer)
+Three independent axes; only the compositor one is hard:
+
+- **Distro** (Ubuntu/Debian/Mint/Manjaro/Arch/Fedora/...): **all of them, no code
+  difference.** A distro is packaging + kernel version. Ship one Rust binary as
+  distro packages *and* a Flatpak/AppImage. This axis is essentially free.
+- **GPU/driver**: AMD + Intel + nouveau via CTM; NVIDIA proprietary via
+  NV-CONTROL (X11) or gamescope (Wayland). All covered.
+- **Compositor (Wayland, the hard axis)**: KDE and Hyprland get native zero/low
+  cost backends. GNOME, Sway, and anything else have no native client hook, so
+  they use the **gamescope fallback**.
+
+| Environment | Backend | Coverage |
+|---|---|---|
+| Any X11 (AMD/Intel/nouveau) | DRM CTM | native, zero-cost |
+| Any X11 (NVIDIA proprietary) | NV-CONTROL | native, zero-cost |
+| KDE Plasma Wayland | KWin effect | native, ~free |
+| Hyprland | Hyprland CTM | native, zero-cost |
+| GNOME / Sway / other Wayland | gamescope | fallback, small cost |
+| NVIDIA on Wayland | gamescope | fallback, small cost |
+
+**The guarantee:** gamescope is the floor nobody falls through. Worst case (e.g.
+GNOME Wayland on NVIDIA) still gets working per-game vibrance, just with a small
+overhead instead of zero. Native backends are upgrades layered on top where the
+environment cooperates. So: yes, all Linux users are served. The only thing with
+no path today is desktop-wide *always-on* vibrance on GNOME Wayland specifically
+(per-game, the actual use case, is covered there via gamescope).
 
 ---
 
@@ -233,7 +271,8 @@ vibrance/
 │     ├─ kwin/             B1  D-Bus control of the shipped KWin effect
 │     ├─ drm-ctm/          B2  libdrm CTM (X11 / TTY)
 │     ├─ hyprland/         B3  Hyprland CTM protocol / IPC
-│     └─ gamescope/        B4  launch wrapper + reshade vibrance effect
+│     ├─ gamescope/        B4  launch wrapper + reshade vibrance effect
+│     └─ nv-control/       B5  NVIDIA X11 DigitalVibrance (NV-CONTROL)
 └─ assets/
    └─ kwin-effect/         the GLSL saturation effect package (shipped)
 ```
