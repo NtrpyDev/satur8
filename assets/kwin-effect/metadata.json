@@ -1,0 +1,18 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Vibrance"
+            }
+        ],
+        "Category": "Appearance",
+        "Description": "Per-game digital vibrance: boosts saturation in the compositor, never inside the game process.",
+        "EnabledByDefault": false,
+        "Id": "vibrance",
+        "License": "GPL-3.0+",
+        "Name": "Vibrance"
+    },
+    "org.kde.kwin.effect": {
+        "internal": false
+    }
+}
