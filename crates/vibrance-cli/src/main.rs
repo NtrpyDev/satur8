@@ -1,15 +1,20 @@
 //! `vibrance` - per-game digital vibrance for Linux.
 //!
-//! M1 scope: detect the environment, pick a backend (KWin on KDE Wayland), and
-//! drive saturation from the command line. The launch wrapper (`run`) and
-//! profile management grow in later milestones.
+//! Detects the environment, picks a backend (KWin on KDE Wayland), and drives
+//! saturation from the command line - directly (`set`/`on`/`off`), as a launch
+//! wrapper (`run`), or via per-game profiles (`profile`).
 
+mod backend;
 mod config;
+mod profile_cmd;
+mod run;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use vibrance_core::{Backend, CostNote, Environment, Output, Saturation};
+use vibrance_core::{CostNote, Environment, Saturation};
 use vibrance_kwin::KwinBackend;
+
+use backend::{all_outputs, select_backend};
 
 #[derive(Parser)]
 #[command(name = "vibrance", version, about = "Per-game digital vibrance for Linux")]
@@ -30,6 +35,24 @@ enum Command {
     },
     /// Turn vibrance off and release any per-frame cost.
     Off,
+    /// Apply vibrance, launch a game, and restore on exit. The Steam launch
+    /// option: `vibrance run --profile cs2 -- %command%`.
+    Run {
+        /// Use a named profile's saturation.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Override saturation directly (wins over --profile).
+        #[arg(long)]
+        saturation: Option<f32>,
+        /// The game command, after `--`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        command: Vec<String>,
+    },
+    /// Manage per-game profiles.
+    Profile {
+        #[command(subcommand)]
+        cmd: profile_cmd::ProfileCmd,
+    },
     /// Show the current environment, chosen backend, and state.
     Status,
     /// Diagnose the environment and backend availability.
@@ -42,35 +65,22 @@ fn main() -> Result<()> {
         Command::Set { saturation } => cmd_set(saturation),
         Command::On { saturation } => cmd_set(saturation),
         Command::Off => cmd_off(),
+        Command::Run {
+            profile,
+            saturation,
+            command,
+        } => {
+            let code = run::run(run::RunArgs {
+                profile,
+                saturation,
+                command,
+            })?;
+            std::process::exit(code);
+        }
+        Command::Profile { cmd } => profile_cmd::run(cmd),
         Command::Status => cmd_status(),
         Command::Doctor => cmd_doctor(),
     }
-}
-
-/// The single output we act on for now (per-output targeting is M7).
-fn all_outputs() -> Output {
-    Output {
-        id: "all".into(),
-        human_name: "All outputs".into(),
-    }
-}
-
-/// Resolve the backend for this environment. Only KWin exists in M1; other
-/// environments get a clear, honest error pointing at the roadmap.
-fn select_backend() -> Result<Box<dyn Backend>> {
-    if let Some(kwin) = KwinBackend::detect() {
-        return Ok(Box::new(kwin));
-    }
-    let envr = Environment::detect();
-    bail!(
-        "no usable backend for this session ({}, {}, {}).\n\
-         The preferred backend here is '{}', which isn't implemented yet \
-         (KWin/KDE Wayland is the M1 target). See PLAN.md for the roadmap.",
-        envr.session,
-        envr.desktop,
-        envr.gpu,
-        envr.preferred_backend()
-    )
 }
 
 fn cmd_set(saturation: f32) -> Result<()> {
@@ -96,7 +106,9 @@ fn cmd_set(saturation: f32) -> Result<()> {
 
 fn cmd_off() -> Result<()> {
     let mut backend = select_backend()?;
-    backend.reset(&all_outputs()).with_context(|| "turning vibrance off")?;
+    backend
+        .reset(&all_outputs())
+        .with_context(|| "turning vibrance off")?;
     println!("vibrance: off ({} backend released)", backend.name());
     Ok(())
 }
@@ -112,7 +124,10 @@ fn cmd_status() -> Result<()> {
     match KwinBackend::detect() {
         Some(kwin) => {
             let loaded = kwin.is_loaded().unwrap_or(false);
-            print!("backend kwin: available, effect {}", if loaded { "loaded" } else { "not loaded" });
+            print!(
+                "backend kwin: available, effect {}",
+                if loaded { "loaded" } else { "not loaded" }
+            );
             if loaded {
                 if let Ok(sat) = kwin.current_saturation() {
                     print!(", saturation {:.2}", sat.get());
@@ -139,9 +154,9 @@ fn cmd_doctor() -> Result<()> {
             println!("  [ok] KWin reachable over D-Bus");
             match kwin.is_loaded() {
                 Ok(true) => println!("  [ok] vibrance effect is loaded"),
-                Ok(false) => println!(
-                    "  [..] vibrance effect installed but not loaded (run `vibrance on`)"
-                ),
+                Ok(false) => {
+                    println!("  [..] vibrance effect installed but not loaded (run `vibrance on`)")
+                }
                 Err(e) => println!("  [!!] couldn't query effect state: {e}"),
             }
         }

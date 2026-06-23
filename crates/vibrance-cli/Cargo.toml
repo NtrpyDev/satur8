@@ -15,3 +15,5 @@ vibrance-core = { workspace = true }
 vibrance-kwin = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+signal-hook = "0.3"
+libc = "0.2"
