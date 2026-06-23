@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 vibrance-core = { workspace = true }
 vibrance-kwin = { workspace = true }
+vibrance-drm-ctm = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 signal-hook = "0.3"

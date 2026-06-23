@@ -169,6 +169,27 @@ fn cmd_doctor() -> Result<()> {
         }
     }
 
+    // Zero-cost DRM CTM availability (read-only probe; never touches master).
+    println!();
+    match vibrance_drm_ctm::probe_ctm() {
+        Ok(lines) => {
+            println!("  DRM CTM (zero-cost path):");
+            for l in lines {
+                println!("    {l}");
+            }
+            match envr.session {
+                vibrance_core::SessionType::Tty => {
+                    println!("    -> usable now: no display server owns DRM master")
+                }
+                other => println!(
+                    "    -> on {other} the display server owns DRM master; CTM is reached \
+                     through its backend (KWin here), not directly"
+                ),
+            }
+        }
+        Err(e) => println!("  DRM CTM: not available ({e})"),
+    }
+
     let profiles = config::load_profiles().unwrap_or_default();
     println!();
     println!("  profiles file: {}", config::profiles_path()?.display());

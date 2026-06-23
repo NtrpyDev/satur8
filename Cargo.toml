@@ -4,6 +4,7 @@ members = [
     "crates/vibrance-core",
     "crates/vibrance-cli",
     "crates/backends/kwin",
+    "crates/backends/drm-ctm",
     # added as further backends/daemon land:
     # "crates/vibrance-daemon",
     # "crates/backends/drm-ctm",
@@ -19,6 +20,7 @@ repository = "https://github.com/REPLACE/vibrance"
 [workspace.dependencies]
 vibrance-core = { path = "crates/vibrance-core" }
 vibrance-kwin = { path = "crates/backends/kwin" }
+vibrance-drm-ctm = { path = "crates/backends/drm-ctm" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

@@ -5,6 +5,7 @@
 //! matrix; they differ only in how they hand it to the GPU. Keeping the math in
 //! one place means the look is identical everywhere and is unit-tested once.
 
+pub mod ctm;
 pub mod env;
 pub mod profile;
 
