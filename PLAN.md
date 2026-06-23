@@ -1,11 +1,13 @@
-# Satur8 for Linux - Build Plan
+# Satur8 for Linux - Design Notes
 
 > A VibranceGUI-style digital vibrance tool for Linux. Per-game saturation
 > boost, applied **outside** the game process so it cannot trip anti-cheat,
 > with as close to **zero CPU cost** as the hardware allows.
 
-Status: planning / scaffold. Nothing here is final; the name is a placeholder
-(see [Naming](#naming)).
+Status: v0.1 is working. KDE Plasma Wayland is the verified target, with the
+GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile config
+working together. This file keeps the longer design notes and backend roadmap;
+the user-facing setup guide lives in `README.md`.
 
 ---
 
