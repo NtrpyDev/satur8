@@ -110,6 +110,22 @@ impl Daemon {
             "satur8-daemon: reloaded, {} profile(s)",
             self.profiles.profiles.len()
         );
+        if let Some(current) = self.current.clone() {
+            if let Some(profile) = self.profiles.by_name(&current) {
+                let sat = profile.saturation();
+                eprintln!(
+                    "satur8-daemon: reapplied active profile '{current}' ({:.2})",
+                    sat.get()
+                );
+                self.apply_saturation(sat);
+            } else {
+                eprintln!(
+                    "satur8-daemon: active profile '{current}' no longer exists -> restoring default"
+                );
+                self.current = None;
+                self.restore_default();
+            }
+        }
     }
 
     /// The profile currently applied (empty string if none).
