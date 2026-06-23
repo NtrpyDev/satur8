@@ -11,6 +11,7 @@ members = [
     "crates/backends/gamescope",
     "crates/vibrance-daemon",
     "crates/vibrance-tray",
+    "crates/vibrance-gui",
 ]
 
 [workspace.package]

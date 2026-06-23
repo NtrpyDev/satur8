@@ -53,6 +53,8 @@ install_all() {
     install -m755 "$repo/target/release/vibrance-daemon" "$bindir/vibrance-daemon"
     [ -f "$repo/target/release/vibrance-tray" ] && \
         install -m755 "$repo/target/release/vibrance-tray" "$bindir/vibrance-tray"
+    [ -f "$repo/target/release/vibrance-gui" ] && \
+        install -m755 "$repo/target/release/vibrance-gui" "$bindir/vibrance-gui"
 
     local so="$repo/assets/kwin-effect/build/vibrance.so"
     if [ "$mode" = system ]; then
@@ -94,7 +96,7 @@ EOF
 
 uninstall_all() {
     say "Removing per-user install"
-    rm -f "$bindir/vibrance" "$bindir/vibrance-daemon" "$bindir/vibrance-tray"
+    rm -f "$bindir/vibrance" "$bindir/vibrance-daemon" "$bindir/vibrance-tray" "$bindir/vibrance-gui"
     rm -f "$qt_plugin_user/vibrance.so"
     rm -rf "$kwin_script_dir" "$gnome_ext_dir"
     rm -f "$unit_dir/vibrance-daemon.service" "$data/applications/vibrance.desktop"

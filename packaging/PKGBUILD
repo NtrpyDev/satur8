@@ -28,6 +28,8 @@ package() {
 
     install -Dm755 target/release/vibrance "$pkgdir/usr/bin/vibrance"
     install -Dm755 target/release/vibrance-daemon "$pkgdir/usr/bin/vibrance-daemon"
+    install -Dm755 target/release/vibrance-tray "$pkgdir/usr/bin/vibrance-tray"
+    install -Dm755 target/release/vibrance-gui "$pkgdir/usr/bin/vibrance-gui"
 
     # KWin effect (system Qt plugin path, where KWin scans).
     install -Dm755 build-kwin/vibrance.so \
