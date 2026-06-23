@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/vibrance-core",
+    # added as backends/daemon/cli land:
+    # "crates/vibrance-daemon",
+    # "crates/vibrance-cli",
+    # "crates/backends/kwin",
+    # "crates/backends/drm-ctm",
+    # "crates/backends/hyprland",
+    # "crates/backends/gamescope",
+]
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/REPLACE/vibrance"
+
+[profile.release]
+# small, fast binary; this runs as a long-lived daemon next to a CPU-bound game
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
