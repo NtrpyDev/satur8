@@ -85,8 +85,7 @@ export component AppWindow inherits Window {
 
     in-out property <[GameRow]> games;
     in-out property <[string]> running;
-    in-out property <[string]> outputs;
-    in-out property <int> current-output: 0;
+    in-out property <string> outputs-note;
     in-out property <[LogRow]> activity;
     in-out property <[color]> before-swatches;
     in-out property <[color]> after-swatches;
@@ -131,10 +130,8 @@ export component AppWindow inherits Window {
                     Text { text: "Satur8"; font-size: 18px; font-weight: 700; color: Pal.ink; vertical-alignment: center; }
                 }
                 Rectangle { height: 8px; }
-                NavItem { label: "Profiles";     active: nav == 0; clicked => { nav = 0; } }
-                NavItem { label: "Live Preview";  active: nav == 1; clicked => { nav = 1; } }
-                NavItem { label: "Outputs";       active: nav == 2; clicked => { nav = 2; } }
-                NavItem { label: "Settings";      active: nav == 3; clicked => { nav = 3; } }
+                NavItem { label: "Profiles"; active: nav == 0; clicked => { nav = 0; } }
+                NavItem { label: "Settings"; active: nav == 1; clicked => { nav = 1; } }
                 Rectangle { vertical-stretch: 1; }
                 Text { text: "v0.1.0"; color: Pal.muted; font-size: 12px; }
             }
@@ -408,95 +405,32 @@ export component AppWindow inherits Window {
                             Swatches { colors: after-swatches; }
                         }
                         Rectangle { height: 4px; }
-                        Text { text: "Output"; color: Pal.muted; font-size: 12px; }
-                        ComboBox { model: outputs; current-index <=> current-output; }
                         Rectangle {
-                            height: 44px;
+                            height: 50px;
                             background: #f7f7f5; border-radius: 8px;
                             HorizontalLayout {
                                 padding: 10px;
-                                Text { text: "Preview shows the effect on the selected output."; color: Pal.muted; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+                                Text {
+                                    text: "Preview applies to your whole desktop temporarily so you can eyeball it. Click Restore to undo. " + outputs-note;
+                                    color: Pal.muted; font-size: 11px; wrap: word-wrap; vertical-alignment: center;
+                                }
                             }
                         }
                         Rectangle { vertical-stretch: 1; }
                         HorizontalLayout {
                             spacing: 8px;
                             Button { text: "↺ Restore"; clicked => { root.restore-output(); } }
-                            Button { text: "Preview"; clicked => { root.preview-output(); } }
-                            Button { text: "✓ Apply"; primary: true; clicked => { root.apply-output(); } }
+                            Button { text: "Preview on desktop"; clicked => { root.preview-output(); } }
+                            Rectangle { horizontal-stretch: 1; }
                         }
                     }
                 }
-            }
-
-            // ---- Live Preview page ----
-            if nav == 1: VerticalLayout {
-                vertical-stretch: 1;
-                alignment: start;
-                padding: 24px;
-                spacing: 14px;
-                Text { text: "Live Preview"; font-size: 20px; font-weight: 700; color: Pal.ink; }
-                Text {
-                    text: "Current profile: " + current-profile-name + "    ·    " + (current-percent > 0 ? "+" : "") + current-percent + "%";
-                    color: Pal.muted; font-size: 13px;
-                }
-                if has-image: HorizontalLayout {
-                    spacing: 16px;
-                    VerticalLayout {
-                        spacing: 6px;
-                        Text { text: "Before"; color: Pal.muted; horizontal-alignment: center; }
-                        Rectangle { height: 240px; border-radius: 10px; clip: true; background: #11151a;
-                            Image { source: before-image; image-fit: contain; width: 100%; height: 100%; } }
-                    }
-                    VerticalLayout {
-                        spacing: 6px;
-                        Text { text: "After"; color: Pal.accent; font-weight: 600; horizontal-alignment: center; }
-                        Rectangle { height: 240px; border-radius: 10px; clip: true; background: #11151a;
-                            Image { source: after-image; image-fit: contain; width: 100%; height: 100%; } }
-                    }
-                }
-                if !has-image: VerticalLayout {
-                    spacing: 10px;
-                    Text { text: "Before"; color: Pal.muted; }
-                    Swatches { colors: before-swatches; }
-                    Text { text: "After"; color: Pal.muted; }
-                    Swatches { colors: after-swatches; }
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    Button { text: "↺ Restore"; clicked => { root.restore-output(); } }
-                    Button { text: "Preview"; clicked => { root.preview-output(); } }
-                    Button { text: "✓ Apply"; primary: true; clicked => { root.apply-output(); } }
-                    Rectangle { horizontal-stretch: 1; }
-                }
-                Rectangle { vertical-stretch: 1; }
-            }
-
-            // ---- Outputs page ----
-            if nav == 2: VerticalLayout {
-                vertical-stretch: 1;
-                padding: 24px;
-                spacing: 14px;
-                Text { text: "Outputs"; font-size: 20px; font-weight: 700; color: Pal.ink; }
-                Text { text: "Displays the active backend (" + backend-name + ") can drive."; color: Pal.muted; font-size: 13px; }
-                Card {
-                    VerticalLayout {
-                        padding: 12px;
-                        spacing: 2px;
-                        for o in outputs: HorizontalLayout {
-                            height: 36px;
-                            spacing: 10px;
-                            Rectangle { width: 10px; height: 10px; border-radius: 5px; y: (parent.height - 10px) / 2; background: Pal.accent; }
-                            Text { text: o; color: Pal.ink; vertical-alignment: center; }
-                        }
-                    }
-                }
-                Rectangle { vertical-stretch: 1; }
             }
 
             // ---- Settings page ----
-            if nav == 3: VerticalLayout {
+            if nav == 1: VerticalLayout {
                 vertical-stretch: 1;
+                alignment: start;
                 padding: 24px;
                 spacing: 14px;
                 Text { text: "Settings"; font-size: 20px; font-weight: 700; color: Pal.ink; }
@@ -504,8 +438,11 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         padding: 16px;
                         spacing: 8px;
-                        Text { text: "Desktop default satur8"; font-weight: 600; color: Pal.ink; }
-                        Text { text: "Applied when no game profile matches."; color: Pal.muted; font-size: 12px; }
+                        Text { text: "Desktop vibrance"; font-weight: 600; color: Pal.ink; }
+                        Text {
+                            text: "Saturates your whole desktop now, and is the default when no game profile is active. Leave at 0% to keep the desktop untouched.";
+                            color: Pal.muted; font-size: 12px; wrap: word-wrap;
+                        }
                         HorizontalLayout {
                             spacing: 12px;
                             Slider {
@@ -515,6 +452,10 @@ export component AppWindow inherits Window {
                             }
                             Text { text: (default-percent > 0 ? "+" : "") + default-percent + "%"; color: Pal.accent; font-weight: 700; width: 52px; vertical-alignment: center; }
                         }
+                        HorizontalLayout {
+                            Button { text: "↺ Restore desktop to normal"; clicked => { root.restore-output(); } }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
                     }
                 }
                 Card {
@@ -522,7 +463,7 @@ export component AppWindow inherits Window {
                         padding: 16px;
                         spacing: 6px;
                         Text { text: "Auto-apply per game"; font-weight: 600; color: Pal.ink; }
-                        Text { text: "Set this as a game's Steam launch option:"; color: Pal.muted; font-size: 12px; }
+                        Text { text: "Profiles apply only while the game runs - set this as the game's Steam launch option:"; color: Pal.muted; font-size: 12px; wrap: word-wrap; }
                         Text { text: "satur8 run --profile <name> -- %command%"; color: Pal.ink; font-size: 13px; }
                         Text { text: "Or follow window focus automatically:"; color: Pal.muted; font-size: 12px; }
                         Text { text: "systemctl --user enable --now satur8-daemon"; color: Pal.ink; font-size: 13px; }

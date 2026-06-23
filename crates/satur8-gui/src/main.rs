@@ -45,6 +45,8 @@ struct State {
     backend: Option<Box<dyn Backend>>,
     profiles: Profiles,
     current_sat: f32,
+    /// True while a live desktop preview is applied, so we can restore it.
+    previewing: bool,
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -67,6 +69,7 @@ fn main() -> Result<(), slint::PlatformError> {
         backend,
         profiles,
         current_sat: first_sat,
+        previewing: false,
     }));
 
     // Games
@@ -79,14 +82,16 @@ fn main() -> Result<(), slint::PlatformError> {
     let running = Rc::new(VecModel::<SharedString>::from(running_strings(&apps.borrow())));
     ui.set_running(ModelRc::from(running.clone()));
 
-    // Outputs
-    let output_names: Vec<SharedString> = state
-        .borrow()
-        .backend
-        .as_ref()
-        .map(|b| b.outputs().into_iter().map(|o| o.human_name.into()).collect())
-        .unwrap_or_else(|| vec!["All outputs".into()]);
-    ui.set_outputs(ModelRc::from(Rc::new(VecModel::from(output_names))));
+    // Output note (honest about what the backend can target).
+    ui.set_outputs_note(
+        match state.borrow().backend.as_ref().map(|b| b.name()) {
+            Some("kwin") | Some("gnome-shell") | Some("hyprland") => {
+                "On this compositor it affects all monitors.".into()
+            }
+            Some("drm-ctm") => "Targets the connected display(s).".into(),
+            _ => "".into(),
+        },
+    );
 
     // Activity
     let activity = Rc::new(VecModel::<LogRow>::default());
@@ -126,6 +131,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 let mut st = state.borrow_mut();
                 st.profiles.default_saturation = sat;
                 save(&st.profiles);
+                // Desktop vibrance is meant to affect the desktop: apply it live.
+                let identity = (sat - 1.0).abs() < 1e-3;
+                if let Some(b) = st.backend.as_mut() {
+                    let _ = if identity {
+                        b.reset(&all_outputs())
+                    } else {
+                        b.apply(&all_outputs(), Saturation::new(sat))
+                    };
+                }
+                st.previewing = !identity;
             }
             if let Some(ui) = w.upgrade() {
                 ui.set_default_percent(percent.round() as i32);
@@ -169,13 +184,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let state = state.clone();
         let activity = activity.clone();
         move |i, enabled| {
-            let mut st = state.borrow_mut();
+            // Editing a profile only saves config - it never touches the live
+            // desktop. The profile applies during the game via the launch wrapper.
+            let st = state.borrow();
             let name = st.profiles.profiles.get(i as usize).map(|p| p.name.clone()).unwrap_or_default();
-            if !enabled {
-                if let Some(b) = st.backend.as_mut() {
-                    let _ = b.reset(&all_outputs());
-                }
-            }
             log(&activity, false, &format!("{} {}", name, if enabled { "enabled" } else { "disabled" }));
         }
     });
@@ -246,13 +258,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(b) = st.backend.as_mut() {
                     let _ = b.apply(&all_outputs(), Saturation::new(sat));
                 }
+                st.previewing = true;
             }
             if let Some(ui) = w.upgrade() {
                 ui.set_current_profile_name(name.clone().into());
                 ui.set_current_percent(sat_to_percent(sat));
                 set_preview(&ui, app_id, sat, &after);
             }
-            log(&activity, true, &format!("Previewing {name}"));
+            log(&activity, true, &format!("Previewing {name} on desktop"));
         }
     });
 
@@ -268,6 +281,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     Err(e) => log(&activity, false, &format!("Apply failed: {e}")),
                 }
             }
+            st.previewing = true;
         }
     });
 
@@ -279,8 +293,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let sat = st.current_sat;
             if let Some(b) = st.backend.as_mut() {
                 let _ = b.apply(&all_outputs(), Saturation::new(sat));
-                log(&activity, false, &format!("Previewing {:+.0}%", (sat - 1.0) * 100.0));
+                log(&activity, false, &format!("Previewing {:+.0}% on desktop", (sat - 1.0) * 100.0));
             }
+            st.previewing = true;
         }
     });
 
@@ -292,6 +307,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(b) = st.backend.as_mut() {
                 let _ = b.reset(&all_outputs());
             }
+            st.previewing = false;
             log(&activity, false, "Restored desktop");
         }
     });
@@ -299,6 +315,21 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_clear_activity({
         let activity = activity.clone();
         move || activity.set_vec(Vec::<LogRow>::new())
+    });
+
+    // Never leave a live preview applied after the window closes.
+    ui.window().on_close_requested({
+        let state = state.clone();
+        move || {
+            let mut st = state.borrow_mut();
+            if st.previewing {
+                if let Some(b) = st.backend.as_mut() {
+                    let _ = b.reset(&all_outputs());
+                }
+                st.previewing = false;
+            }
+            slint::CloseRequestResponse::HideWindow
+        }
     });
 
     ui.run()
