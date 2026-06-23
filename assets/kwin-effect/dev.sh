@@ -11,7 +11,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 build_dir="$here/build"
-so="$build_dir/libvibrance_effect.so"
+so="$build_dir/vibrance.so"
 effect_id="vibrance"
 
 # KWin already has this on its Qt plugin search path, so a system install is
@@ -33,13 +33,13 @@ cmd_install() {
     if [ -r "$pass" ]; then
         sudo -S -v < "$pass" 2>/dev/null
     fi
-    sudo sh -c "mkdir -p '$sys_dir' && cp '$so' '$sys_dir/libvibrance_effect.so' && chmod 0755 '$sys_dir/libvibrance_effect.so'"
+    sudo sh -c "mkdir -p '$sys_dir' && cp '$so' '$sys_dir/vibrance.so' && chmod 0755 '$sys_dir/vibrance.so'"
     echo "installed -> $sys_dir"
 }
 
 cmd_install_user() {
     mkdir -p "$user_dir"
-    cp "$so" "$user_dir/libvibrance_effect.so"
+    cp "$so" "$user_dir/vibrance.so"
     echo "installed -> $user_dir (add this dir's root to QT_PLUGIN_PATH and re-login)"
 }
 

@@ -2,10 +2,10 @@
 resolver = "2"
 members = [
     "crates/vibrance-core",
-    # added as backends/daemon/cli land:
+    "crates/vibrance-cli",
+    "crates/backends/kwin",
+    # added as further backends/daemon land:
     # "crates/vibrance-daemon",
-    # "crates/vibrance-cli",
-    # "crates/backends/kwin",
     # "crates/backends/drm-ctm",
     # "crates/backends/hyprland",
     # "crates/backends/gamescope",
@@ -15,6 +15,15 @@ members = [
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/REPLACE/vibrance"
+
+[workspace.dependencies]
+vibrance-core = { path = "crates/vibrance-core" }
+vibrance-kwin = { path = "crates/backends/kwin" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+zbus = "5"
 
 [profile.release]
 # small, fast binary; this runs as a long-lived daemon next to a CPU-bound game

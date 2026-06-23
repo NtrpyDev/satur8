@@ -30,6 +30,12 @@ add_library(vibrance_effect MODULE
     vibrance_effect.h
 )
 
+# KWin derives the effect id from the plugin's filename *including* any "lib"
+# prefix. Emit plain "vibrance.so" so the id is simply "vibrance".
+set_target_properties(vibrance_effect PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "vibrance")
+
 target_include_directories(vibrance_effect PRIVATE
     ${KWIN_INCLUDE_DIR}
     /usr/include/KF6

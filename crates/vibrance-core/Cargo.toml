@@ -7,3 +7,5 @@ repository.workspace = true
 description = "Shared saturation math, backend abstraction and profile model for Vibrance."
 
 [dependencies]
+serde = { workspace = true }
+toml = { workspace = true }

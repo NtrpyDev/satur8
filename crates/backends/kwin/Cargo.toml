@@ -1,0 +1,12 @@
+[package]
+name = "vibrance-kwin"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "KWin (KDE Plasma Wayland) backend for Vibrance: drives the shipped saturation effect over D-Bus."
+
+[dependencies]
+vibrance-core = { workspace = true }
+zbus = { workspace = true }
+anyhow = { workspace = true }

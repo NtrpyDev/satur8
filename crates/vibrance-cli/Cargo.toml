@@ -1,0 +1,17 @@
+[package]
+name = "vibrance-cli"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The `vibrance` command-line tool."
+
+[[bin]]
+name = "vibrance"
+path = "src/main.rs"
+
+[dependencies]
+vibrance-core = { workspace = true }
+vibrance-kwin = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }

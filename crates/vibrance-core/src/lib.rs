@@ -5,6 +5,12 @@
 //! matrix; they differ only in how they hand it to the GPU. Keeping the math in
 //! one place means the look is identical everywhere and is unit-tested once.
 
+pub mod env;
+pub mod profile;
+
+pub use env::{Desktop, Environment, Gpu, SessionType};
+pub use profile::{MatchRule, Profile, Profiles};
+
 /// Rec.709 luma weights. Saturation is defined as a blend toward this luma.
 pub const LUMA_R: f32 = 0.2126;
 pub const LUMA_G: f32 = 0.7152;
