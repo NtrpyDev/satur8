@@ -27,29 +27,69 @@ global Pal {
     out property <color> muted: #8a9099;
 }
 
+component BrandLogo inherits HorizontalLayout {
+    height: 48px;
+    spacing: 10px;
+    Rectangle {
+        width: 42px;
+        height: 38px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 10px;
+        background: #151c24;
+        border-width: 1px;
+        border-color: #273442;
+        Text {
+            text: "S8";
+            width: 100%;
+            height: 100%;
+            color: Pal.accent;
+            font-family: "Fira Sans Condensed";
+            font-size: 20px;
+            font-weight: 800;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    HorizontalLayout {
+        spacing: 0px;
+        alignment: center;
+        Text {
+            text: "Satur";
+            color: Pal.ink;
+            font-family: "Fira Sans Condensed";
+            font-size: 30px;
+            font-weight: 800;
+            vertical-alignment: center;
+        }
+        Text {
+            text: "8";
+            color: Pal.accent;
+            font-family: "Fira Sans Condensed";
+            font-size: 32px;
+            font-weight: 800;
+            vertical-alignment: center;
+        }
+    }
+}
+
 component NavItem inherits Rectangle {
     in property <string> label;
     in property <bool> active;
     callback clicked;
-    height: 42px;
-    border-radius: 9px;
-    background: active ? Pal.accent-soft : (touch.has-hover ? #f0efec : transparent);
+    height: 38px;
+    width: nav-label.preferred-width + 30px;
+    border-radius: 10px;
+    background: active ? Pal.accent : (touch.has-hover ? Pal.accent-soft : transparent);
     touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
-        padding-left: 12px;
-        spacing: 12px;
-        Rectangle {
-            width: 20px;
-            height: 20px;
-            y: (parent.height - 20px) / 2;
-            border-radius: 6px;
-            background: active ? Pal.accent : #cfd3d6;
-        }
-        Text {
+        padding-left: 15px;
+        padding-right: 15px;
+        nav-label := Text {
             text: label;
-            font-size: 14px;
-            font-weight: active ? 700 : 500;
-            color: active ? Pal.accent : Pal.ink;
+            font-family: "Fira Sans";
+            font-size: 15px;
+            font-weight: 700;
+            color: active ? white : Pal.ink;
             vertical-alignment: center;
         }
     }
@@ -76,7 +116,8 @@ component Swatches inherits HorizontalLayout {
 export component AppWindow inherits Window {
     title: "Satur8";
     icon: @image-url("icon.png");
-    default-font-size: 14px;
+    default-font-family: "Fira Sans";
+    default-font-size: 15px;
     preferred-width: 1140px;
     preferred-height: 700px;
     min-width: 1040px;
@@ -111,62 +152,55 @@ export component AppWindow inherits Window {
     callback preview-output();
     callback clear-activity();
 
-    HorizontalLayout {
-        // ================= Sidebar =================
+    VerticalLayout {
+        // ================= Header =================
         Rectangle {
-            width: 210px;
+            height: 72px;
             background: Pal.card;
-            Rectangle { width: 1px; x: parent.width - 1px; background: Pal.line; }
-            VerticalLayout {
-                padding: 16px;
-                spacing: 6px;
-                HorizontalLayout {
-                    spacing: 10px;
-                    height: 44px;
-                    Rectangle {
-                        width: 34px; height: 34px; border-radius: 10px; background: Pal.accent;
-                        Text { text: "S8"; color: white; font-size: 15px; font-weight: 800; }
-                    }
-                    Text { text: "Satur8"; font-size: 18px; font-weight: 700; color: Pal.ink; vertical-alignment: center; }
+            Rectangle { height: 1px; y: parent.height - 1px; background: Pal.line; }
+            HorizontalLayout {
+                padding-left: 24px;
+                padding-right: 24px;
+                spacing: 22px;
+                BrandLogo {
+                    y: (parent.height - self.height) / 2;
                 }
-                Rectangle { height: 8px; }
-                NavItem { label: "Profiles"; active: nav == 0; clicked => { nav = 0; } }
-                NavItem { label: "Settings"; active: nav == 1; clicked => { nav = 1; } }
-                Rectangle { vertical-stretch: 1; }
-                Text { text: "v0.1.0"; color: Pal.muted; font-size: 12px; }
-            }
-        }
-
-        VerticalLayout {
-            // ---- top status strip ----
-            Rectangle {
-                height: 56px;
-                background: Pal.card;
-                Rectangle { height: 1px; y: parent.height - 1px; background: Pal.line; }
                 HorizontalLayout {
-                    padding-left: 24px;
-                    Rectangle {
-                        y: (parent.height - 30px) / 2;
-                        height: 30px;
-                        width: pill.preferred-width + 28px;
-                        border-radius: 15px;
-                        background: backend-ok ? Pal.accent-soft : #fbe3e3;
-                        pill := HorizontalLayout {
-                            padding-left: 14px; padding-right: 14px; spacing: 8px;
-                            Rectangle {
-                                width: 9px; height: 9px; border-radius: 5px;
-                                y: (parent.height - 9px) / 2;
-                                background: backend-ok ? #16a34a : #dc2626;
-                            }
-                            Text {
-                                text: backend-ok ? (backend-name + " backend active") : "no backend in this session";
-                                color: Pal.ink; font-size: 13px; vertical-alignment: center;
-                            }
+                    height: 38px;
+                    y: (parent.height - self.height) / 2;
+                    spacing: 8px;
+                    NavItem { label: "Profiles"; active: nav == 0; clicked => { nav = 0; } }
+                    NavItem { label: "Settings"; active: nav == 1; clicked => { nav = 1; } }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 32px;
+                    width: pill.preferred-width + 28px;
+                    border-radius: 16px;
+                    background: backend-ok ? Pal.accent-soft : #fbe3e3;
+                    pill := HorizontalLayout {
+                        padding-left: 14px; padding-right: 14px; spacing: 8px;
+                        Rectangle {
+                            width: 9px; height: 9px; border-radius: 5px;
+                            y: (parent.height - 9px) / 2;
+                            background: backend-ok ? #16a34a : #dc2626;
+                        }
+                        Text {
+                            text: backend-ok ? (backend-name + " backend active") : "no backend in this session";
+                            color: Pal.ink; font-size: 14px; vertical-alignment: center;
                         }
                     }
-                    Rectangle { horizontal-stretch: 1; }
+                }
+                Text {
+                    text: "v0.1.0";
+                    y: (parent.height - self.height) / 2;
+                    color: Pal.muted;
+                    font-size: 12px;
+                    vertical-alignment: center;
                 }
             }
+        }
 
             // ---- body: Profiles page ----
             if nav == 0: HorizontalLayout {
@@ -473,4 +507,3 @@ export component AppWindow inherits Window {
             }
         }
     }
-}
