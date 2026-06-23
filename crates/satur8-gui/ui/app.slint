@@ -74,7 +74,8 @@ component Swatches inherits HorizontalLayout {
 }
 
 export component AppWindow inherits Window {
-    title: "Vibrance";
+    title: "Satur8";
+    icon: @image-url("icon.png");
     default-font-size: 14px;
     preferred-width: 1140px;
     preferred-height: 700px;
@@ -431,6 +432,7 @@ export component AppWindow inherits Window {
             // ---- Live Preview page ----
             if nav == 1: VerticalLayout {
                 vertical-stretch: 1;
+                alignment: start;
                 padding: 24px;
                 spacing: 14px;
                 Text { text: "Live Preview"; font-size: 20px; font-weight: 700; color: Pal.ink; }
@@ -440,17 +442,16 @@ export component AppWindow inherits Window {
                 }
                 if has-image: HorizontalLayout {
                     spacing: 16px;
-                    vertical-stretch: 1;
                     VerticalLayout {
                         spacing: 6px;
                         Text { text: "Before"; color: Pal.muted; horizontal-alignment: center; }
-                        Rectangle { border-radius: 10px; clip: true; vertical-stretch: 1;
+                        Rectangle { height: 240px; border-radius: 10px; clip: true; background: #11151a;
                             Image { source: before-image; image-fit: contain; width: 100%; height: 100%; } }
                     }
                     VerticalLayout {
                         spacing: 6px;
                         Text { text: "After"; color: Pal.accent; font-weight: 600; horizontal-alignment: center; }
-                        Rectangle { border-radius: 10px; clip: true; vertical-stretch: 1;
+                        Rectangle { height: 240px; border-radius: 10px; clip: true; background: #11151a;
                             Image { source: after-image; image-fit: contain; width: 100%; height: 100%; } }
                     }
                 }
@@ -460,7 +461,6 @@ export component AppWindow inherits Window {
                     Swatches { colors: before-swatches; }
                     Text { text: "After"; color: Pal.muted; }
                     Swatches { colors: after-swatches; }
-                    Rectangle { vertical-stretch: 1; }
                 }
                 HorizontalLayout {
                     spacing: 8px;
@@ -469,6 +469,7 @@ export component AppWindow inherits Window {
                     Button { text: "✓ Apply"; primary: true; clicked => { root.apply-output(); } }
                     Rectangle { horizontal-stretch: 1; }
                 }
+                Rectangle { vertical-stretch: 1; }
             }
 
             // ---- Outputs page ----
