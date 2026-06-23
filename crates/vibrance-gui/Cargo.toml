@@ -4,7 +4,8 @@ version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Vibrance desktop app: pick a running game and set its per-game saturation, VibranceGUI-style."
+description = "Vibrance desktop app: pick a running game and set its per-game saturation, with a clean Slint UI."
+build = "build.rs"
 
 [[bin]]
 name = "vibrance-gui"
@@ -17,5 +18,8 @@ vibrance-drm-ctm = { workspace = true }
 vibrance-hyprland = { workspace = true }
 vibrance-nv-control = { workspace = true }
 vibrance-gnome = { workspace = true }
-anyhow = { workspace = true }
-eframe = "0.34"
+slint = "1.16"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+
+[build-dependencies]
+slint-build = "1.16"

@@ -1,261 +1,430 @@
-//! `vibrance-gui` - a simple, clean desktop app for per-game vibrance.
+//! `vibrance-gui` - the Vibrance desktop app (Slint).
 //!
-//! Pick a running game, set how vivid it should be, done. It writes the same
-//! `profiles.toml` the CLI/daemon read, so a profile added here is what
-//! `vibrance run --profile <name>` (your Steam launch option) uses.
+//! Sidebar + per-game profile rows with the game's real Steam icon, a vibrance
+//! slider and an enable toggle; a before/after preview built from the game's own
+//! Steam art with the saturation applied; an output selector and an activity log.
+//! Reads/writes the same `profiles.toml` the CLI and daemon use.
+//!
+//! Game art comes from the user's *local* Steam cache - nothing is bundled.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod proc;
+mod steam;
 
-use std::path::PathBuf;
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
-use eframe::egui;
+use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use vibrance_core::{Backend, MatchRule, Output, Profile, Profiles, Saturation};
 
-/// Saturation a freshly-added game gets; tweak per game afterwards.
-const DEFAULT_SAT: f32 = 1.4;
-/// Game-useful range. 1.0 = normal, higher = more vivid.
-const SAT_RANGE: std::ops::RangeInclusive<f32> = 1.0..=3.0;
+slint::include_modules!();
 
-fn main() -> eframe::Result {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([440.0, 560.0])
-            .with_min_inner_size([360.0, 360.0])
-            .with_title("Vibrance"),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "Vibrance",
-        options,
-        Box::new(|cc| {
-            setup_style(&cc.egui_ctx);
-            Ok(Box::new(VibranceApp::new()))
-        }),
-    )
-}
+const SWATCHES: [(u8, u8, u8); 6] = [
+    (128, 128, 128),
+    (229, 57, 53),
+    (253, 216, 53),
+    (67, 160, 71),
+    (38, 166, 154),
+    (30, 136, 229),
+];
 
-fn setup_style(ctx: &egui::Context) {
-    let mut style = (*ctx.global_style()).clone();
-    style.visuals = egui::Visuals::light();
-    let accent = egui::Color32::from_rgb(0, 158, 138); // teal
-    style.visuals.selection.bg_fill = accent;
-    style.visuals.hyperlink_color = accent;
-    style.visuals.widgets.hovered.bg_stroke.color = accent;
-    style.visuals.panel_fill = egui::Color32::from_rgb(247, 248, 250);
-    style.spacing.item_spacing = egui::vec2(8.0, 10.0);
-    style.spacing.button_padding = egui::vec2(12.0, 6.0);
-    style.spacing.slider_width = 150.0;
-    ctx.set_global_style(style);
-}
+const TILE_COLORS: [(u8, u8, u8); 8] = [
+    (13, 148, 136),
+    (37, 99, 235),
+    (217, 70, 39),
+    (147, 51, 234),
+    (202, 138, 4),
+    (5, 150, 105),
+    (219, 39, 119),
+    (71, 85, 105),
+];
 
-struct VibranceApp {
+struct State {
     backend: Option<Box<dyn Backend>>,
-    backend_name: String,
     profiles: Profiles,
-    running: Vec<String>,
-    picked: Option<String>,
-    status: String,
-    previewing: bool,
+    current_sat: f32,
 }
 
-impl VibranceApp {
-    fn new() -> VibranceApp {
-        let backend = select_backend();
-        let backend_name = backend
+fn main() -> Result<(), slint::PlatformError> {
+    let ui = AppWindow::new()?;
+
+    let backend = select_backend();
+    ui.set_backend_ok(backend.is_some());
+    ui.set_backend_name(
+        backend
             .as_ref()
             .map(|b| b.name().to_string())
-            .unwrap_or_else(|| "none".into());
-        VibranceApp {
-            backend,
-            backend_name,
-            profiles: load_profiles(),
-            running: proc::running_executables(),
-            picked: None,
-            status: "Ready.".into(),
-            previewing: false,
+            .unwrap_or_else(|| "no".into())
+            .into(),
+    );
+
+    let profiles = load_profiles();
+    let first = profiles.profiles.first().cloned();
+    let first_sat = first.as_ref().map(|p| p.saturation).unwrap_or(1.0);
+    let state = Rc::new(RefCell::new(State {
+        backend,
+        profiles,
+        current_sat: first_sat,
+    }));
+
+    // Games
+    let games = Rc::new(VecModel::<GameRow>::default());
+    rebuild_games(&games, &state.borrow().profiles);
+    ui.set_games(ModelRc::from(games.clone()));
+
+    // Running apps (with Steam AppIDs)
+    let apps = Rc::new(RefCell::new(proc::running_apps()));
+    let running = Rc::new(VecModel::<SharedString>::from(running_strings(&apps.borrow())));
+    ui.set_running(ModelRc::from(running.clone()));
+
+    // Outputs
+    let output_names: Vec<SharedString> = state
+        .borrow()
+        .backend
+        .as_ref()
+        .map(|b| b.outputs().into_iter().map(|o| o.human_name.into()).collect())
+        .unwrap_or_else(|| vec!["All outputs".into()]);
+    ui.set_outputs(ModelRc::from(Rc::new(VecModel::from(output_names))));
+
+    // Activity
+    let activity = Rc::new(VecModel::<LogRow>::default());
+    log(&activity, true, "Started Vibrance");
+    match state.borrow().backend.as_ref().map(|b| b.name().to_string()) {
+        Some(name) => log(&activity, false, &format!("{name} backend active")),
+        None => log(&activity, false, "No supported backend in this session"),
+    }
+    ui.set_activity(ModelRc::from(activity.clone()));
+
+    // Preview (swatches always; real art when the profile is a known Steam game)
+    let after = Rc::new(VecModel::<Color>::from(after_swatches(first_sat)));
+    ui.set_before_swatches(ModelRc::from(Rc::new(VecModel::from(before_swatches()))));
+    ui.set_after_swatches(ModelRc::from(after.clone()));
+    if let Some(p) = &first {
+        ui.set_current_profile_name(p.name.clone().into());
+        ui.set_current_percent(sat_to_percent(p.saturation));
+        set_preview(&ui, profile_app_id(p), p.saturation, &after);
+    }
+
+    ui.set_default_percent(sat_to_percent(state.borrow().profiles.default_saturation));
+
+    // ---------------- callbacks ----------------
+    ui.on_default_changed({
+        let state = state.clone();
+        let w = ui.as_weak();
+        move |percent| {
+            let sat = percent_to_sat(percent);
+            {
+                let mut st = state.borrow_mut();
+                st.profiles.default_saturation = sat;
+                save(&st.profiles);
+            }
+            if let Some(ui) = w.upgrade() {
+                ui.set_default_percent(percent.round() as i32);
+            }
         }
-    }
+    });
 
-    fn outputs() -> Output {
-        Output { id: "all".into(), human_name: "All outputs".into() }
-    }
+    ui.on_percent_changed({
+        let state = state.clone();
+        let games = games.clone();
+        let after = after.clone();
+        let w = ui.as_weak();
+        move |i, percent| {
+            let sat = percent_to_sat(percent);
+            let app_id;
+            let name;
+            {
+                let mut st = state.borrow_mut();
+                if let Some(p) = st.profiles.profiles.get_mut(i as usize) {
+                    p.saturation = sat;
+                }
+                st.current_sat = sat;
+                let p = st.profiles.profiles.get(i as usize);
+                name = p.map(|p| p.name.clone()).unwrap_or_default();
+                app_id = p.and_then(profile_app_id);
+                save(&st.profiles);
+            }
+            if let Some(mut row) = games.row_data(i as usize) {
+                row.percent = percent.round() as i32;
+                games.set_row_data(i as usize, row);
+            }
+            if let Some(ui) = w.upgrade() {
+                ui.set_current_profile_name(name.into());
+                ui.set_current_percent(sat_to_percent(sat));
+                set_preview(&ui, app_id, sat, &after);
+            }
+        }
+    });
 
-    fn preview(&mut self, sat: f32) {
-        let Some(b) = self.backend.as_mut() else {
-            self.status = "No supported backend in this session.".into();
+    ui.on_toggle_enabled({
+        let state = state.clone();
+        let activity = activity.clone();
+        move |i, enabled| {
+            let mut st = state.borrow_mut();
+            let name = st.profiles.profiles.get(i as usize).map(|p| p.name.clone()).unwrap_or_default();
+            if !enabled {
+                if let Some(b) = st.backend.as_mut() {
+                    let _ = b.reset(&all_outputs());
+                }
+            }
+            log(&activity, false, &format!("{} {}", name, if enabled { "enabled" } else { "disabled" }));
+        }
+    });
+
+    ui.on_remove({
+        let state = state.clone();
+        let games = games.clone();
+        let activity = activity.clone();
+        move |i| {
+            let name;
+            {
+                let mut st = state.borrow_mut();
+                let i = i as usize;
+                name = st.profiles.profiles.get(i).map(|p| p.name.clone()).unwrap_or_default();
+                if i < st.profiles.profiles.len() {
+                    st.profiles.profiles.remove(i);
+                }
+                save(&st.profiles);
+            }
+            rebuild_games(&games, &state.borrow().profiles);
+            log(&activity, false, &format!("Removed {name}"));
+        }
+    });
+
+    ui.on_add_running({
+        let state = state.clone();
+        let games = games.clone();
+        let apps = apps.clone();
+        let activity = activity.clone();
+        move |i| {
+            let app = apps.borrow().get(i as usize).map(|a| (a.exe.clone(), a.app_id));
+            let Some((exe, app_id)) = app else { return };
+            {
+                let mut st = state.borrow_mut();
+                add_or_update(&mut st.profiles, &exe, app_id, 1.4);
+                save(&st.profiles);
+            }
+            rebuild_games(&games, &state.borrow().profiles);
+            log(&activity, true, &format!("Added {exe}"));
+        }
+    });
+
+    ui.on_refresh_running({
+        let apps = apps.clone();
+        let running = running.clone();
+        move || {
+            *apps.borrow_mut() = proc::running_apps();
+            running.set_vec(running_strings(&apps.borrow()));
+        }
+    });
+
+    ui.on_preview_profile({
+        let state = state.clone();
+        let after = after.clone();
+        let activity = activity.clone();
+        let w = ui.as_weak();
+        move |i| {
+            let (name, sat, app_id) = {
+                let st = state.borrow();
+                match st.profiles.profiles.get(i as usize) {
+                    Some(p) => (p.name.clone(), p.saturation, profile_app_id(p)),
+                    None => return,
+                }
+            };
+            {
+                let mut st = state.borrow_mut();
+                st.current_sat = sat;
+                if let Some(b) = st.backend.as_mut() {
+                    let _ = b.apply(&all_outputs(), Saturation::new(sat));
+                }
+            }
+            if let Some(ui) = w.upgrade() {
+                ui.set_current_profile_name(name.clone().into());
+                ui.set_current_percent(sat_to_percent(sat));
+                set_preview(&ui, app_id, sat, &after);
+            }
+            log(&activity, true, &format!("Previewing {name}"));
+        }
+    });
+
+    ui.on_apply_output({
+        let state = state.clone();
+        let activity = activity.clone();
+        move || {
+            let mut st = state.borrow_mut();
+            let sat = st.current_sat;
+            if let Some(b) = st.backend.as_mut() {
+                match b.apply(&all_outputs(), Saturation::new(sat)) {
+                    Ok(()) => log(&activity, true, &format!("Applied {:+.0}%", (sat - 1.0) * 100.0)),
+                    Err(e) => log(&activity, false, &format!("Apply failed: {e}")),
+                }
+            }
+        }
+    });
+
+    ui.on_preview_output({
+        let state = state.clone();
+        let activity = activity.clone();
+        move || {
+            let mut st = state.borrow_mut();
+            let sat = st.current_sat;
+            if let Some(b) = st.backend.as_mut() {
+                let _ = b.apply(&all_outputs(), Saturation::new(sat));
+                log(&activity, false, &format!("Previewing {:+.0}%", (sat - 1.0) * 100.0));
+            }
+        }
+    });
+
+    ui.on_restore_output({
+        let state = state.clone();
+        let activity = activity.clone();
+        move || {
+            let mut st = state.borrow_mut();
+            if let Some(b) = st.backend.as_mut() {
+                let _ = b.reset(&all_outputs());
+            }
+            log(&activity, false, "Restored desktop");
+        }
+    });
+
+    ui.on_clear_activity({
+        let activity = activity.clone();
+        move || activity.set_vec(Vec::<LogRow>::new())
+    });
+
+    ui.run()
+}
+
+// ---------------- helpers ----------------
+
+fn all_outputs() -> Output {
+    Output { id: "all".into(), human_name: "All outputs".into() }
+}
+fn percent_to_sat(percent: f32) -> f32 {
+    (1.0 + percent / 100.0).clamp(0.0, 4.0)
+}
+fn sat_to_percent(sat: f32) -> i32 {
+    ((sat - 1.0) * 100.0).round() as i32
+}
+
+fn profile_app_id(p: &Profile) -> Option<u32> {
+    p.match_rule.steam_app_id.or_else(|| {
+        let key = p.match_rule.exe.as_deref().unwrap_or(p.name.as_str());
+        steam::known_app_id(key)
+    })
+}
+
+fn rebuild_games(model: &VecModel<GameRow>, profiles: &Profiles) {
+    let rows: Vec<GameRow> = profiles
+        .profiles
+        .iter()
+        .map(|p| {
+            let exe = p.match_rule.exe.clone().unwrap_or_else(|| p.name.clone());
+            let icon = profile_app_id(p).and_then(steam::icon_path).and_then(|path| load_icon(&path));
+            GameRow {
+                name: p.name.clone().into(),
+                exe: exe.into(),
+                percent: sat_to_percent(p.saturation),
+                enabled: true,
+                accent: tile_color(&p.name),
+                initial: p.name.chars().next().unwrap_or('?').to_uppercase().to_string().into(),
+                has_icon: icon.is_some(),
+                icon: icon.unwrap_or_default(),
+            }
+        })
+        .collect();
+    model.set_vec(rows);
+}
+
+/// Set the right-panel before/after: real Steam art if we have it, swatches else.
+fn set_preview(ui: &AppWindow, app_id: Option<u32>, sat: f32, after_swatch_model: &VecModel<Color>) {
+    after_swatch_model.set_vec(after_swatches(sat));
+    if let Some(path) = app_id.and_then(steam::preview_path) {
+        if let Some((before, after)) = load_preview_pair(&path, sat) {
+            ui.set_before_image(before);
+            ui.set_after_image(after);
+            ui.set_has_image(true);
             return;
-        };
-        match b.apply(&Self::outputs(), Saturation::new(sat)) {
-            Ok(()) => {
-                self.previewing = true;
-                self.status = format!("Previewing {sat:.2}×. Click Stop to restore.");
-            }
-            Err(e) => self.status = format!("Couldn't apply: {e}"),
         }
     }
-
-    fn stop_preview(&mut self) {
-        if let Some(b) = self.backend.as_mut() {
-            let _ = b.reset(&Self::outputs());
-        }
-        self.previewing = false;
-        self.status = "Restored.".into();
-    }
-
-    fn save(&mut self) {
-        if let Err(e) = save_profiles(&self.profiles) {
-            self.status = format!("Save failed: {e}");
-        }
-    }
+    ui.set_has_image(false);
 }
 
-impl eframe::App for VibranceApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.heading("Vibrance");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let ok = self.backend.is_some();
-                let (dot, color) = if ok {
-                    ("●", egui::Color32::from_rgb(0, 158, 138))
-                } else {
-                    ("●", egui::Color32::from_rgb(200, 80, 80))
-                };
-                ui.label(egui::RichText::new(format!("{dot} {}", self.backend_name)).color(color));
-            });
-        });
-        ui.label(
-            egui::RichText::new("Per-game saturation - applied in the compositor, never in the game.")
-                .weak()
-                .small(),
-        );
-        ui.add_space(6.0);
-
-        // ---- Games ----
-        let mut to_delete: Option<usize> = None;
-        let mut to_preview: Option<f32> = None;
-        let mut dirty = false;
-
-        egui::Frame::group(ui.style())
-            .fill(egui::Color32::WHITE)
-            .corner_radius(8.0)
-            .inner_margin(egui::Margin::same(10))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(egui::RichText::new("GAMES").small().strong().weak());
-                ui.add_space(2.0);
-
-                if self.profiles.profiles.is_empty() {
-                    ui.add_space(6.0);
-                    ui.label(egui::RichText::new("No games yet. Add one below.").weak());
-                    ui.add_space(6.0);
-                }
-
-                egui::ScrollArea::vertical()
-                    .max_height(240.0)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        for (i, p) in self.profiles.profiles.iter_mut().enumerate() {
-                            ui.horizontal(|ui| {
-                                ui.add_sized(
-                                    [110.0, 20.0],
-                                    egui::Label::new(egui::RichText::new(&p.name).strong())
-                                        .truncate(),
-                                );
-                                dirty |= ui
-                                    .add(
-                                        egui::Slider::new(&mut p.saturation, SAT_RANGE)
-                                            .suffix("×")
-                                            .fixed_decimals(2)
-                                            .trailing_fill(true),
-                                    )
-                                    .changed();
-                                if ui.button("Preview").clicked() {
-                                    to_preview = Some(p.saturation);
-                                }
-                                if ui
-                                    .button(egui::RichText::new("✕").color(egui::Color32::GRAY))
-                                    .on_hover_text("Remove")
-                                    .clicked()
-                                {
-                                    to_delete = Some(i);
-                                }
-                            });
-                        }
-                    });
-            });
-
-        if let Some(s) = to_preview {
-            self.preview(s);
-        }
-        if let Some(i) = to_delete {
-            self.profiles.profiles.remove(i);
-            self.save();
-            self.status = "Removed.".into();
-        } else if dirty {
-            self.save();
-        }
-
-        ui.add_space(8.0);
-
-        // ---- Add a game ----
-        egui::Frame::group(ui.style())
-            .fill(egui::Color32::WHITE)
-            .corner_radius(8.0)
-            .inner_margin(egui::Margin::same(10))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(egui::RichText::new("ADD A GAME").small().strong().weak());
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt("running")
-                        .selected_text(
-                            self.picked.clone().unwrap_or_else(|| "Select a running program".into()),
-                        )
-                        .width(230.0)
-                        .show_ui(ui, |ui| {
-                            for name in &self.running {
-                                ui.selectable_value(&mut self.picked, Some(name.clone()), name);
-                            }
-                        });
-                    if ui.button("⟳").on_hover_text("Refresh list").clicked() {
-                        self.running = proc::running_executables();
-                    }
-                    let can_add = self.picked.is_some();
-                    if ui.add_enabled(can_add, egui::Button::new("Add")).clicked() {
-                        if let Some(exe) = self.picked.clone() {
-                            add_or_update(&mut self.profiles, &exe, DEFAULT_SAT);
-                            self.save();
-                            self.status = format!("Added {exe}.");
-                            self.picked = None;
-                        }
-                    }
-                });
-            });
-
-        // ---- Footer ----
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if self.previewing {
-                if ui.button("Stop preview").clicked() {
-                    self.stop_preview();
-                }
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new(&self.status).weak().small());
-            });
-        });
-    }
+fn to_slint(img: &image::RgbaImage) -> Image {
+    let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(img.as_raw(), img.width(), img.height());
+    Image::from_rgba8(buf)
 }
 
-/// Add a game profile named after the exe (or bump an existing one).
-fn add_or_update(profiles: &mut Profiles, exe: &str, saturation: f32) {
-    let name = exe
-        .trim_end_matches(".exe")
-        .trim_end_matches(".x86_64")
-        .to_string();
+/// Centre-cropped square icon.
+fn load_icon(path: &Path) -> Option<Image> {
+    let img = image::open(path).ok()?.into_rgba8();
+    let (w, h) = (img.width(), img.height());
+    let side = w.min(h);
+    let cropped = image::imageops::crop_imm(&img, (w - side) / 2, (h - side) / 2, side, side).to_image();
+    let small = image::imageops::thumbnail(&cropped, 96, 96);
+    Some(to_slint(&small))
+}
+
+/// (before, after) preview pair from a wide art image, after = saturation applied.
+fn load_preview_pair(path: &Path, sat: f32) -> Option<(Image, Image)> {
+    let base = image::open(path).ok()?.into_rgba8();
+    let tw = 360u32;
+    let th = (tw as f32 * base.height() as f32 / base.width() as f32).round() as u32;
+    let base = image::imageops::thumbnail(&base, tw, th.max(1));
+    let before = to_slint(&base);
+
+    let m = Saturation::new(sat).matrix();
+    let mut after = base.clone();
+    for px in after.pixels_mut() {
+        let (r, g, b) = (px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0);
+        let o = |row: [f32; 3]| ((row[0] * r + row[1] * g + row[2] * b).clamp(0.0, 1.0) * 255.0).round() as u8;
+        px[0] = o(m[0]);
+        px[1] = o(m[1]);
+        px[2] = o(m[2]);
+    }
+    Some((before, to_slint(&after)))
+}
+
+fn before_swatches() -> Vec<Color> {
+    SWATCHES.iter().map(|&(r, g, b)| Color::from_rgb_u8(r, g, b)).collect()
+}
+fn after_swatches(sat: f32) -> Vec<Color> {
+    let m = Saturation::new(sat).matrix();
+    SWATCHES
+        .iter()
+        .map(|&(r, g, b)| {
+            let (rf, gf, bf) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+            let o = |row: [f32; 3]| ((row[0] * rf + row[1] * gf + row[2] * bf).clamp(0.0, 1.0) * 255.0).round() as u8;
+            Color::from_rgb_u8(o(m[0]), o(m[1]), o(m[2]))
+        })
+        .collect()
+}
+
+fn tile_color(name: &str) -> Color {
+    let h = name.bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+    let (r, g, b) = TILE_COLORS[(h as usize) % TILE_COLORS.len()];
+    Color::from_rgb_u8(r, g, b)
+}
+
+fn log(model: &VecModel<LogRow>, ok: bool, text: &str) {
+    model.insert(0, LogRow { ok, text: text.into(), time: now_hms().into() });
+}
+
+fn now_hms() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let day = secs % 86_400;
+    format!("{:02}:{:02}:{:02}", day / 3600, (day % 3600) / 60, day % 60)
+}
+
+fn running_strings(apps: &[proc::RunningApp]) -> Vec<SharedString> {
+    apps.iter().map(|a| a.exe.clone().into()).collect()
+}
+
+fn add_or_update(profiles: &mut Profiles, exe: &str, app_id: Option<u32>, saturation: f32) {
+    let name = exe.trim_end_matches(".exe").trim_end_matches(".x86_64").to_string();
     if let Some(p) = profiles
         .profiles
         .iter_mut()
@@ -263,6 +432,9 @@ fn add_or_update(profiles: &mut Profiles, exe: &str, saturation: f32) {
     {
         p.saturation = saturation;
         p.match_rule.exe = Some(exe.to_string());
+        if app_id.is_some() {
+            p.match_rule.steam_app_id = app_id;
+        }
         return;
     }
     profiles.profiles.push(Profile {
@@ -271,13 +443,11 @@ fn add_or_update(profiles: &mut Profiles, exe: &str, saturation: f32) {
         match_rule: MatchRule {
             exe: Some(exe.to_string()),
             window_class: None,
-            steam_app_id: None,
+            steam_app_id: app_id,
         },
         outputs: vec![],
     });
 }
-
-// ---- backend + config (small local copies so the GUI is standalone) ----
 
 fn select_backend() -> Option<Box<dyn Backend>> {
     use vibrance_drm_ctm::DrmCtmBackend;
@@ -310,24 +480,18 @@ fn config_dir() -> PathBuf {
             return PathBuf::from(x).join("vibrance");
         }
     }
-    PathBuf::from(std::env::var("HOME").unwrap_or_default())
-        .join(".config")
-        .join("vibrance")
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config").join("vibrance")
 }
-
-fn profiles_path() -> PathBuf {
-    config_dir().join("profiles.toml")
-}
-
 fn load_profiles() -> Profiles {
-    match std::fs::read_to_string(profiles_path()) {
+    match std::fs::read_to_string(config_dir().join("profiles.toml")) {
         Ok(s) => Profiles::from_toml(&s).unwrap_or_default(),
         Err(_) => Profiles::default(),
     }
 }
-
-fn save_profiles(profiles: &Profiles) -> anyhow::Result<()> {
-    std::fs::create_dir_all(config_dir())?;
-    std::fs::write(profiles_path(), profiles.to_toml()?)?;
-    Ok(())
+fn save(profiles: &Profiles) {
+    let dir = config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(toml) = profiles.to_toml() {
+        let _ = std::fs::write(dir.join("profiles.toml"), toml);
+    }
 }
