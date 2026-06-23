@@ -104,6 +104,32 @@ component Button inherits Rectangle {
     }
 }
 
+component ThemeToggle inherits Rectangle {
+    callback toggled(bool);
+    width: 38px;
+    height: 38px;
+    border-radius: 19px;
+    border-width: 1px;
+    border-color: Pal.line;
+    background: touch.pressed ? Pal.line : (touch.has-hover ? Pal.hover : Pal.note);
+
+    touch := TouchArea {
+        clicked => {
+            Pal.dark = !Pal.dark;
+            root.toggled(Pal.dark);
+        }
+    }
+
+    Text {
+        text: Pal.dark ? "☾" : "☀";
+        color: Pal.accent;
+        font-size: 18px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
 component Card inherits Rectangle {
     background: Pal.card;
     border-radius: 12px;
@@ -185,6 +211,10 @@ export component AppWindow inherits Window {
                     NavItem { label: "About"; active: nav == 2; clicked => { nav = 2; } }
                 }
                 Rectangle { horizontal-stretch: 1; }
+                ThemeToggle {
+                    y: (parent.height - self.height) / 2;
+                    toggled(dark) => { root.dark-mode-changed(dark); }
+                }
                 Rectangle {
                     y: (parent.height - self.height) / 2;
                     height: 32px;
@@ -480,31 +510,6 @@ export component AppWindow inherits Window {
                 padding: 24px;
                 spacing: 14px;
                 Text { text: "Settings"; font-size: 20px; font-weight: 700; color: Pal.ink; }
-                Card {
-                    HorizontalLayout {
-                        padding: 16px;
-                        spacing: 12px;
-                        VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "Dark mode"; font-weight: 600; color: Pal.ink; }
-                            Text {
-                                text: "Switches Satur8 to a darker graphite UI.";
-                                color: Pal.muted; font-size: 12px; wrap: word-wrap;
-                            }
-                        }
-                        Rectangle { horizontal-stretch: 1; }
-                        VerticalLayout {
-                            alignment: center;
-                            Switch {
-                                checked: Pal.dark;
-                                toggled => {
-                                    Pal.dark = self.checked;
-                                    root.dark-mode-changed(self.checked);
-                                }
-                            }
-                        }
-                    }
-                }
                 Card {
                     VerticalLayout {
                         padding: 16px;
