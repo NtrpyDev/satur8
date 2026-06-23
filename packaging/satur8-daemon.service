@@ -1,6 +1,6 @@
 [Unit]
 Description=Satur8 focus daemon (per-game digital vibrance)
-Documentation=https://github.com/REPLACE/satur8
+Documentation=https://github.com/NtrpyDev/satur8
 # Only meaningful inside a graphical session.
 After=graphical-session.target
 PartOf=graphical-session.target

@@ -3,6 +3,6 @@
     "name": "Satur8",
     "description": "Per-game digital vibrance for GNOME: a shell-level saturation shader controlled over D-Bus by the satur8 tool. Applies after the game renders (never injected), so it is GPU-agnostic and works on NVIDIA Wayland too.",
     "shell-version": ["45", "46", "47", "48"],
-    "url": "https://github.com/REPLACE/satur8",
+    "url": "https://github.com/NtrpyDev/satur8",
     "session-modes": ["user"]
 }

@@ -17,7 +17,7 @@ members = [
 [workspace.package]
 edition = "2021"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/REPLACE/satur8"
+repository = "https://github.com/NtrpyDev/satur8"
 
 [workspace.dependencies]
 satur8-core = { path = "crates/satur8-core" }

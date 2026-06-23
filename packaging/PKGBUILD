@@ -4,7 +4,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="Per-game digital vibrance for Linux: compositor/scanout saturation boost, never injected into the game"
 arch=('x86_64')
-url="https://github.com/REPLACE/satur8"
+url="https://github.com/NtrpyDev/satur8"
 license=('GPL-3.0-or-later')
 depends=('gcc-libs')
 # KWin backend (effect): kwin at runtime; build needs the KDE/KWin SDK.
