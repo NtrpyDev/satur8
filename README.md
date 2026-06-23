@@ -70,10 +70,15 @@ control tools around it are Rust.
 
 ## Install
 
-The installer builds and installs the binaries, KWin effect, KWin focus script,
-GNOME extension, systemd user unit, and desktop entry.
+Download the latest Linux x86_64 release from:
+
+https://github.com/NtrpyDev/satur8/releases
+
+Then install it:
 
 ```sh
+tar -xzf satur8-v0.1.0-linux-x86_64.tar.gz
+cd satur8-v0.1.0-linux-x86_64
 packaging/install.sh
 ```
 
@@ -88,6 +93,9 @@ For a per-user uninstall:
 ```sh
 packaging/install.sh --uninstall
 ```
+
+If you clone the source repository instead, the same installer builds and
+installs Satur8 from source.
 
 The Arch packaging scaffold is in `packaging/PKGBUILD`.
 

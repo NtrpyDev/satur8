@@ -15,6 +15,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
+prebuilt="$repo/prebuilt/linux-x86_64"
 mode="user"
 action="install"
 for arg in "$@"; do
@@ -36,6 +37,14 @@ unit_dir="$HOME/.config/systemd/user"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 
+has_prebuilt() {
+    [ "$(uname -m)" = x86_64 ] &&
+    [ -x "$prebuilt/bin/satur8" ] &&
+    [ -x "$prebuilt/bin/satur8-daemon" ] &&
+    [ -x "$prebuilt/bin/satur8-gui" ] &&
+    [ -f "$prebuilt/kwin/satur8.so" ]
+}
+
 build() {
     say "Building release binaries"
     (cd "$repo" && cargo build --release)
@@ -45,24 +54,35 @@ build() {
     cmake --build "$repo/assets/kwin-effect/build" >/dev/null
 }
 
+prepare_artifacts() {
+    if has_prebuilt; then
+        say "Using bundled linux-x86_64 release binaries"
+        bin_src="$prebuilt/bin"
+        effect_so="$prebuilt/kwin/satur8.so"
+    else
+        build
+        bin_src="$repo/target/release"
+        effect_so="$repo/assets/kwin-effect/build/satur8.so"
+    fi
+}
+
 install_all() {
-    build
+    prepare_artifacts
     say "Installing binaries to $bindir"
     mkdir -p "$bindir"
-    install -m755 "$repo/target/release/satur8" "$bindir/satur8"
-    install -m755 "$repo/target/release/satur8-daemon" "$bindir/satur8-daemon"
-    [ -f "$repo/target/release/satur8-tray" ] && \
-        install -m755 "$repo/target/release/satur8-tray" "$bindir/satur8-tray"
-    [ -f "$repo/target/release/satur8-gui" ] && \
-        install -m755 "$repo/target/release/satur8-gui" "$bindir/satur8-gui"
+    install -m755 "$bin_src/satur8" "$bindir/satur8"
+    install -m755 "$bin_src/satur8-daemon" "$bindir/satur8-daemon"
+    [ -f "$bin_src/satur8-tray" ] && \
+        install -m755 "$bin_src/satur8-tray" "$bindir/satur8-tray"
+    [ -f "$bin_src/satur8-gui" ] && \
+        install -m755 "$bin_src/satur8-gui" "$bindir/satur8-gui"
 
-    local so="$repo/assets/kwin-effect/build/satur8.so"
     if [ "$mode" = system ]; then
         say "Installing KWin effect to $qt_plugin_sys (sudo)"
-        sudo install -Dm755 "$so" "$qt_plugin_sys/satur8.so"
+        sudo install -Dm755 "$effect_so" "$qt_plugin_sys/satur8.so"
     else
         say "Installing KWin effect to $qt_plugin_user"
-        install -Dm755 "$so" "$qt_plugin_user/satur8.so"
+        install -Dm755 "$effect_so" "$qt_plugin_user/satur8.so"
         echo "    NOTE: for KWin to find a user-path effect, ensure QT_PLUGIN_PATH"
         echo "    includes ~/.local/lib/qt6/plugins at login, or re-run with --system."
     fi
