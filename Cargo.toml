@@ -5,6 +5,7 @@ members = [
     "crates/vibrance-cli",
     "crates/backends/kwin",
     "crates/backends/drm-ctm",
+    "crates/vibrance-daemon",
     # added as further backends/daemon land:
     # "crates/vibrance-daemon",
     # "crates/backends/drm-ctm",

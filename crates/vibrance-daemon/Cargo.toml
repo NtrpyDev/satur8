@@ -1,0 +1,17 @@
+[package]
+name = "vibrance-daemon"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Event-driven vibrance daemon: applies/restores per-game profiles on window focus changes."
+
+[[bin]]
+name = "vibrance-daemon"
+path = "src/main.rs"
+
+[dependencies]
+vibrance-core = { workspace = true }
+vibrance-kwin = { workspace = true }
+zbus = { workspace = true }
+anyhow = { workspace = true }
