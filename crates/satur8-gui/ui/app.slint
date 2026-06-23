@@ -128,7 +128,7 @@ export component AppWindow inherits Window {
                         width: 34px; height: 34px; border-radius: 10px; background: Pal.accent;
                         Text { text: "V"; color: white; font-size: 19px; font-weight: 800; }
                     }
-                    Text { text: "Vibrance"; font-size: 18px; font-weight: 700; color: Pal.ink; vertical-alignment: center; }
+                    Text { text: "Satur8"; font-size: 18px; font-weight: 700; color: Pal.ink; vertical-alignment: center; }
                 }
                 Rectangle { height: 8px; }
                 NavItem { label: "Profiles";     active: nav == 0; clicked => { nav = 0; } }
@@ -248,7 +248,7 @@ export component AppWindow inherits Window {
                             if games.length == 0: Rectangle {
                                 height: 130px;
                                 Text {
-                                    text: "No games yet.\nClick “Add running game”, pick your game, and set its vibrance.";
+                                    text: "No games yet.\nClick “Add running game”, pick your game, and set its satur8.";
                                     color: Pal.muted; horizontal-alignment: center; vertical-alignment: center;
                                 }
                             }
@@ -504,7 +504,7 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         padding: 16px;
                         spacing: 8px;
-                        Text { text: "Desktop default vibrance"; font-weight: 600; color: Pal.ink; }
+                        Text { text: "Desktop default satur8"; font-weight: 600; color: Pal.ink; }
                         Text { text: "Applied when no game profile matches."; color: Pal.muted; font-size: 12px; }
                         HorizontalLayout {
                             spacing: 12px;
@@ -523,9 +523,9 @@ export component AppWindow inherits Window {
                         spacing: 6px;
                         Text { text: "Auto-apply per game"; font-weight: 600; color: Pal.ink; }
                         Text { text: "Set this as a game's Steam launch option:"; color: Pal.muted; font-size: 12px; }
-                        Text { text: "vibrance run --profile <name> -- %command%"; color: Pal.ink; font-size: 13px; }
+                        Text { text: "satur8 run --profile <name> -- %command%"; color: Pal.ink; font-size: 13px; }
                         Text { text: "Or follow window focus automatically:"; color: Pal.muted; font-size: 12px; }
-                        Text { text: "systemctl --user enable --now vibrance-daemon"; color: Pal.ink; font-size: 13px; }
+                        Text { text: "systemctl --user enable --now satur8-daemon"; color: Pal.ink; font-size: 13px; }
                     }
                 }
                 Rectangle { vertical-stretch: 1; }

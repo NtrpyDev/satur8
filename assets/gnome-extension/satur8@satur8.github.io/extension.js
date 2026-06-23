@@ -1,7 +1,7 @@
-// Vibrance for GNOME Shell (B4).
+// Satur8 for GNOME Shell (B4).
 //
 // Adds a saturation (digital vibrance) shader at the shell level and exposes a
-// small D-Bus interface the `vibrance` tool drives. Because it is a compositor
+// small D-Bus interface the `satur8` tool drives. Because it is a compositor
 // shader applied to already-rendered pixels, it never touches the game process
 // (VAC-safe, same category as the KWin effect) and is GPU-agnostic - it works on
 // NVIDIA Wayland too, where gamescope would otherwise be the only option.
@@ -18,7 +18,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const DBUS_IFACE = `
 <node>
-  <interface name="org.vibrance.GnomeShell">
+  <interface name="org.satur8.GnomeShell">
     <method name="SetSaturation">
       <arg type="d" name="saturation" direction="in"/>
     </method>
@@ -31,15 +31,15 @@ const DBUS_IFACE = `
 // cogl_tex_coord_in / cogl_sampler are the Cogl globals a ShaderEffect binds.
 const SHADER = `
 uniform sampler2D tex;
-uniform float vibrance;
+uniform float satur8;
 void main() {
     vec4 c = texture2D(tex, cogl_tex_coord_in[0].st);
     float luma = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
-    cogl_color_out = vec4(clamp(mix(vec3(luma), c.rgb, vibrance), 0.0, 1.0), c.a);
+    cogl_color_out = vec4(clamp(mix(vec3(luma), c.rgb, satur8), 0.0, 1.0), c.a);
 }`;
 
-const VibranceEffect = GObject.registerClass(
-class VibranceEffect extends Clutter.ShaderEffect {
+const Satur8Effect = GObject.registerClass(
+class Satur8Effect extends Clutter.ShaderEffect {
     _init(saturation) {
         super._init({shader_type: Clutter.ShaderType.FRAGMENT_SHADER});
         this.set_shader_source(SHADER);
@@ -48,7 +48,7 @@ class VibranceEffect extends Clutter.ShaderEffect {
 
     setSaturation(saturation) {
         this.set_uniform_value('tex', 0);
-        this.set_uniform_value('vibrance', parseFloat(saturation));
+        this.set_uniform_value('satur8', parseFloat(saturation));
     }
 
     vfunc_get_static_shader_source() {
@@ -56,14 +56,14 @@ class VibranceEffect extends Clutter.ShaderEffect {
     }
 });
 
-export default class VibranceExtension extends Extension {
+export default class Satur8Extension extends Extension {
     enable() {
         this._saturation = 1.0;
         this._effect = null;
         this._dbus = Gio.DBusExportedObject.wrapJSObject(DBUS_IFACE, this);
-        this._dbus.export(Gio.DBus.session, '/org/vibrance/GnomeShell');
+        this._dbus.export(Gio.DBus.session, '/org/satur8/GnomeShell');
         this._owner = Gio.bus_own_name(
-            Gio.BusType.SESSION, 'org.vibrance.GnomeShell',
+            Gio.BusType.SESSION, 'org.satur8.GnomeShell',
             Gio.BusNameOwnerFlags.NONE, null, null, null);
     }
 
@@ -86,8 +86,8 @@ export default class VibranceExtension extends Extension {
 
     _ensureEffect() {
         if (!this._effect) {
-            this._effect = new VibranceEffect(this._saturation);
-            this._target.add_effect_with_name('vibrance', this._effect);
+            this._effect = new Satur8Effect(this._saturation);
+            this._target.add_effect_with_name('satur8', this._effect);
         }
     }
 

@@ -2,7 +2,7 @@
 //!
 //! The proprietary NVIDIA driver exposes the *exact* feature VibranceGUI drives
 //! on Windows: "Digital Vibrance", over the NV-CONTROL X extension. On Linux X11
-//! the documented interface is `nvidia-settings -a "[gpu:0]/DigitalVibrance=N"`,
+//! the documented interface is `nvidia-settings -a "[gpu:0]/DigitalSatur8=N"`,
 //! N in roughly -1024..1023 (0 = neutral). This is native and zero-cost - the
 //! driver applies it in the display pipeline, not in the game.
 //!
@@ -11,22 +11,22 @@
 //! by the compositor shader backends instead (KWin/GNOME/Hyprland), not this.
 //!
 //! Untested here (no NVIDIA hardware on the dev box); gated to X11 + NVIDIA by
-//! `detect()`. The saturation->vibrance mapping is unit-tested.
+//! `detect()`. The saturation->satur8 mapping is unit-tested.
 
 use std::path::PathBuf;
 use std::process::Command;
 
-use vibrance_core::{
+use satur8_core::{
     Backend, BackendError, CostNote, Environment, Gpu, Output, Saturation, SessionType,
 };
 
 const DV_MIN: i32 = -1024;
 const DV_MAX: i32 = 1023;
 
-/// Map vibrance-core saturation (0.0..=4.0, 1.0 = neutral) onto the driver's
+/// Map satur8-core saturation (0.0..=4.0, 1.0 = neutral) onto the driver's
 /// Digital Vibrance range (-1024..=1023, 0 = neutral). Above neutral we scale
 /// up to the +max at s=4; below neutral down to -max (full desaturation) at s=0.
-pub fn saturation_to_digital_vibrance(saturation: Saturation) -> i32 {
+pub fn saturation_to_digital_satur8(saturation: Saturation) -> i32 {
     let s = saturation.get();
     let dv = if s >= 1.0 {
         ((s - 1.0) / (Saturation::MAX - 1.0)) * DV_MAX as f32
@@ -47,10 +47,10 @@ impl NvControlBackend {
         which("nvidia-settings").map(|_| NvControlBackend)
     }
 
-    fn set_vibrance(&self, dv: i32) -> Result<(), BackendError> {
+    fn set_satur8(&self, dv: i32) -> Result<(), BackendError> {
         // [gpu:0] applies to the GPU's attached displays; per-display targeting
         // ([DPY:...]) is an M7 refinement.
-        let attr = format!("[gpu:0]/DigitalVibrance={dv}");
+        let attr = format!("[gpu:0]/DigitalSatur8={dv}");
         let out = Command::new("nvidia-settings")
             .args(["-a", &attr])
             .output()
@@ -82,11 +82,11 @@ impl Backend for NvControlBackend {
     }
 
     fn apply(&mut self, _output: &Output, saturation: Saturation) -> Result<(), BackendError> {
-        self.set_vibrance(saturation_to_digital_vibrance(saturation))
+        self.set_satur8(saturation_to_digital_satur8(saturation))
     }
 
     fn reset(&mut self, _output: &Output) -> Result<(), BackendError> {
-        self.set_vibrance(0)
+        self.set_satur8(0)
     }
 }
 
@@ -103,23 +103,23 @@ mod tests {
 
     #[test]
     fn neutral_maps_to_zero() {
-        assert_eq!(saturation_to_digital_vibrance(Saturation::IDENTITY), 0);
+        assert_eq!(saturation_to_digital_satur8(Saturation::IDENTITY), 0);
     }
 
     #[test]
     fn max_maps_to_max() {
-        assert_eq!(saturation_to_digital_vibrance(Saturation::new(4.0)), DV_MAX);
+        assert_eq!(saturation_to_digital_satur8(Saturation::new(4.0)), DV_MAX);
     }
 
     #[test]
     fn zero_maps_to_min() {
-        assert_eq!(saturation_to_digital_vibrance(Saturation::new(0.0)), DV_MIN);
+        assert_eq!(saturation_to_digital_satur8(Saturation::new(0.0)), DV_MIN);
     }
 
     #[test]
     fn stays_in_range() {
         for &s in &[0.0f32, 0.5, 1.0, 1.6, 2.5, 4.0] {
-            let dv = saturation_to_digital_vibrance(Saturation::new(s));
+            let dv = saturation_to_digital_satur8(Saturation::new(s));
             assert!((DV_MIN..=DV_MAX).contains(&dv));
         }
     }

@@ -1,4 +1,4 @@
-//! `vibrance` - per-game digital vibrance for Linux.
+//! `satur8` - per-game digital vibrance for Linux.
 //!
 //! Detects the environment, picks a backend (KWin on KDE Wayland), and drives
 //! saturation from the command line - directly (`set`/`on`/`off`), as a launch
@@ -11,13 +11,13 @@ mod run;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use vibrance_core::{CostNote, Environment, Saturation};
-use vibrance_kwin::KwinBackend;
+use satur8_core::{CostNote, Environment, Saturation};
+use satur8_kwin::KwinBackend;
 
 use backend::{all_outputs, select_backend};
 
 #[derive(Parser)]
-#[command(name = "vibrance", version, about = "Per-game digital vibrance for Linux")]
+#[command(name = "satur8", version, about = "Per-game digital vibrance for Linux")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -32,11 +32,11 @@ enum Command {
         /// Blend in linear light (more correct) instead of gamma sRGB.
         #[arg(long)]
         linear: bool,
-        /// Target a specific output id (see `vibrance outputs`); default all.
+        /// Target a specific output id (see `satur8 outputs`); default all.
         #[arg(long)]
         output: Option<String>,
     },
-    /// Turn vibrance on using a saturation value (default 1.5).
+    /// Turn satur8 on using a saturation value (default 1.5).
     On {
         #[arg(default_value_t = 1.5)]
         saturation: f32,
@@ -46,10 +46,10 @@ enum Command {
     },
     /// List the outputs the active backend can target.
     Outputs,
-    /// Turn vibrance off and release any per-frame cost.
+    /// Turn satur8 off and release any per-frame cost.
     Off,
-    /// Apply vibrance, launch a game, and restore on exit. The Steam launch
-    /// option: `vibrance run --profile cs2 -- %command%`.
+    /// Apply satur8, launch a game, and restore on exit. The Steam launch
+    /// option: `satur8 run --profile cs2 -- %command%`.
     Run {
         /// Use a named profile's saturation.
         #[arg(long)]
@@ -124,7 +124,7 @@ fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> 
             .into_iter()
             .find(|o| &o.id == id)
             .with_context(|| {
-                format!("no output '{id}' on the {} backend (see `vibrance outputs`)", backend.name())
+                format!("no output '{id}' on the {} backend (see `satur8 outputs`)", backend.name())
             })?,
         None => all_outputs(),
     };
@@ -149,7 +149,7 @@ fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> 
     }
 
     println!(
-        "vibrance: saturation {:.2}{} on {} via {} backend{}",
+        "satur8: saturation {:.2}{} on {} via {} backend{}",
         clamped.get(),
         if linear && backend.supports_linear_light() { " (linear light)" } else { "" },
         target.human_name,
@@ -178,8 +178,8 @@ fn cmd_off() -> Result<()> {
     let mut backend = select_backend()?;
     backend
         .reset(&all_outputs())
-        .with_context(|| "turning vibrance off")?;
-    println!("vibrance: off ({} backend released)", backend.name());
+        .with_context(|| "turning satur8 off")?;
+    println!("satur8: off ({} backend released)", backend.name());
     Ok(())
 }
 
@@ -212,7 +212,7 @@ fn cmd_status() -> Result<()> {
 
 fn cmd_doctor() -> Result<()> {
     let envr = Environment::detect();
-    println!("vibrance doctor");
+    println!("satur8 doctor");
     println!("  session type : {}", envr.session);
     println!("  desktop      : {}", envr.desktop);
     println!("  gpu          : {}", envr.gpu);
@@ -223,9 +223,9 @@ fn cmd_doctor() -> Result<()> {
         Some(kwin) => {
             println!("  [ok] KWin reachable over D-Bus");
             match kwin.is_loaded() {
-                Ok(true) => println!("  [ok] vibrance effect is loaded"),
+                Ok(true) => println!("  [ok] satur8 effect is loaded"),
                 Ok(false) => {
-                    println!("  [..] vibrance effect installed but not loaded (run `vibrance on`)")
+                    println!("  [..] satur8 effect installed but not loaded (run `satur8 on`)")
                 }
                 Err(e) => println!("  [!!] couldn't query effect state: {e}"),
             }
@@ -241,14 +241,14 @@ fn cmd_doctor() -> Result<()> {
 
     // Zero-cost DRM CTM availability (read-only probe; never touches master).
     println!();
-    match vibrance_drm_ctm::probe_ctm() {
+    match satur8_drm_ctm::probe_ctm() {
         Ok(lines) => {
             println!("  DRM CTM (zero-cost path):");
             for l in lines {
                 println!("    {l}");
             }
             match envr.session {
-                vibrance_core::SessionType::Tty => {
+                satur8_core::SessionType::Tty => {
                     println!("    -> usable now: no display server owns DRM master")
                 }
                 other => println!(

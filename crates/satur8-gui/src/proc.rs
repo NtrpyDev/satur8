@@ -29,7 +29,7 @@ pub fn running_apps() -> Vec<RunningApp> {
         let Some(base) = target.file_name().map(|n| n.to_string_lossy().to_string()) else {
             continue;
         };
-        if base.is_empty() || base.starts_with("vibrance") {
+        if base.is_empty() || base.starts_with("satur8") {
             continue;
         }
         let app_id = steam_app_id_of(&pid);

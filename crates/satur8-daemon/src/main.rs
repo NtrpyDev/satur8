@@ -1,4 +1,4 @@
-//! `vibrance-daemon` - the always-on, event-driven trigger (PLAN.md M4/section 6).
+//! `satur8-daemon` - the always-on, event-driven trigger (PLAN.md M4/section 6).
 //!
 //! KWin doesn't broadcast the active window to third parties, so the companion
 //! KWin script (`assets/kwin-script/`) forwards each activation to us by calling
@@ -8,17 +8,17 @@
 //! On each activation we match the focused window's class against the profiles
 //! file: a match applies that profile's saturation; focusing anything else
 //! restores the desktop default. This complements the launch wrapper (M2) for
-//! people who want vibrance to follow focus rather than wrap a launch command.
+//! people who want satur8 to follow focus rather than wrap a launch command.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use vibrance_core::{Backend, Output, Profiles, Saturation};
-use vibrance_kwin::KwinBackend;
+use satur8_core::{Backend, Output, Profiles, Saturation};
+use satur8_kwin::KwinBackend;
 use zbus::interface;
 
-const SERVICE: &str = "org.vibrance.Daemon";
-const PATH: &str = "/org/vibrance/Daemon";
+const SERVICE: &str = "org.satur8.Daemon";
+const PATH: &str = "/org/satur8/Daemon";
 
 fn all_outputs() -> Output {
     Output {
@@ -39,10 +39,10 @@ impl Daemon {
         let profiles = load_profiles();
         let backend = KwinBackend::detect();
         if backend.is_none() {
-            eprintln!("vibrance-daemon: warning - no KWin backend; will track focus but can't apply");
+            eprintln!("satur8-daemon: warning - no KWin backend; will track focus but can't apply");
         }
         eprintln!(
-            "vibrance-daemon: ready, {} profile(s) loaded",
+            "satur8-daemon: ready, {} profile(s) loaded",
             profiles.profiles.len()
         );
         Daemon {
@@ -55,7 +55,7 @@ impl Daemon {
     fn apply_saturation(&mut self, sat: Saturation) {
         if let Some(b) = self.backend.as_mut() {
             if let Err(e) = b.apply(&all_outputs(), sat) {
-                eprintln!("vibrance-daemon: apply failed: {e}");
+                eprintln!("satur8-daemon: apply failed: {e}");
             }
         }
     }
@@ -69,7 +69,7 @@ impl Daemon {
                 b.apply(&all_outputs(), def)
             };
             if let Err(e) = result {
-                eprintln!("vibrance-daemon: restore failed: {e}");
+                eprintln!("satur8-daemon: restore failed: {e}");
             }
         }
     }
@@ -82,13 +82,13 @@ impl Daemon {
                     return;
                 }
                 let (name, sat) = (profile.name.clone(), profile.saturation());
-                eprintln!("vibrance-daemon: '{class}' -> profile '{name}' ({:.2})", sat.get());
+                eprintln!("satur8-daemon: '{class}' -> profile '{name}' ({:.2})", sat.get());
                 self.apply_saturation(sat);
                 self.current = Some(name);
             }
             None => {
                 if self.current.take().is_some() {
-                    eprintln!("vibrance-daemon: '{class}' has no profile -> restoring default");
+                    eprintln!("satur8-daemon: '{class}' has no profile -> restoring default");
                     self.restore_default();
                 }
             }
@@ -96,7 +96,7 @@ impl Daemon {
     }
 }
 
-#[interface(name = "org.vibrance.Daemon")]
+#[interface(name = "org.satur8.Daemon")]
 impl Daemon {
     /// Called by the KWin script on every window activation.
     fn window_activated(&mut self, class: String, _caption: String) {
@@ -107,7 +107,7 @@ impl Daemon {
     fn reload(&mut self) {
         self.profiles = load_profiles();
         eprintln!(
-            "vibrance-daemon: reloaded, {} profile(s)",
+            "satur8-daemon: reloaded, {} profile(s)",
             self.profiles.profiles.len()
         );
     }
@@ -138,7 +138,7 @@ fn profiles_path() -> Option<std::path::PathBuf> {
     } else {
         std::path::PathBuf::from(std::env::var("HOME").ok()?).join(".config")
     };
-    Some(dir.join("vibrance").join("profiles.toml"))
+    Some(dir.join("satur8").join("profiles.toml"))
 }
 
 fn main() -> Result<()> {
@@ -146,13 +146,13 @@ fn main() -> Result<()> {
     let _conn = zbus::blocking::connection::Builder::session()
         .context("connecting to the session bus")?
         .name(SERVICE)
-        .context("claiming the org.vibrance.Daemon bus name (already running?)")?
+        .context("claiming the org.satur8.Daemon bus name (already running?)")?
         .serve_at(PATH, daemon)
         .context("publishing the daemon interface")?
         .build()
         .context("starting the daemon service")?;
 
-    eprintln!("vibrance-daemon: listening on {SERVICE} {PATH}");
+    eprintln!("satur8-daemon: listening on {SERVICE} {PATH}");
     // Event-driven: nothing to do but stay alive for incoming activations.
     loop {
         std::thread::sleep(Duration::from_secs(3600));

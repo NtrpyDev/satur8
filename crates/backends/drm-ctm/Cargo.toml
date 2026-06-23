@@ -1,12 +1,12 @@
 [package]
-name = "vibrance-drm-ctm"
+name = "satur8-drm-ctm"
 version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "DRM/KMS CTM backend (B2) for Vibrance: zero-cost hardware saturation via the scanout color matrix."
+description = "DRM/KMS CTM backend (B2) for Satur8: zero-cost hardware saturation via the scanout color matrix."
 
 [dependencies]
-vibrance-core = { workspace = true }
+satur8-core = { workspace = true }
 drm = "0.15"
 anyhow = { workspace = true }

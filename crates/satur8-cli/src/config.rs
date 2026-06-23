@@ -2,17 +2,17 @@
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use vibrance_core::Profiles;
+use satur8_core::Profiles;
 
-/// `$XDG_CONFIG_HOME/vibrance/` (or `~/.config/vibrance/`).
+/// `$XDG_CONFIG_HOME/satur8/` (or `~/.config/satur8/`).
 pub fn config_dir() -> Result<PathBuf> {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
-            return Ok(PathBuf::from(xdg).join("vibrance"));
+            return Ok(PathBuf::from(xdg).join("satur8"));
         }
     }
     let home = std::env::var("HOME").context("HOME is not set")?;
-    Ok(PathBuf::from(home).join(".config").join("vibrance"))
+    Ok(PathBuf::from(home).join(".config").join("satur8"))
 }
 
 pub fn profiles_path() -> Result<PathBuf> {

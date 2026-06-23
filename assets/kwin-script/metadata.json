@@ -2,15 +2,15 @@
     "KPlugin": {
         "Authors": [
             {
-                "Name": "Vibrance"
+                "Name": "Satur8"
             }
         ],
         "Category": "Window Management",
-        "Description": "Forwards window-focus changes to the vibrance daemon so per-game profiles follow focus.",
+        "Description": "Forwards window-focus changes to the satur8 daemon so per-game profiles follow focus.",
         "EnabledByDefault": false,
-        "Id": "vibrance-focus",
+        "Id": "satur8-focus",
         "License": "GPL-3.0+",
-        "Name": "Vibrance Focus Forwarder",
+        "Name": "Satur8 Focus Forwarder",
         "Version": "0.1"
     },
     "X-Plasma-API": "javascript",

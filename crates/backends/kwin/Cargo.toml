@@ -1,12 +1,12 @@
 [package]
-name = "vibrance-kwin"
+name = "satur8-kwin"
 version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "KWin (KDE Plasma Wayland) backend for Vibrance: drives the shipped saturation effect over D-Bus."
+description = "KWin (KDE Plasma Wayland) backend for Satur8: drives the shipped saturation effect over D-Bus."
 
 [dependencies]
-vibrance-core = { workspace = true }
+satur8-core = { workspace = true }
 zbus = { workspace = true }
 anyhow = { workspace = true }

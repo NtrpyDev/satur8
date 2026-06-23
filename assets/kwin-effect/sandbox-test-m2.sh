@@ -3,7 +3,7 @@
 # an isolated config dir. Nothing touches the user's desktop or real config.
 set -uo pipefail
 
-VIB="${1:-$HOME/vibrance/target/debug/vibrance}"
+VIB="${1:-$HOME/satur8/target/debug/satur8}"
 CFG="$(mktemp -d)"
 
 dbus-run-session -- bash -s "$VIB" "$CFG" <<'INNER'
@@ -19,8 +19,8 @@ for _ in $(seq 1 60); do
     sleep 0.25
 done
 
-sat() { qdbus6 org.kde.KWin /org/kde/KWin/Effect/Vibrance1 org.kde.kwin.Effect.Vibrance.saturation 2>/dev/null; }
-loaded() { qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.isEffectLoaded vibrance; }
+sat() { qdbus6 org.kde.KWin /org/kde/KWin/Effect/Satur81 org.kde.kwin.Effect.Satur8.saturation 2>/dev/null; }
+loaded() { qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.isEffectLoaded satur8; }
 
 echo "### profile add + list"
 "$VIB" profile add cs2 1.6 --exe cs2 --steam-app-id 730

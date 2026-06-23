@@ -1,8 +1,8 @@
 {
-    "uuid": "vibrance@vibrance.github.io",
-    "name": "Vibrance",
-    "description": "Per-game digital vibrance for GNOME: a shell-level saturation shader controlled over D-Bus by the vibrance tool. Applies after the game renders (never injected), so it is GPU-agnostic and works on NVIDIA Wayland too.",
+    "uuid": "satur8@satur8.github.io",
+    "name": "Satur8",
+    "description": "Per-game digital vibrance for GNOME: a shell-level saturation shader controlled over D-Bus by the satur8 tool. Applies after the game renders (never injected), so it is GPU-agnostic and works on NVIDIA Wayland too.",
     "shell-version": ["45", "46", "47", "48"],
-    "url": "https://github.com/REPLACE/vibrance",
+    "url": "https://github.com/REPLACE/satur8",
     "session-modes": ["user"]
 }

@@ -3,24 +3,24 @@
 //! KWin owns DRM master and exposes no client CTM API, so we ship a tiny
 //! single-purpose saturation effect (see `assets/kwin-effect/`) and drive it
 //! over D-Bus from here. Loading/unloading the effect is how we turn the GPU
-//! pass on and off, so when vibrance is "off" there is genuinely zero cost.
+//! pass on and off, so when satur8 is "off" there is genuinely zero cost.
 //!
 //! Nothing here touches the game process - we only talk to the compositor.
 
-use vibrance_core::{
+use satur8_core::{
     Backend, BackendError, CostNote, Desktop, Environment, Output, Saturation, SessionType,
 };
 use zbus::blocking::Connection;
 
 /// KWin derives an effect's id from the installed plugin's filename. We install
-/// the effect as `vibrance.so`, so the id KWin uses is `vibrance`.
-const EFFECT_ID: &str = "vibrance";
+/// the effect as `satur8.so`, so the id KWin uses is `satur8`.
+const EFFECT_ID: &str = "satur8";
 
 const KWIN_SERVICE: &str = "org.kde.KWin";
 const EFFECTS_PATH: &str = "/Effects";
 const EFFECTS_IFACE: &str = "org.kde.kwin.Effects";
-const EFFECT_PATH: &str = "/org/kde/KWin/Effect/Vibrance1";
-const EFFECT_IFACE: &str = "org.kde.kwin.Effect.Vibrance";
+const EFFECT_PATH: &str = "/org/kde/KWin/Effect/Satur81";
+const EFFECT_IFACE: &str = "org.kde.kwin.Effect.Satur8";
 
 pub struct KwinBackend {
     conn: Connection,
@@ -75,7 +75,7 @@ impl KwinBackend {
         let ok = reply.body().deserialize::<bool>().map_err(apply_err)?;
         if !ok {
             return Err(BackendError::Apply(format!(
-                "KWin refused to load effect '{EFFECT_ID}'. Is vibrance.so installed \
+                "KWin refused to load effect '{EFFECT_ID}'. Is satur8.so installed \
                  in a kwin/effects/plugins dir on KWin's plugin path?"
             )));
         }

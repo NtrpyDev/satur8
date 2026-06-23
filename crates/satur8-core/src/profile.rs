@@ -1,6 +1,6 @@
 //! Per-game profiles: how a game is recognised and what saturation it gets.
 //!
-//! Stored as TOML at `$XDG_CONFIG_HOME/vibrance/profiles.toml`. The launch
+//! Stored as TOML at `$XDG_CONFIG_HOME/satur8/profiles.toml`. The launch
 //! wrapper (M2) and the focus watcher (M4) both resolve a running game to a
 //! profile through [`Profiles::match_*`].
 

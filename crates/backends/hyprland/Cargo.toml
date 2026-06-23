@@ -1,11 +1,11 @@
 [package]
-name = "vibrance-hyprland"
+name = "satur8-hyprland"
 version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Hyprland backend (B3) for Vibrance: applies a saturation screen shader via hyprctl."
+description = "Hyprland backend (B3) for Satur8: applies a saturation screen shader via hyprctl."
 
 [dependencies]
-vibrance-core = { workspace = true }
+satur8-core = { workspace = true }
 anyhow = { workspace = true }

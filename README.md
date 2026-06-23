@@ -1,4 +1,4 @@
-# Vibrance (working name)
+# Satur8 (working name)
 
 Per-game **digital vibrance / saturation** for Linux - the thing VibranceGUI
 does on Windows, built for Wayland and X11.
@@ -14,7 +14,7 @@ packaging/install.sh            # per-user install (no root)
 packaging/install.sh --system   # system install (KWin effect to the system Qt plugin dir)
 ```
 
-This builds the Rust binaries (`vibrance`, `vibrance-daemon`, `vibrance-tray`),
+This builds the Rust binaries (`satur8`, `satur8-daemon`, `satur8-tray`),
 the KWin effect, and installs the KWin focus script, GNOME extension, a systemd
 user unit, and a desktop entry. An Arch [`PKGBUILD`](packaging/PKGBUILD) is
 provided too.
@@ -22,27 +22,27 @@ provided too.
 ## Usage
 
 ```sh
-vibrance on 1.5                         # boost saturation now
-vibrance off                            # restore, release all per-frame cost
-vibrance status                         # environment + backend + current state
-vibrance doctor                         # diagnose backends (incl. DRM CTM probe)
+satur8 on 1.5                         # boost saturation now
+satur8 off                            # restore, release all per-frame cost
+satur8 status                         # environment + backend + current state
+satur8 doctor                         # diagnose backends (incl. DRM CTM probe)
 
 # Per-game, as a Steam launch option (apply on launch, restore on exit):
-vibrance run --profile cs2 -- %command%
+satur8 run --profile cs2 -- %command%
 
 # Profiles:
-vibrance profile add cs2 1.6 --exe cs2 --steam-app-id 730
-vibrance profile list
+satur8 profile add cs2 1.6 --exe cs2 --steam-app-id 730
+satur8 profile list
 
 # Universal fallback for niche compositors:
-vibrance run --via gamescope --saturation 1.5 -- <game>
+satur8 run --via gamescope --saturation 1.5 -- <game>
 ```
 
 Always-on, follow-focus mode (KDE): enable the daemon + the KWin focus script:
 
 ```sh
-systemctl --user enable --now vibrance-daemon
-kwriteconfig6 --file kwinrc --group Plugins --key vibrance-focusEnabled true
+systemctl --user enable --now satur8-daemon
+kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
 qdbus6 org.kde.KWin /KWin reconfigure
 ```
 
@@ -54,21 +54,21 @@ by design.
 
 ## How it stays safe with anti-cheat
 
-Vibrance **only changes the display color pipeline** - either the GPU's hardware
+Satur8 **only changes the display color pipeline** - either the GPU's hardware
 scanout color matrix or the compositor - *after* the game has rendered its
 frame. It never injects into, reads, or modifies the game process. That is the
 same category as turning up saturation on your monitor's OSD.
 
 This is the key difference from tools like **vkBasalt** or in-game **ReShade**,
 which load *inside the game process* and are exactly what CS2's Trusted Mode is
-built to block. Vibrance deliberately does not do that.
+built to block. Satur8 deliberately does not do that.
 
 This is a description of what the tool does and does not do - not a guarantee
 about any anti-cheat's future behavior.
 
 ## Lowest possible cost
 
-Where the environment allows it (X11, Hyprland, TTY), Vibrance sets the GPU's
+Where the environment allows it (X11, Hyprland, TTY), Satur8 sets the GPU's
 **hardware Color Transformation Matrix**: a one-time setup with **zero**
 per-frame CPU or GPU cost - it matters because CS2 is CPU-bound. On KDE Wayland
 (the first supported target) it uses a tiny single-purpose compositor shader; the

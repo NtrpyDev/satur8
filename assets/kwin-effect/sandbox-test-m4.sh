@@ -4,8 +4,8 @@
 # config + private bus. Nothing touches the user's desktop.
 set -uo pipefail
 
-VIB="${1:-$HOME/vibrance/target/debug/vibrance}"
-DAEMON="${2:-$HOME/vibrance/target/debug/vibrance-daemon}"
+VIB="${1:-$HOME/satur8/target/debug/satur8}"
+DAEMON="${2:-$HOME/satur8/target/debug/satur8-daemon}"
 CFG="$(mktemp -d)"
 
 dbus-run-session -- bash -s "$VIB" "$DAEMON" "$CFG" <<'INNER'
@@ -21,19 +21,19 @@ for _ in $(seq 1 60); do
     sleep 0.25
 done
 
-sat() { qdbus6 org.kde.KWin /org/kde/KWin/Effect/Vibrance1 org.kde.kwin.Effect.Vibrance.saturation 2>/dev/null; }
-loaded() { qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.isEffectLoaded vibrance; }
-activate() { qdbus6 org.vibrance.Daemon /org/vibrance/Daemon org.vibrance.Daemon.WindowActivated "$1" "$2"; }
-active_profile() { qdbus6 org.vibrance.Daemon /org/vibrance/Daemon org.vibrance.Daemon.activeProfile 2>/dev/null; }
+sat() { qdbus6 org.kde.KWin /org/kde/KWin/Effect/Satur81 org.kde.kwin.Effect.Satur8.saturation 2>/dev/null; }
+loaded() { qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.isEffectLoaded satur8; }
+activate() { qdbus6 org.satur8.Daemon /org/satur8/Daemon org.satur8.Daemon.WindowActivated "$1" "$2"; }
+active_profile() { qdbus6 org.satur8.Daemon /org/satur8/Daemon org.satur8.Daemon.activeProfile 2>/dev/null; }
 
 # A game profile keyed by window class.
 "$VIB" profile add cs2 1.6 --window-class cs2 >/dev/null
 
 # Start the daemon (it reads the same profiles file).
-"$DAEMON" >/tmp/vibrance-daemon-m4.log 2>&1 &
+"$DAEMON" >/tmp/satur8-daemon-m4.log 2>&1 &
 DPID=$!
 for _ in $(seq 1 40); do
-    qdbus6 org.vibrance.Daemon /org/vibrance/Daemon org.vibrance.Daemon.activeProfile >/dev/null 2>&1 && break
+    qdbus6 org.satur8.Daemon /org/satur8/Daemon org.satur8.Daemon.activeProfile >/dev/null 2>&1 && break
     sleep 0.25
 done
 
@@ -55,7 +55,7 @@ sleep 0.4
 echo "loaded=$(loaded)  saturation=$(sat)  active_profile=$(active_profile)  (expect true / 1.6 / cs2)"
 echo
 
-echo "### daemon log:"; sed 's/^/    /' /tmp/vibrance-daemon-m4.log
+echo "### daemon log:"; sed 's/^/    /' /tmp/satur8-daemon-m4.log
 INNER
 
 rm -rf "$CFG"

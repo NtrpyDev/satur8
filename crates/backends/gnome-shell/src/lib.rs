@@ -2,21 +2,21 @@
 //!
 //! Mutter exposes no client CTM API, but our GNOME Shell extension
 //! (`assets/gnome-extension/`) applies a saturation shader at the shell level
-//! and publishes `org.vibrance.GnomeShell`. This backend just drives that over
+//! and publishes `org.satur8.GnomeShell`. This backend just drives that over
 //! D-Bus - the same shape as the KWin backend. Because it's a compositor shader,
 //! it is GPU-agnostic and works on NVIDIA Wayland too.
 //!
 //! `detect()` requires the extension's service to be on the bus, so if the user
 //! hasn't enabled it we fall through cleanly. Untested on the dev box (no GNOME).
 
-use vibrance_core::{
+use satur8_core::{
     Backend, BackendError, CostNote, Desktop, Environment, Output, Saturation, SessionType,
 };
 use zbus::blocking::Connection;
 
-const SERVICE: &str = "org.vibrance.GnomeShell";
-const PATH: &str = "/org/vibrance/GnomeShell";
-const IFACE: &str = "org.vibrance.GnomeShell";
+const SERVICE: &str = "org.satur8.GnomeShell";
+const PATH: &str = "/org/satur8/GnomeShell";
+const IFACE: &str = "org.satur8.GnomeShell";
 
 pub struct GnomeBackend {
     conn: Connection,

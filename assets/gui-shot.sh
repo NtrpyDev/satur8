@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render vibrance-gui on a throwaway virtual X display and screenshot it, so it
+# Render satur8-gui on a throwaway virtual X display and screenshot it, so it
 # never appears on the real desktop. Intended to run as a background command
 # (foreground sleep is blocked in this environment).
 #   assets/gui-shot.sh [out.png] [nav]
@@ -21,7 +21,7 @@ sleep 2
 # Software renderer = no GL needed on the virtual display. VIBRANCE_GUI_NAV lets
 # us screenshot a specific page.
 WINIT_UNIX_BACKEND=x11 SLINT_BACKEND=winit-software VIBRANCE_GUI_NAV="$NAV" \
-    "$HOME/vibrance/target/debug/vibrance-gui" >/tmp/gui-x.log 2>&1 &
+    "$HOME/satur8/target/debug/satur8-gui" >/tmp/gui-x.log 2>&1 &
 GPID=$!
 sleep 5
 

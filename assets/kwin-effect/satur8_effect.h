@@ -1,5 +1,5 @@
 /*
-    Vibrance - a single-purpose KWin saturation effect.
+    Satur8 - a single-purpose KWin saturation effect.
 
     This is the compositor half of the KWin (B1) backend. It redirects windows
     into an offscreen texture and runs one tiny GLSL pass that boosts saturation
@@ -24,14 +24,14 @@ class GLShader;
 class EffectWindow;
 }
 
-class VibranceEffect : public KWin::OffscreenEffect
+class Satur8Effect : public KWin::OffscreenEffect
 {
     Q_OBJECT
-    Q_CLASSINFO("D-Bus Interface", "org.kde.kwin.Effect.Vibrance")
+    Q_CLASSINFO("D-Bus Interface", "org.kde.kwin.Effect.Satur8")
 
 public:
-    VibranceEffect();
-    ~VibranceEffect() override;
+    Satur8Effect();
+    ~Satur8Effect() override;
 
     static bool supported();
 
@@ -52,7 +52,7 @@ protected:
 
 public Q_SLOTS:
     /// Live saturation control over D-Bus. 1.0 = unchanged, >1 = more vivid,
-    /// 0 = greyscale. Clamped to vibrance-core's 0..=4 range.
+    /// 0 = greyscale. Clamped to satur8-core's 0..=4 range.
     Q_SCRIPTABLE void setSaturation(double saturation);
     Q_SCRIPTABLE double saturation() const;
     /// Blend in linear light (more correct) instead of gamma-encoded sRGB.

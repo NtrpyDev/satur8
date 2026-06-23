@@ -1,6 +1,6 @@
-//! `vibrance-tray` - a StatusNotifierItem tray for quick saturation control.
+//! `satur8-tray` - a StatusNotifierItem tray for quick saturation control.
 //!
-//! A lightweight system-tray control (the GUI half of M6): toggle vibrance and
+//! A lightweight system-tray control (the GUI half of M6): toggle satur8 and
 //! pick a saturation preset without touching the terminal. It drives the same
 //! backends as the CLI.
 //!
@@ -13,7 +13,7 @@ use std::thread;
 use ksni::menu::{MenuItem, StandardItem};
 use ksni::Tray;
 
-use vibrance_core::{Backend, Output, Saturation};
+use satur8_core::{Backend, Output, Saturation};
 
 /// Work items handed from menu callbacks to the apply thread, so the menu never
 /// blocks on D-Bus.
@@ -31,11 +31,11 @@ fn all_outputs() -> Output {
 
 /// Minimal backend selector (mirrors the CLI's order) so the tray is standalone.
 fn select_backend() -> Option<Box<dyn Backend>> {
-    use vibrance_drm_ctm::DrmCtmBackend;
-    use vibrance_gnome::GnomeBackend;
-    use vibrance_hyprland::HyprlandBackend;
-    use vibrance_kwin::KwinBackend;
-    use vibrance_nv_control::NvControlBackend;
+    use satur8_drm_ctm::DrmCtmBackend;
+    use satur8_gnome::GnomeBackend;
+    use satur8_hyprland::HyprlandBackend;
+    use satur8_kwin::KwinBackend;
+    use satur8_nv_control::NvControlBackend;
 
     if let Some(b) = KwinBackend::detect() {
         return Some(Box::new(b));
@@ -61,7 +61,7 @@ fn spawn_apply_thread() -> Sender<Action> {
     thread::spawn(move || {
         let mut backend = select_backend();
         if backend.is_none() {
-            eprintln!("vibrance-tray: no usable backend in this session");
+            eprintln!("satur8-tray: no usable backend in this session");
         }
         for action in rx {
             let Some(b) = backend.as_mut() else { continue };
@@ -70,24 +70,24 @@ fn spawn_apply_thread() -> Sender<Action> {
                 Action::Off => b.reset(&all_outputs()),
             };
             if let Err(e) = result {
-                eprintln!("vibrance-tray: {e}");
+                eprintln!("satur8-tray: {e}");
             }
         }
     });
     tx
 }
 
-struct VibranceTray {
+struct Satur8Tray {
     on: bool,
     saturation: f32,
     tx: Sender<Action>,
 }
 
-impl VibranceTray {
+impl Satur8Tray {
     fn preset(&self, label: &str, value: f32) -> MenuItem<Self> {
         StandardItem {
             label: label.into(),
-            activate: Box::new(move |t: &mut VibranceTray| {
+            activate: Box::new(move |t: &mut Satur8Tray| {
                 t.on = true;
                 t.saturation = value;
                 let _ = t.tx.send(Action::Set(value));
@@ -98,13 +98,13 @@ impl VibranceTray {
     }
 }
 
-impl Tray for VibranceTray {
+impl Tray for Satur8Tray {
     fn id(&self) -> String {
-        "vibrance".into()
+        "satur8".into()
     }
 
     fn title(&self) -> String {
-        "Vibrance".into()
+        "Satur8".into()
     }
 
     fn icon_name(&self) -> String {
@@ -113,7 +113,7 @@ impl Tray for VibranceTray {
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            title: "Vibrance".into(),
+            title: "Satur8".into(),
             description: if self.on {
                 format!("On - saturation {:.2}", self.saturation)
             } else {
@@ -128,9 +128,9 @@ impl Tray for VibranceTray {
         vec![
             StandardItem {
                 label: if self.on {
-                    format!("Vibrance: on ({:.2})", self.saturation)
+                    format!("Satur8: on ({:.2})", self.saturation)
                 } else {
-                    "Vibrance: off".into()
+                    "Satur8: off".into()
                 },
                 enabled: false,
                 ..Default::default()
@@ -143,7 +143,7 @@ impl Tray for VibranceTray {
             MenuItem::Separator,
             StandardItem {
                 label: "Off".into(),
-                activate: Box::new(|t: &mut VibranceTray| {
+                activate: Box::new(|t: &mut Satur8Tray| {
                     t.on = false;
                     let _ = t.tx.send(Action::Off);
                 }),
@@ -164,7 +164,7 @@ fn main() -> anyhow::Result<()> {
     use ksni::blocking::TrayMethods;
 
     let tx = spawn_apply_thread();
-    let tray = VibranceTray {
+    let tray = Satur8Tray {
         on: false,
         saturation: 1.5,
         tx,
@@ -173,7 +173,7 @@ fn main() -> anyhow::Result<()> {
         .spawn()
         .map_err(|e| anyhow::anyhow!("couldn't register tray (no StatusNotifier host?): {e}"))?;
 
-    eprintln!("vibrance-tray: running. Use the tray icon to toggle vibrance.");
+    eprintln!("satur8-tray: running. Use the tray icon to toggle satur8.");
     // Keep the process alive; the tray service runs in the background.
     loop {
         thread::park();

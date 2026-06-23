@@ -26,8 +26,8 @@ use drm::control::{
 };
 use drm::{ClientCapability, Device as BasicDevice};
 
-use vibrance_core::ctm::drm_ctm_blob_bytes;
-use vibrance_core::{
+use satur8_core::ctm::drm_ctm_blob_bytes;
+use satur8_core::{
     Backend, BackendError, CostNote, Environment, Output, Saturation, SessionType,
 };
 

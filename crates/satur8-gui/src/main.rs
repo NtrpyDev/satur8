@@ -1,6 +1,6 @@
-//! `vibrance-gui` - the Vibrance desktop app (Slint).
+//! `satur8-gui` - the Satur8 desktop app (Slint).
 //!
-//! Sidebar + per-game profile rows with the game's real Steam icon, a vibrance
+//! Sidebar + per-game profile rows with the game's real Steam icon, a satur8
 //! slider and an enable toggle; a before/after preview built from the game's own
 //! Steam art with the saturation applied; an output selector and an activity log.
 //! Reads/writes the same `profiles.toml` the CLI and daemon use.
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
-use vibrance_core::{Backend, MatchRule, Output, Profile, Profiles, Saturation};
+use satur8_core::{Backend, MatchRule, Output, Profile, Profiles, Saturation};
 
 slint::include_modules!();
 
@@ -90,7 +90,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Activity
     let activity = Rc::new(VecModel::<LogRow>::default());
-    log(&activity, true, "Started Vibrance");
+    log(&activity, true, "Started Satur8");
     match state.borrow().backend.as_ref().map(|b| b.name().to_string()) {
         Some(name) => log(&activity, false, &format!("{name} backend active")),
         None => log(&activity, false, "No supported backend in this session"),
@@ -457,11 +457,11 @@ fn add_or_update(profiles: &mut Profiles, exe: &str, app_id: Option<u32>, satura
 }
 
 fn select_backend() -> Option<Box<dyn Backend>> {
-    use vibrance_drm_ctm::DrmCtmBackend;
-    use vibrance_gnome::GnomeBackend;
-    use vibrance_hyprland::HyprlandBackend;
-    use vibrance_kwin::KwinBackend;
-    use vibrance_nv_control::NvControlBackend;
+    use satur8_drm_ctm::DrmCtmBackend;
+    use satur8_gnome::GnomeBackend;
+    use satur8_hyprland::HyprlandBackend;
+    use satur8_kwin::KwinBackend;
+    use satur8_nv_control::NvControlBackend;
 
     if let Some(b) = KwinBackend::detect() {
         return Some(Box::new(b));
@@ -484,10 +484,10 @@ fn select_backend() -> Option<Box<dyn Backend>> {
 fn config_dir() -> PathBuf {
     if let Ok(x) = std::env::var("XDG_CONFIG_HOME") {
         if !x.is_empty() {
-            return PathBuf::from(x).join("vibrance");
+            return PathBuf::from(x).join("satur8");
         }
     }
-    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config").join("vibrance")
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config").join("satur8")
 }
 fn load_profiles() -> Profiles {
     match std::fs::read_to_string(config_dir().join("profiles.toml")) {

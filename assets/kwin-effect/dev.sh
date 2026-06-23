@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build, install and (re)load the Vibrance KWin effect on a live KDE Wayland
+# Build, install and (re)load the Satur8 KWin effect on a live KDE Wayland
 # session. Usage:
 #   ./dev.sh build              # configure + compile only
 #   ./dev.sh install            # system install via pkexec (KWin scans it now)
@@ -11,8 +11,8 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 build_dir="$here/build"
-so="$build_dir/vibrance.so"
-effect_id="vibrance"
+so="$build_dir/satur8.so"
+effect_id="satur8"
 
 # KWin already has this on its Qt plugin search path, so a system install is
 # picked up by loadEffect immediately - no compositor restart, no relogin.
@@ -29,17 +29,17 @@ cmd_build() {
 cmd_install() {
     # Unattended root install. Primes sudo from the stored password if present,
     # otherwise falls back to an interactive prompt.
-    local pass="$HOME/.config/vibrance/sudo-pass"
+    local pass="$HOME/.config/satur8/sudo-pass"
     if [ -r "$pass" ]; then
         sudo -S -v < "$pass" 2>/dev/null
     fi
-    sudo sh -c "mkdir -p '$sys_dir' && cp '$so' '$sys_dir/vibrance.so' && chmod 0755 '$sys_dir/vibrance.so'"
+    sudo sh -c "mkdir -p '$sys_dir' && cp '$so' '$sys_dir/satur8.so' && chmod 0755 '$sys_dir/satur8.so'"
     echo "installed -> $sys_dir"
 }
 
 cmd_install_user() {
     mkdir -p "$user_dir"
-    cp "$so" "$user_dir/vibrance.so"
+    cp "$so" "$user_dir/satur8.so"
     echo "installed -> $user_dir (add this dir's root to QT_PLUGIN_PATH and re-login)"
 }
 
@@ -47,7 +47,7 @@ cmd_load()   { dbus_effects loadEffect "$effect_id"; }
 cmd_unload() { dbus_effects unloadEffect "$effect_id"; }
 cmd_reload() { dbus_effects unloadEffect "$effect_id" || true; dbus_effects loadEffect "$effect_id"; }
 cmd_loaded() { dbus_effects isEffectLoaded "$effect_id"; }
-cmd_set()    { qdbus6 org.kde.KWin /org/kde/KWin/Effect/Vibrance1 org.kde.kwin.Effect.Vibrance.setSaturation "$1"; }
+cmd_set()    { qdbus6 org.kde.KWin /org/kde/KWin/Effect/Satur81 org.kde.kwin.Effect.Satur8.setSaturation "$1"; }
 
 case "${1:-}" in
     build)        cmd_build ;;

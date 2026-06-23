@@ -1,4 +1,4 @@
-//! Vibrance core: the parts every backend shares.
+//! Satur8 core: the parts every backend shares.
 //!
 //! The only real logic here is the saturation matrix. Every backend (KWin
 //! shader, DRM CTM, Hyprland CTM, gamescope reshade) applies the *same* 3x3

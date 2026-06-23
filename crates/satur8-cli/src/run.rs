@@ -1,10 +1,10 @@
-//! The launch wrapper: `vibrance run [...] -- <game command>`.
+//! The launch wrapper: `satur8 run [...] -- <game command>`.
 //!
 //! This is the primary, zero-polling trigger (PLAN.md section 6). We apply the
 //! saturation, spawn the game, wait, and restore on exit - there is no watcher
 //! process running during play. It is the Steam launch-option path:
 //!
-//!   vibrance run --profile cs2 -- %command%
+//!   satur8 run --profile cs2 -- %command%
 //!
 //! Restore is best-effort-guaranteed: whatever ends the game (normal exit,
 //! Ctrl-C, or Steam's SIGTERM), we forward the signal to the game and always
@@ -14,7 +14,7 @@ use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;
 use std::thread;
-use vibrance_core::{Profiles, Saturation};
+use satur8_core::{Profiles, Saturation};
 
 use crate::backend::{all_outputs, select_backend};
 use crate::config;
@@ -31,7 +31,7 @@ pub struct RunArgs {
 
 pub fn run(args: RunArgs) -> Result<i32> {
     if args.command.is_empty() {
-        bail!("nothing to run. Usage: vibrance run [--profile NAME | --saturation S] -- <command>");
+        bail!("nothing to run. Usage: satur8 run [--profile NAME | --saturation S] -- <command>");
     }
 
     let profiles = config::load_profiles().unwrap_or_default();
@@ -42,11 +42,11 @@ pub fn run(args: RunArgs) -> Result<i32> {
     if args.via.as_deref() == Some("gamescope") {
         let sat = resolved.unwrap_or(Saturation::IDENTITY);
         eprintln!(
-            "vibrance: {:.2} via gamescope (nested compositor: extra pass + latency), launching {}",
+            "satur8: {:.2} via gamescope (nested compositor: extra pass + latency), launching {}",
             sat.get(),
             args.command[0]
         );
-        return vibrance_gamescope::run(sat, &args.gamescope_args, &args.command)
+        return satur8_gamescope::run(sat, &args.gamescope_args, &args.command)
             .context("running via gamescope");
     }
     if let Some(other) = &args.via {
@@ -60,19 +60,19 @@ pub fn run(args: RunArgs) -> Result<i32> {
             .apply(&all_outputs(), sat)
             .context("applying saturation before launch")?;
         eprintln!(
-            "vibrance: {:.2} via {} backend, launching {}",
+            "satur8: {:.2} via {} backend, launching {}",
             sat.get(),
             backend.name(),
             args.command[0]
         );
     } else {
         eprintln!(
-            "vibrance: no matching profile and no --saturation; launching {} without changes",
+            "satur8: no matching profile and no --saturation; launching {} without changes",
             args.command[0]
         );
     }
 
-    let restore = |b: &mut Box<dyn vibrance_core::Backend>| {
+    let restore = |b: &mut Box<dyn satur8_core::Backend>| {
         let restore_to = profiles.default_saturation();
         let result = if restore_to.is_identity() {
             b.reset(&all_outputs())
@@ -80,7 +80,7 @@ pub fn run(args: RunArgs) -> Result<i32> {
             b.apply(&all_outputs(), restore_to)
         };
         if let Err(e) = result {
-            eprintln!("vibrance: warning, failed to restore saturation: {e}");
+            eprintln!("satur8: warning, failed to restore saturation: {e}");
         }
     };
 
@@ -135,13 +135,13 @@ fn resolve_saturation(profiles: &Profiles, args: &RunArgs) -> Result<Option<Satu
     if let Some(name) = &args.profile {
         let p = profiles
             .by_name(name)
-            .with_context(|| format!("no profile named '{name}' (see `vibrance profile list`)"))?;
+            .with_context(|| format!("no profile named '{name}' (see `satur8 profile list`)"))?;
         return Ok(Some(p.saturation()));
     }
     // Try to auto-match by the launched executable's basename.
     let exe = exe_basename(&args.command[0]);
     if let Some(p) = profiles.match_exe(&exe) {
-        eprintln!("vibrance: matched profile '{}' by exe '{exe}'", p.name);
+        eprintln!("satur8: matched profile '{}' by exe '{exe}'", p.name);
         return Ok(Some(p.saturation()));
     }
     Ok(None)

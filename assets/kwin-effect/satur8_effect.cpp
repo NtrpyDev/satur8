@@ -1,10 +1,10 @@
 /*
-    Vibrance KWin saturation effect - implementation.
+    Satur8 KWin saturation effect - implementation.
 
     SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-#include "vibrance_effect.h"
+#include "satur8_effect.h"
 
 #include <effect/effecthandler.h>
 #include <opengl/glshader.h>
@@ -14,13 +14,13 @@
 
 #include <algorithm>
 
-// Rec.709 luma weights. These MUST match vibrance-core's LUMA_* so the look is
+// Rec.709 luma weights. These MUST match satur8-core's LUMA_* so the look is
 // identical to every other backend (DRM CTM, Hyprland, gamescope).
 static constexpr float kLumaR = 0.2126f;
 static constexpr float kLumaG = 0.7152f;
 static constexpr float kLumaB = 0.0722f;
 
-// Single saturation pass. Same math as Saturation::matrix() in vibrance-core,
+// Single saturation pass. Same math as Saturation::matrix() in satur8-core,
 // done per-pixel: out = mix(luma, in, s), which for s > 1 extrapolates away from
 // grey (more vivid). KWin textures are premultiplied-alpha, so we divide alpha
 // out before mixing and multiply it back afterwards. KWin prepends the right
@@ -32,7 +32,7 @@ static constexpr float kLumaB = 0.0722f;
 // VibranceGUI's perceptual, gamma-space behaviour so numbers feel familiar.
 static const QByteArray kFragment = QByteArrayLiteral(
     "uniform sampler2D sampler;\n"
-    "uniform float vibrance;\n"
+    "uniform float satur8;\n"
     "uniform vec3 luma;\n"
     "uniform int linearize;\n"
     "in vec2 texcoord0;\n"
@@ -52,40 +52,40 @@ static const QByteArray kFragment = QByteArrayLiteral(
     "    if (linearize != 0) {\n"
     "        rgb = toLinear(rgb);\n"
     "        float y = dot(rgb, luma);\n"
-    "        rgb = toSrgb(clamp(mix(vec3(y), rgb, vibrance), 0.0, 1.0));\n"
+    "        rgb = toSrgb(clamp(mix(vec3(y), rgb, satur8), 0.0, 1.0));\n"
     "    } else {\n"
     "        float y = dot(rgb, luma);\n"
-    "        rgb = clamp(mix(vec3(y), rgb, vibrance), 0.0, 1.0);\n"
+    "        rgb = clamp(mix(vec3(y), rgb, satur8), 0.0, 1.0);\n"
     "    }\n"
     "    fragColor = vec4(rgb * tex.a, tex.a);\n"
     "}\n");
 
-static const QString kDBusPath = QStringLiteral("/org/kde/KWin/Effect/Vibrance1");
+static const QString kDBusPath = QStringLiteral("/org/kde/KWin/Effect/Satur81");
 
-VibranceEffect::VibranceEffect()
+Satur8Effect::Satur8Effect()
 {
     QDBusConnection::sessionBus().registerObject(
         kDBusPath, this, QDBusConnection::ExportScriptableContents);
 
     connect(KWin::effects, &KWin::EffectsHandler::windowAdded,
-            this, &VibranceEffect::redirectWindow);
+            this, &Satur8Effect::redirectWindow);
     const auto windows = KWin::effects->stackingOrder();
     for (KWin::EffectWindow *w : windows) {
         redirectWindow(w);
     }
 }
 
-VibranceEffect::~VibranceEffect()
+Satur8Effect::~Satur8Effect()
 {
     QDBusConnection::sessionBus().unregisterObject(kDBusPath);
 }
 
-bool VibranceEffect::supported()
+bool Satur8Effect::supported()
 {
     return KWin::effects->isOpenGLCompositing() && KWin::OffscreenEffect::supported();
 }
 
-bool VibranceEffect::ensureShader()
+bool Satur8Effect::ensureShader()
 {
     if (m_shader) {
         return true;
@@ -102,7 +102,7 @@ bool VibranceEffect::ensureShader()
     return true;
 }
 
-void VibranceEffect::redirectWindow(KWin::EffectWindow *w)
+void Satur8Effect::redirectWindow(KWin::EffectWindow *w)
 {
     if (!w || !ensureShader()) {
         return;
@@ -111,7 +111,7 @@ void VibranceEffect::redirectWindow(KWin::EffectWindow *w)
     setShader(w, m_shader.get());
 }
 
-void VibranceEffect::drawWindow(const KWin::RenderTarget &renderTarget,
+void Satur8Effect::drawWindow(const KWin::RenderTarget &renderTarget,
                                 const KWin::RenderViewport &viewport,
                                 KWin::EffectWindow *w,
                                 int mask,
@@ -124,7 +124,7 @@ void VibranceEffect::drawWindow(const KWin::RenderTarget &renderTarget,
         // standard uniform setup OffscreenEffect does for the redirected draw.
         KWin::ShaderManager *manager = KWin::ShaderManager::instance();
         manager->pushShader(m_shader.get());
-        m_shader->setUniform("vibrance", static_cast<float>(m_saturation));
+        m_shader->setUniform("satur8", static_cast<float>(m_saturation));
         m_shader->setUniform("luma", QVector3D(kLumaR, kLumaG, kLumaB));
         m_shader->setUniform("linearize", m_linear ? 1 : 0);
         manager->popShader();
@@ -132,16 +132,16 @@ void VibranceEffect::drawWindow(const KWin::RenderTarget &renderTarget,
     KWin::OffscreenEffect::drawWindow(renderTarget, viewport, w, mask, deviceRegion, data);
 }
 
-void VibranceEffect::reconfigure(ReconfigureFlags)
+void Satur8Effect::reconfigure(ReconfigureFlags)
 {
 }
 
-bool VibranceEffect::isActive() const
+bool Satur8Effect::isActive() const
 {
     return m_shader != nullptr;
 }
 
-void VibranceEffect::setSaturation(double saturation)
+void Satur8Effect::setSaturation(double saturation)
 {
     saturation = std::clamp(saturation, 0.0, 4.0);
     if (m_saturation == saturation) {
@@ -151,12 +151,12 @@ void VibranceEffect::setSaturation(double saturation)
     KWin::effects->addRepaintFull();
 }
 
-double VibranceEffect::saturation() const
+double Satur8Effect::saturation() const
 {
     return m_saturation;
 }
 
-void VibranceEffect::setLinearLight(bool enabled)
+void Satur8Effect::setLinearLight(bool enabled)
 {
     if (m_linear == enabled) {
         return;
@@ -165,11 +165,11 @@ void VibranceEffect::setLinearLight(bool enabled)
     KWin::effects->addRepaintFull();
 }
 
-bool VibranceEffect::linearLight() const
+bool Satur8Effect::linearLight() const
 {
     return m_linear;
 }
 
-KWIN_EFFECT_FACTORY(VibranceEffect, "metadata.json")
+KWIN_EFFECT_FACTORY(Satur8Effect, "metadata.json")
 
-#include "vibrance_effect.moc"
+#include "satur8_effect.moc"

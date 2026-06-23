@@ -1,4 +1,4 @@
-# Vibrance for Linux - Build Plan
+# Satur8 for Linux - Build Plan
 
 > A VibranceGUI-style digital vibrance tool for Linux. Per-game saturation
 > boost, applied **outside** the game process so it cannot trip anti-cheat,
@@ -50,7 +50,7 @@ turning up saturation on your monitor's OSD - VAC has nothing to see.
 
 1. **Outside the game, always.** No Vulkan layers in the game, no DLL/`.so`
    injection, no memory hooks. Compositor/scanout only.
-2. **Lowest possible hardware tax**, CPU first. CS2 is CPU-bound; the vibrance
+2. **Lowest possible hardware tax**, CPU first. CS2 is CPU-bound; the satur8
    tool must not steal cycles from it. Two consequences:
    - Prefer the **hardware CTM** (zero per-frame cost) over per-frame shaders.
    - **No busy polling.** Triggers are event-driven or a launch wrapper.
@@ -99,7 +99,7 @@ As a 3x3 matrix (identity when s = 1), with `w = 1 - s`:
 | w*Lr       w*Lg       w*Lb + s  |
 ```
 
-This lives in `vibrance-core` once. The DRM backend converts it to the
+This lives in `satur8-core` once. The DRM backend converts it to the
 S31.32 fixed-point the kernel CTM property expects; the shader backends feed it
 to a `mat3` uniform. (Optional later refinement: do the blend in linear light
 rather than gamma-encoded sRGB for a more correct result; default to matching
@@ -164,7 +164,7 @@ This is the native GNOME path; GNOME users do not need gamescope.
 
 ### B5. NV-CONTROL backend - **NVIDIA on X11, native**
 The NVIDIA proprietary driver exposes a real "Digital Vibrance" control via the
-NV-CONTROL X extension (`nvidia-settings -a "[gpu:0]/DigitalVibrance=N"`, range
+NV-CONTROL X extension (`nvidia-settings -a "[gpu:0]/DigitalSatur8=N"`, range
 roughly -1024..1023). This is the exact feature VibranceGUI drives on Windows,
 available on Linux X11. Native path for NVIDIA on X11 (the DRM CTM in B2 is
 unreliable on the proprietary driver). NVIDIA on Wayland is covered natively by
@@ -174,8 +174,8 @@ the compositor shader paths (B1 KWin / B4 GNOME / Hyprland's screen-shader hook)
 ### B6. gamescope backend - **true last resort only**
 gamescope is a nested compositor that runs under *any* session and supports
 `--reshade-effect <path>` applied to its **own** composited output (not injected
-into the game). So `vibrance run -- %command%` launches the game inside gamescope
-with a vibrance effect. It needs no cooperation from the host compositor, which
+into the game). So `satur8 run -- %command%` launches the game inside gamescope
+with a satur8 effect. It needs no cooperation from the host compositor, which
 is exactly why it is the floor nobody falls through - and why it costs an extra
 composite pass + latency. It is the answer ONLY for Wayland compositors with no
 native hook at all (Sway / minimal wlroots / niche), where `wlr-gamma-control`
@@ -189,7 +189,7 @@ KDE Wayland         -> B1 (KWin effect)
 Hyprland            -> B3 (Hyprland CTM; screen-shader on NVIDIA)
 GNOME Wayland       -> B4 (Shell extension shader, any GPU incl. NVIDIA)
 X11 + AMD/Intel/nv  -> B2 (DRM CTM)
-X11 + NVIDIA prop   -> B5 (NV-CONTROL DigitalVibrance)
+X11 + NVIDIA prop   -> B5 (NV-CONTROL DigitalSatur8)
 Bare KMS            -> B2 (DRM CTM, we own DRM master)
 Sway / other wlr    -> B6 (gamescope)   [no native hook; upstream CTM = TODO]
 ```
@@ -221,7 +221,7 @@ Three independent axes; only the compositor one is hard:
 no longer the answer for GNOME or NVIDIA-on-Wayland (those use compositor
 shaders). gamescope survives only as the last-resort floor for niche Wayland
 compositors that expose no hook at all, and even they get working per-game
-vibrance. The one genuine gap: desktop-wide *always-on* vibrance on those niche
+satur8. The one genuine gap: desktop-wide *always-on* satur8 on those niche
 compositors (per-game still works via gamescope).
 
 ---
@@ -232,7 +232,7 @@ VibranceGUI watches the process list. Polling the process table at 60Hz is
 exactly the CPU waste we want to avoid. Two better paths, both near-zero CPU:
 
 1. **Launch wrapper (primary, zero polling).** Steam launch options:
-   `vibrance run --profile cs2 -- %command%`. Applies the profile, `exec`s the
+   `satur8 run --profile cs2 -- %command%`. Applies the profile, `exec`s the
    game, restores on exit. No watcher process at all during play. This also
    covers non-Steam launchers (Lutris, Heroic, bare command).
 2. **Event-driven watcher (optional, for always-on / focus-based).**
@@ -286,21 +286,21 @@ stay out of the gaming hot path (don't run a heavy GUI process while playing).
 ## 8. Architecture / repo layout
 
 ```
-vibrance/
+satur8/
 ├─ PLAN.md                 (this file)
 ├─ README.md
 ├─ LICENSE                 (GPL-3.0 - matches the libvibrant/KWin ecosystem)
 ├─ Cargo.toml              (workspace)
 ├─ crates/
-│  ├─ vibrance-core/       saturation matrix, Backend trait, Profile model, env detect
-│  ├─ vibrance-daemon/     event-driven watcher, applies/restores profiles
-│  ├─ vibrance-cli/        `vibrance` command (run/set/profile/status/doctor)
+│  ├─ satur8-core/       saturation matrix, Backend trait, Profile model, env detect
+│  ├─ satur8-daemon/     event-driven watcher, applies/restores profiles
+│  ├─ satur8-cli/        `satur8` command (run/set/profile/status/doctor)
 │  └─ backends/
 │     ├─ kwin/             B1  D-Bus control of the shipped KWin effect
 │     ├─ drm-ctm/          B2  libdrm CTM (X11 / TTY)
 │     ├─ hyprland/         B3  Hyprland CTM protocol / screen shader
 │     ├─ gnome-shell/      B4  GNOME Shell extension (GLSL, any GPU)
-│     ├─ nv-control/       B5  NVIDIA X11 DigitalVibrance (NV-CONTROL)
+│     ├─ nv-control/       B5  NVIDIA X11 DigitalSatur8 (NV-CONTROL)
 │     └─ gamescope/        B6  last-resort launch wrapper + reshade effect
 └─ assets/
    └─ kwin-effect/         the GLSL saturation effect package (shipped)
@@ -326,7 +326,7 @@ pub trait Backend {
 - **M1 - MVP for the author's box:** KWin effect backend + saturation that
   visibly works on KDE Wayland, set via CLI. "I can boost CS2 and restore on
   exit on my machine."
-- **M2 - launch wrapper:** `vibrance run -- %command%`, Steam launch-option
+- **M2 - launch wrapper:** `satur8 run -- %command%`, Steam launch-option
   workflow, profiles file. Any game, zero-poll trigger.
 - **M3 - DRM CTM backend:** X11/TTY zero-cost path; broadens hardware coverage.
 - **M4 - event-driven watcher:** D-Bus focus watcher for always-on KDE use.
@@ -345,11 +345,11 @@ pub trait Backend {
   (`OffscreenEffect` + GLSL, what we ship) remains the realistic KDE path; KWin
   cannot be moved to zero-cost CTM today. Re-check on future KWin releases.
 - **Does the AMD RX 9070 XT honor DRM CTM on this kernel?** **Yes.** A read-only
-  probe (`vibrance doctor` / `vibrance-drm-ctm::probe_ctm`) finds 4 CTM-capable
+  probe (`satur8 doctor` / `satur8-drm-ctm::probe_ctm`) finds 4 CTM-capable
   CRTCs on the amdgpu card. Setting it still requires DRM master, i.e. a TTY /
   bare-KMS session (on Wayland KWin owns master); the zero-cost path is real
   there.
-- gamescope reshade vibrance quality + measured latency on a 240Hz panel. (Open;
+- gamescope reshade satur8 quality + measured latency on a 240Hz panel. (Open;
   the fallback shader is implemented and loads, perf not yet measured.)
 - Confirm KWin effect cost is actually negligible at 1440p/240Hz in CS2. (Open;
   needs an in-game measurement pass.)
@@ -363,6 +363,6 @@ promising "no ban" as a guarantee; describe *what it does and does not do* and
 let that stand. Never recommend vkBasalt/ReShade-into-the-game for VAC titles.
 
 ## Naming
-Working name `vibrance` (binary `vibrance`). Check GitHub + crates.io before
+Working name `satur8` (binary `satur8`). Check GitHub + crates.io before
 publishing; alternates if taken: `vivid`, `chroma-cli`, `satur`, `vibra`.
 ```

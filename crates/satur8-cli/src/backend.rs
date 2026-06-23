@@ -1,12 +1,12 @@
 //! Backend selection shared across subcommands.
 
 use anyhow::{bail, Result};
-use vibrance_core::{Backend, Environment, Output};
-use vibrance_drm_ctm::DrmCtmBackend;
-use vibrance_gnome::GnomeBackend;
-use vibrance_hyprland::HyprlandBackend;
-use vibrance_kwin::KwinBackend;
-use vibrance_nv_control::NvControlBackend;
+use satur8_core::{Backend, Environment, Output};
+use satur8_drm_ctm::DrmCtmBackend;
+use satur8_gnome::GnomeBackend;
+use satur8_hyprland::HyprlandBackend;
+use satur8_kwin::KwinBackend;
+use satur8_nv_control::NvControlBackend;
 
 /// The single output we act on for now (per-output targeting is M7).
 pub fn all_outputs() -> Output {
@@ -18,7 +18,7 @@ pub fn all_outputs() -> Output {
 
 /// Resolve the best reachable backend for this environment, lowest cost and
 /// most native first, matching PLAN.md's selection order. gamescope is *not*
-/// here - it's a launch-only fallback used by `vibrance run`, not an apply/reset
+/// here - it's a launch-only fallback used by `satur8 run`, not an apply/reset
 /// backend.
 pub fn select_backend() -> Result<Box<dyn Backend>> {
     if let Some(b) = KwinBackend::detect() {
@@ -41,7 +41,7 @@ pub fn select_backend() -> Result<Box<dyn Backend>> {
     bail!(
         "no usable apply/reset backend for this session ({}, {}, {}).\n\
          Preferred here is '{}'. On a niche wlroots compositor with no native \
-         hook, use the gamescope fallback: `vibrance run --via gamescope -- <game>`.",
+         hook, use the gamescope fallback: `satur8 run --via gamescope -- <game>`.",
         envr.session,
         envr.desktop,
         envr.gpu,

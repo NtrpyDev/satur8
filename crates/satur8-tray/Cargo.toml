@@ -1,21 +1,21 @@
 [package]
-name = "vibrance-tray"
+name = "satur8-tray"
 version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "System-tray control for Vibrance (StatusNotifierItem): toggle and pick saturation/profiles."
+description = "System-tray control for Satur8 (StatusNotifierItem): toggle and pick saturation/profiles."
 
 [[bin]]
-name = "vibrance-tray"
+name = "satur8-tray"
 path = "src/main.rs"
 
 [dependencies]
-vibrance-core = { workspace = true }
-vibrance-kwin = { workspace = true }
-vibrance-drm-ctm = { workspace = true }
-vibrance-hyprland = { workspace = true }
-vibrance-nv-control = { workspace = true }
-vibrance-gnome = { workspace = true }
+satur8-core = { workspace = true }
+satur8-kwin = { workspace = true }
+satur8-drm-ctm = { workspace = true }
+satur8-hyprland = { workspace = true }
+satur8-nv-control = { workspace = true }
+satur8-gnome = { workspace = true }
 anyhow = { workspace = true }
 ksni = { version = "0.3", features = ["blocking"] }

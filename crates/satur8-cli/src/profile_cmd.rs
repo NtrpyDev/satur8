@@ -1,8 +1,8 @@
-//! `vibrance profile ...` - manage the per-game profiles file.
+//! `satur8 profile ...` - manage the per-game profiles file.
 
 use anyhow::{bail, Result};
 use clap::Subcommand;
-use vibrance_core::{MatchRule, Profile};
+use satur8_core::{MatchRule, Profile};
 
 use crate::config;
 
@@ -56,7 +56,7 @@ fn list() -> Result<()> {
     let profiles = config::load_profiles()?;
     println!("default saturation: {:.2}", profiles.default_saturation);
     if profiles.profiles.is_empty() {
-        println!("(no profiles yet - add one with `vibrance profile add`)");
+        println!("(no profiles yet - add one with `satur8 profile add`)");
         return Ok(());
     }
     for p in &profiles.profiles {

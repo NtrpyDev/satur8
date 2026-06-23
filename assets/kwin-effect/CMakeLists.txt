@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(vibrance-kwin-effect LANGUAGES CXX)
+project(satur8-kwin-effect LANGUAGES CXX)
 
 # The KWin effect ABI is NOT stable: this must be built against the exact KWin
 # version it will run under.
@@ -25,24 +25,24 @@ file(GLOB KF6_INCLUDE_DIRS "/usr/include/KF6/*")
 find_library(KF6_COREADDONS_LIBRARY NAMES KF6CoreAddons PATHS /usr/lib /usr/lib64 REQUIRED)
 find_library(KF6_CONFIGCORE_LIBRARY NAMES KF6ConfigCore PATHS /usr/lib /usr/lib64 REQUIRED)
 
-add_library(vibrance_effect MODULE
-    vibrance_effect.cpp
-    vibrance_effect.h
+add_library(satur8_effect MODULE
+    satur8_effect.cpp
+    satur8_effect.h
 )
 
 # KWin derives the effect id from the plugin's filename *including* any "lib"
-# prefix. Emit plain "vibrance.so" so the id is simply "vibrance".
-set_target_properties(vibrance_effect PROPERTIES
+# prefix. Emit plain "satur8.so" so the id is simply "satur8".
+set_target_properties(satur8_effect PROPERTIES
     PREFIX ""
-    OUTPUT_NAME "vibrance")
+    OUTPUT_NAME "satur8")
 
-target_include_directories(vibrance_effect PRIVATE
+target_include_directories(satur8_effect PRIVATE
     ${KWIN_INCLUDE_DIR}
     /usr/include/KF6
     ${KF6_INCLUDE_DIRS}
 )
 
-target_link_libraries(vibrance_effect
+target_link_libraries(satur8_effect
     Qt6::Core
     Qt6::Gui
     Qt6::DBus
@@ -59,5 +59,5 @@ if(NOT VIBRANCE_PLUGIN_INSTALL_DIR)
         "$ENV{HOME}/.local/lib/qt6/plugins/kwin/effects/plugins")
 endif()
 
-install(TARGETS vibrance_effect
+install(TARGETS satur8_effect
     LIBRARY DESTINATION "${VIBRANCE_PLUGIN_INSTALL_DIR}")

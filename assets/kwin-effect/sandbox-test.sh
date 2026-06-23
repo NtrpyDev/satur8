@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Validate the vibrance CLI <-> KWin backend end to end against a HEADLESS,
+# Validate the satur8 CLI <-> KWin backend end to end against a HEADLESS,
 # fully isolated KWin instance (its own D-Bus bus + virtual framebuffer). This
 # touches nothing on the user's real desktop.
 set -uo pipefail
 
-VIB="${1:-$HOME/vibrance/target/debug/vibrance}"
+VIB="${1:-$HOME/satur8/target/debug/satur8}"
 
 dbus-run-session -- bash -s "$VIB" <<'INNER'
 set -uo pipefail
@@ -32,10 +32,10 @@ fi
 echo "headless KWin up (pid $KWIN), private bus = ${DBUS_SESSION_BUS_ADDRESS%%,*}"
 echo
 
-echo "### vibrance status (before)"; "$VIB" status; echo
-echo "### vibrance set 1.8";        "$VIB" set 1.8; echo
-echo "### read back saturation";    qdbus6 org.kde.KWin /org/kde/KWin/Effect/Vibrance1 org.kde.kwin.Effect.Vibrance.saturation
-echo "### vibrance status (on)";    "$VIB" status; echo
-echo "### vibrance off";            "$VIB" off; echo
-echo "### effect loaded now?";      qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.isEffectLoaded vibrance
+echo "### satur8 status (before)"; "$VIB" status; echo
+echo "### satur8 set 1.8";        "$VIB" set 1.8; echo
+echo "### read back saturation";    qdbus6 org.kde.KWin /org/kde/KWin/Effect/Satur81 org.kde.kwin.Effect.Satur8.saturation
+echo "### satur8 status (on)";    "$VIB" status; echo
+echo "### satur8 off";            "$VIB" off; echo
+echo "### effect loaded now?";      qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.isEffectLoaded satur8
 INNER

@@ -1,10 +1,10 @@
-# Maintainer: Vibrance <ntrpydev@pm.me>
-pkgname=vibrance
+# Maintainer: Satur8 <ntrpydev@pm.me>
+pkgname=satur8
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Per-game digital vibrance for Linux: compositor/scanout saturation boost, never injected into the game"
 arch=('x86_64')
-url="https://github.com/REPLACE/vibrance"
+url="https://github.com/REPLACE/satur8"
 license=('GPL-3.0-or-later')
 depends=('gcc-libs')
 # KWin backend (effect): kwin at runtime; build needs the KDE/KWin SDK.
@@ -26,30 +26,30 @@ build() {
 package() {
     cd "$pkgname-$pkgver"
 
-    install -Dm755 target/release/vibrance "$pkgdir/usr/bin/vibrance"
-    install -Dm755 target/release/vibrance-daemon "$pkgdir/usr/bin/vibrance-daemon"
-    install -Dm755 target/release/vibrance-tray "$pkgdir/usr/bin/vibrance-tray"
-    install -Dm755 target/release/vibrance-gui "$pkgdir/usr/bin/vibrance-gui"
+    install -Dm755 target/release/satur8 "$pkgdir/usr/bin/satur8"
+    install -Dm755 target/release/satur8-daemon "$pkgdir/usr/bin/satur8-daemon"
+    install -Dm755 target/release/satur8-tray "$pkgdir/usr/bin/satur8-tray"
+    install -Dm755 target/release/satur8-gui "$pkgdir/usr/bin/satur8-gui"
 
     # KWin effect (system Qt plugin path, where KWin scans).
-    install -Dm755 build-kwin/vibrance.so \
-        "$pkgdir/usr/lib/qt6/plugins/kwin/effects/plugins/vibrance.so"
+    install -Dm755 build-kwin/satur8.so \
+        "$pkgdir/usr/lib/qt6/plugins/kwin/effects/plugins/satur8.so"
 
     # KWin focus-forwarder script.
-    install -d "$pkgdir/usr/share/kwin/scripts/vibrance-focus"
-    cp -r assets/kwin-script/. "$pkgdir/usr/share/kwin/scripts/vibrance-focus/"
+    install -d "$pkgdir/usr/share/kwin/scripts/satur8-focus"
+    cp -r assets/kwin-script/. "$pkgdir/usr/share/kwin/scripts/satur8-focus/"
 
     # GNOME Shell extension.
-    install -d "$pkgdir/usr/share/gnome-shell/extensions/vibrance@vibrance.github.io"
-    cp -r assets/gnome-extension/vibrance@vibrance.github.io/. \
-        "$pkgdir/usr/share/gnome-shell/extensions/vibrance@vibrance.github.io/"
+    install -d "$pkgdir/usr/share/gnome-shell/extensions/satur8@satur8.github.io"
+    cp -r assets/gnome-extension/satur8@satur8.github.io/. \
+        "$pkgdir/usr/share/gnome-shell/extensions/satur8@satur8.github.io/"
 
     # gamescope fallback shader.
-    install -Dm644 assets/gamescope/Vibrance.fx \
-        "$pkgdir/usr/share/gamescope/reshade/Shaders/Vibrance.fx"
+    install -Dm644 assets/gamescope/Satur8.fx \
+        "$pkgdir/usr/share/gamescope/reshade/Shaders/Satur8.fx"
 
-    install -Dm644 packaging/vibrance-daemon.service \
-        "$pkgdir/usr/lib/systemd/user/vibrance-daemon.service"
-    install -Dm644 packaging/vibrance.desktop "$pkgdir/usr/share/applications/vibrance.desktop"
+    install -Dm644 packaging/satur8-daemon.service \
+        "$pkgdir/usr/lib/systemd/user/satur8-daemon.service"
+    install -Dm644 packaging/satur8.desktop "$pkgdir/usr/share/applications/satur8.desktop"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
