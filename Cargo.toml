@@ -5,12 +5,11 @@ members = [
     "crates/vibrance-cli",
     "crates/backends/kwin",
     "crates/backends/drm-ctm",
+    "crates/backends/hyprland",
+    "crates/backends/nv-control",
+    "crates/backends/gnome-shell",
+    "crates/backends/gamescope",
     "crates/vibrance-daemon",
-    # added as further backends/daemon land:
-    # "crates/vibrance-daemon",
-    # "crates/backends/drm-ctm",
-    # "crates/backends/hyprland",
-    # "crates/backends/gamescope",
 ]
 
 [workspace.package]
@@ -22,6 +21,10 @@ repository = "https://github.com/REPLACE/vibrance"
 vibrance-core = { path = "crates/vibrance-core" }
 vibrance-kwin = { path = "crates/backends/kwin" }
 vibrance-drm-ctm = { path = "crates/backends/drm-ctm" }
+vibrance-hyprland = { path = "crates/backends/hyprland" }
+vibrance-nv-control = { path = "crates/backends/nv-control" }
+vibrance-gnome = { path = "crates/backends/gnome-shell" }
+vibrance-gamescope = { path = "crates/backends/gamescope" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

@@ -44,6 +44,14 @@ enum Command {
         /// Override saturation directly (wins over --profile).
         #[arg(long)]
         saturation: Option<f32>,
+        /// Force a run strategy instead of the native backend. Supported:
+        /// `gamescope` (the universal fallback; nested compositor).
+        #[arg(long)]
+        via: Option<String>,
+        /// Extra args for gamescope before `--`, comma-separated
+        /// (e.g. --gamescope-args=-W,2560,-H,1440,-r,240). Only with --via gamescope.
+        #[arg(long, value_delimiter = ',')]
+        gamescope_args: Vec<String>,
         /// The game command, after `--`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         command: Vec<String>,
@@ -68,11 +76,15 @@ fn main() -> Result<()> {
         Command::Run {
             profile,
             saturation,
+            via,
+            gamescope_args,
             command,
         } => {
             let code = run::run(run::RunArgs {
                 profile,
                 saturation,
+                via,
+                gamescope_args,
                 command,
             })?;
             std::process::exit(code);

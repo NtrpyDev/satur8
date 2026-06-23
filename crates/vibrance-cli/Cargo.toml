@@ -14,6 +14,10 @@ path = "src/main.rs"
 vibrance-core = { workspace = true }
 vibrance-kwin = { workspace = true }
 vibrance-drm-ctm = { workspace = true }
+vibrance-hyprland = { workspace = true }
+vibrance-nv-control = { workspace = true }
+vibrance-gnome = { workspace = true }
+vibrance-gamescope = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 signal-hook = "0.3"

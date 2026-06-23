@@ -1,0 +1,11 @@
+[package]
+name = "vibrance-gamescope"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "gamescope fallback backend (B6) for Vibrance: runs a game inside gamescope with a saturation ReShade effect."
+
+[dependencies]
+vibrance-core = { workspace = true }
+anyhow = { workspace = true }

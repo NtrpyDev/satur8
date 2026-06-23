@@ -22,6 +22,10 @@ use crate::config;
 pub struct RunArgs {
     pub profile: Option<String>,
     pub saturation: Option<f32>,
+    /// Force a specific run strategy. Currently only "gamescope".
+    pub via: Option<String>,
+    /// Extra args passed to gamescope before `--` (e.g. -W 2560 -H 1440).
+    pub gamescope_args: Vec<String>,
     pub command: Vec<String>,
 }
 
@@ -32,6 +36,22 @@ pub fn run(args: RunArgs) -> Result<i32> {
 
     let profiles = config::load_profiles().unwrap_or_default();
     let resolved = resolve_saturation(&profiles, &args)?;
+
+    // The gamescope fallback wraps the whole launch in a nested compositor and
+    // exits with the game, so it bypasses the apply/restore backend entirely.
+    if args.via.as_deref() == Some("gamescope") {
+        let sat = resolved.unwrap_or(Saturation::IDENTITY);
+        eprintln!(
+            "vibrance: {:.2} via gamescope (nested compositor: extra pass + latency), launching {}",
+            sat.get(),
+            args.command[0]
+        );
+        return vibrance_gamescope::run(sat, &args.gamescope_args, &args.command)
+            .context("running via gamescope");
+    }
+    if let Some(other) = &args.via {
+        bail!("unknown --via '{other}' (supported: gamescope)");
+    }
 
     // Apply before launch (if we have something to apply).
     let mut backend = select_backend()?;
