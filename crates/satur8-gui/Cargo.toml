@@ -21,6 +21,8 @@ satur8-gnome = { workspace = true }
 slint = "1.16"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 zbus = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
 
 [build-dependencies]
 slint-build = "1.16"

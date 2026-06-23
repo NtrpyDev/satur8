@@ -17,6 +17,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use serde::{Deserialize, Serialize};
 use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use satur8_core::{Backend, MatchRule, Output, Profile, Profiles, Saturation};
 
@@ -50,8 +51,15 @@ struct State {
     previewing: bool,
 }
 
+#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+struct GuiConfig {
+    #[serde(default)]
+    dark_mode: bool,
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
+    ui.global::<Pal>().set_dark(load_gui_config().dark_mode);
 
     let backend = select_backend();
     ui.set_backend_ok(backend.is_some());
@@ -121,8 +129,18 @@ fn main() -> Result<(), slint::PlatformError> {
             ui.set_nav(n);
         }
     }
+    if let Ok(value) = std::env::var("SATUR8_GUI_DARK") {
+        ui.global::<Pal>().set_dark(matches!(value.as_str(), "1" | "true" | "yes" | "on"));
+    }
 
     // ---------------- callbacks ----------------
+    ui.on_dark_mode_changed(|dark_mode| {
+        save_gui_config(&GuiConfig { dark_mode });
+    });
+    ui.on_open_link(|url| {
+        open_url(url.as_str());
+    });
+
     ui.on_default_changed({
         let state = state.clone();
         let w = ui.as_weak();
@@ -531,6 +549,12 @@ fn load_profiles() -> Profiles {
         Err(_) => Profiles::default(),
     }
 }
+fn load_gui_config() -> GuiConfig {
+    match std::fs::read_to_string(config_dir().join("gui.toml")) {
+        Ok(s) => toml::from_str(&s).unwrap_or_default(),
+        Err(_) => GuiConfig::default(),
+    }
+}
 fn save(profiles: &Profiles) {
     let dir = config_dir();
     let _ = std::fs::create_dir_all(&dir);
@@ -539,6 +563,17 @@ fn save(profiles: &Profiles) {
             reload_daemon_profiles();
         }
     }
+}
+fn save_gui_config(config: &GuiConfig) {
+    let dir = config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(toml) = toml::to_string(config) {
+        let _ = std::fs::write(dir.join("gui.toml"), toml);
+    }
+}
+
+fn open_url(url: &str) {
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 }
 
 fn reload_daemon_profiles() {

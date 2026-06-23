@@ -1,4 +1,4 @@
-import { Button, Slider, ListView, Switch, ScrollView } from "std-widgets.slint";
+import { Slider, ListView, Switch, ScrollView } from "std-widgets.slint";
 
 export struct GameRow {
     name: string,
@@ -17,14 +17,18 @@ export struct LogRow {
     ok: bool,
 }
 
-global Pal {
-    out property <color> accent: #0f9f8f;
-    out property <color> accent-soft: #c5e4de;
-    out property <color> bg: #d8dad6;
-    out property <color> card: #eef0ec;
-    out property <color> line: #c9cec8;
-    out property <color> ink: #242a2f;
-    out property <color> muted: #6f7780;
+export global Pal {
+    in-out property <bool> dark: false;
+    out property <color> accent: dark ? #14b8a6 : #0f9f8f;
+    out property <color> accent-soft: dark ? #173f3c : #bfded7;
+    out property <color> bg: dark ? #1f2427 : #cfd3ce;
+    out property <color> card: dark ? #2a3033 : #dde2dc;
+    out property <color> line: dark ? #3a4246 : #b8c0b8;
+    out property <color> ink: dark ? #eef3f2 : #20262b;
+    out property <color> muted: dark ? #a8b3b1 : #69737a;
+    out property <color> hover: dark ? #343d41 : #c4cbc4;
+    out property <color> note: dark ? #232a2d : #d2d8d1;
+    out property <color> danger-soft: dark ? #4c292b : #e8ccc8;
 }
 
 component BrandLogo inherits HorizontalLayout {
@@ -58,7 +62,7 @@ component NavItem inherits Rectangle {
     height: 38px;
     width: nav-label.preferred-width + 30px;
     border-radius: 10px;
-    background: active ? Pal.accent : (touch.has-hover ? #e2e6e1 : transparent);
+    background: active ? Pal.accent : (touch.has-hover ? Pal.hover : transparent);
     touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
         padding-left: 15px;
@@ -71,6 +75,32 @@ component NavItem inherits Rectangle {
             color: active ? white : Pal.ink;
             vertical-alignment: center;
         }
+    }
+}
+
+component Button inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    callback clicked;
+    height: 36px;
+    width: label.preferred-width + 28px;
+    border-radius: 7px;
+    border-width: primary ? 0px : 1px;
+    border-color: Pal.line;
+    background: primary
+        ? (touch.pressed ? #0d8f81 : (touch.has-hover ? #13b5a5 : Pal.accent))
+        : (touch.pressed ? Pal.line : (touch.has-hover ? Pal.hover : Pal.note));
+
+    touch := TouchArea { clicked => { root.clicked(); } }
+
+    label := Text {
+        text: root.text;
+        color: primary ? white : Pal.ink;
+        font-family: "Fira Sans";
+        font-size: 14px;
+        font-weight: primary ? 700 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
     }
 }
 
@@ -130,6 +160,8 @@ export component AppWindow inherits Window {
     callback restore-output();
     callback preview-output();
     callback clear-activity();
+    callback dark-mode-changed(bool);
+    callback open-link(string);
 
     VerticalLayout {
         // ================= Header =================
@@ -150,6 +182,7 @@ export component AppWindow inherits Window {
                     spacing: 8px;
                     NavItem { label: "Profiles"; active: nav == 0; clicked => { nav = 0; } }
                     NavItem { label: "Settings"; active: nav == 1; clicked => { nav = 1; } }
+                    NavItem { label: "About"; active: nav == 2; clicked => { nav = 2; } }
                 }
                 Rectangle { horizontal-stretch: 1; }
                 Rectangle {
@@ -157,7 +190,7 @@ export component AppWindow inherits Window {
                     height: 32px;
                     width: pill.preferred-width + 28px;
                     border-radius: 16px;
-                    background: backend-ok ? Pal.accent-soft : #efd5d2;
+                    background: backend-ok ? Pal.accent-soft : Pal.danger-soft;
                     pill := HorizontalLayout {
                         padding-left: 14px; padding-right: 14px; spacing: 8px;
                         Rectangle {
@@ -230,7 +263,7 @@ export component AppWindow inherits Window {
                                                 spacing: 2px;
                                                 for r[i] in running: Rectangle {
                                                     height: 30px; border-radius: 6px;
-                                                    background: rt.has-hover ? #e2e6e1 : transparent;
+                                                    background: rt.has-hover ? Pal.hover : transparent;
                                                     rt := TouchArea { clicked => { root.add-running(i); running-popup.close(); } }
                                                     HorizontalLayout {
                                                         padding-left: 8px;
@@ -420,7 +453,7 @@ export component AppWindow inherits Window {
                         Rectangle { height: 4px; }
                         Rectangle {
                             height: 50px;
-                            background: #e2e5e0; border-radius: 8px;
+                            background: Pal.note; border-radius: 8px;
                             HorizontalLayout {
                                 padding: 10px;
                                 Text {
@@ -447,6 +480,31 @@ export component AppWindow inherits Window {
                 padding: 24px;
                 spacing: 14px;
                 Text { text: "Settings"; font-size: 20px; font-weight: 700; color: Pal.ink; }
+                Card {
+                    HorizontalLayout {
+                        padding: 16px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Dark mode"; font-weight: 600; color: Pal.ink; }
+                            Text {
+                                text: "Switches Satur8 to a darker graphite UI.";
+                                color: Pal.muted; font-size: 12px; wrap: word-wrap;
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        VerticalLayout {
+                            alignment: center;
+                            Switch {
+                                checked: Pal.dark;
+                                toggled => {
+                                    Pal.dark = self.checked;
+                                    root.dark-mode-changed(self.checked);
+                                }
+                            }
+                        }
+                    }
+                }
                 Card {
                     VerticalLayout {
                         padding: 16px;
@@ -483,6 +541,43 @@ export component AppWindow inherits Window {
                         Text {
                             text: "When you leave the game, Satur8 restores your desktop vibrance setting.";
                             color: Pal.muted; font-size: 12px; wrap: word-wrap;
+                        }
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+
+            // ---- About page ----
+            if nav == 2: VerticalLayout {
+                vertical-stretch: 1;
+                padding: 24px;
+                spacing: 14px;
+                Text { text: "About"; font-size: 20px; font-weight: 700; color: Pal.ink; }
+                Card {
+                    VerticalLayout {
+                        padding: 18px;
+                        spacing: 10px;
+                        Text { text: "Satur8"; font-size: 28px; font-weight: 800; color: Pal.ink; }
+                        Text {
+                            text: "Per-game digital vibrance for Linux. Satur8 watches focused game windows, applies the matching saturation profile, and restores your desktop setting when you leave the game.";
+                            color: Pal.muted; font-size: 14px; wrap: word-wrap;
+                        }
+                        Text {
+                            text: "It changes the display color pipeline after the game renders. It does not inject into, read, or modify the game process.";
+                            color: Pal.muted; font-size: 14px; wrap: word-wrap;
+                        }
+                    }
+                }
+                Card {
+                    VerticalLayout {
+                        padding: 18px;
+                        spacing: 12px;
+                        Text { text: "Links"; font-size: 16px; font-weight: 700; color: Pal.ink; }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Button { text: "Twitter / X  @NtrpyDev"; clicked => { root.open-link("https://x.com/NtrpyDev"); } }
+                            Button { text: "GitHub  NtrpyDev/satur8"; clicked => { root.open-link("https://github.com/NtrpyDev/satur8"); } }
+                            Rectangle { horizontal-stretch: 1; }
                         }
                     }
                 }
