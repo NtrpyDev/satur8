@@ -142,30 +142,56 @@ per-window (prior art: `hyprland-ctm-vibrance`, and its successor `hyprvibr`
 which uses a plugin so stock Hyprland works). Non-NVIDIA GPUs that honor the DRM
 CTM. This is proof that compositor-cooperative CTM is the right long-term shape.
 
-### B4. gamescope backend - **universal fallback**
-gamescope is a nested compositor that runs under *any* session (KDE, Hyprland,
-Sway, X11). It supports `--reshade-effect <path>` applied to its **own**
-composited output (not injected into the game). So `vibrance run -- %command%`
-can launch the game inside gamescope with a vibrance reshade effect. Works
-everywhere gamescope works; costs an extra composite pass + a little latency, so
-it is the fallback, not the default.
+### The one thing that matters: it's all DRM/KMS underneath
+The saturation matrix lives in *one* place in hardware: the GPU scanout block
+(the CTM), in the kernel's DRM/KMS layer. X11 and Wayland are not two color
+systems; they are two answers to "who is allowed to talk to DRM":
+- **X11**: the X server talks to DRM -> it (or NV-CONTROL) sets the CTM for us.
+- **Wayland**: the compositor talks to DRM -> *it* must set the CTM for us.
+- **Bare KMS (no display server)**: *we* talk to DRM -> we set the CTM ourselves.
+
+One room, three doors. Doing it right = getting a key to that room (native
+backend, zero cost). gamescope is "lazy" because instead of getting a key it
+builds a second compositor in front of yours and does the work there - hence the
+extra composite pass and latency. It needs zero cooperation, which is why it is
+the universal fallback and also why it is the wrong default. Prefer native.
+
+### B4. GNOME Shell extension backend - **GNOME Wayland, native, any GPU**
+GNOME/Mutter exposes no client CTM API, but a GNOME Shell extension can apply a
+GLSL effect at the shell level (same category as the KWin effect). Because it is
+just a compositor shader, it is GPU-agnostic and **works on NVIDIA Wayland too**.
+This is the native GNOME path; GNOME users do not need gamescope.
 
 ### B5. NV-CONTROL backend - **NVIDIA on X11, native**
 The NVIDIA proprietary driver exposes a real "Digital Vibrance" control via the
 NV-CONTROL X extension (`nvidia-settings -a "[gpu:0]/DigitalVibrance=N"`, range
 roughly -1024..1023). This is the exact feature VibranceGUI drives on Windows,
-available on Linux X11. It is the native path for NVIDIA users on X11 (the DRM
-CTM in B2 is unreliable on the proprietary driver). NVIDIA on Wayland has no
-native hook, so it falls back to B4 (gamescope).
+available on Linux X11. Native path for NVIDIA on X11 (the DRM CTM in B2 is
+unreliable on the proprietary driver). NVIDIA on Wayland is covered natively by
+the compositor shader paths (B1 KWin / B4 GNOME / Hyprland's screen-shader hook),
+*not* gamescope.
+
+### B6. gamescope backend - **true last resort only**
+gamescope is a nested compositor that runs under *any* session and supports
+`--reshade-effect <path>` applied to its **own** composited output (not injected
+into the game). So `vibrance run -- %command%` launches the game inside gamescope
+with a vibrance effect. It needs no cooperation from the host compositor, which
+is exactly why it is the floor nobody falls through - and why it costs an extra
+composite pass + latency. It is the answer ONLY for Wayland compositors with no
+native hook at all (Sway / minimal wlroots / niche), where `wlr-gamma-control`
+is the only color API and cannot do saturation (per-channel gamma LUTs can't mix
+channels; saturation is a 3x3 matrix that must). The proper long-term fix for
+those is upstreaming a CTM protocol to wlroots.
 
 ### Backend selection order at runtime
 ```
-KDE Wayland         -> B1 (KWin effect)   [later: CTM if KWin exposes it]
-Hyprland            -> B3 (Hyprland CTM)
+KDE Wayland         -> B1 (KWin effect)
+Hyprland            -> B3 (Hyprland CTM; screen-shader on NVIDIA)
+GNOME Wayland       -> B4 (Shell extension shader, any GPU incl. NVIDIA)
 X11 + AMD/Intel/nv  -> B2 (DRM CTM)
 X11 + NVIDIA prop   -> B5 (NV-CONTROL DigitalVibrance)
-GNOME/other Wayland -> B4 (gamescope wrapper)   [no native hook today]
-anything else       -> B4 (gamescope wrapper), else clear error w/ options
+Bare KMS            -> B2 (DRM CTM, we own DRM master)
+Sway / other wlr    -> B6 (gamescope)   [no native hook; upstream CTM = TODO]
 ```
 
 ### Who can actually run this (the "all Linux users" answer)
@@ -174,27 +200,29 @@ Three independent axes; only the compositor one is hard:
 - **Distro** (Ubuntu/Debian/Mint/Manjaro/Arch/Fedora/...): **all of them, no code
   difference.** A distro is packaging + kernel version. Ship one Rust binary as
   distro packages *and* a Flatpak/AppImage. This axis is essentially free.
-- **GPU/driver**: AMD + Intel + nouveau via CTM; NVIDIA proprietary via
-  NV-CONTROL (X11) or gamescope (Wayland). All covered.
-- **Compositor (Wayland, the hard axis)**: KDE and Hyprland get native zero/low
-  cost backends. GNOME, Sway, and anything else have no native client hook, so
-  they use the **gamescope fallback**.
+- **GPU/driver**: AMD/Intel/nouveau via CTM; NVIDIA via NV-CONTROL (X11) or a
+  compositor shader (Wayland). All covered, all native.
+- **Display system**: X11, Wayland, and bare KMS are the only real ones. Mir is a
+  Wayland compositor underneath. XWayland is just X11 apps on a Wayland
+  compositor, so the compositor backend still owns the final pixels. fbdev /
+  VNC / RDP have no real color pipeline and are not gaming-relevant.
 
 | Environment | Backend | Coverage |
 |---|---|---|
 | Any X11 (AMD/Intel/nouveau) | DRM CTM | native, zero-cost |
-| Any X11 (NVIDIA proprietary) | NV-CONTROL | native, zero-cost |
-| KDE Plasma Wayland | KWin effect | native, ~free |
-| Hyprland | Hyprland CTM | native, zero-cost |
-| GNOME / Sway / other Wayland | gamescope | fallback, small cost |
-| NVIDIA on Wayland | gamescope | fallback, small cost |
+| Any X11 (NVIDIA) | NV-CONTROL | native, zero-cost |
+| Bare KMS (any GPU) | DRM CTM | native, zero-cost |
+| KDE Plasma Wayland (any GPU) | KWin effect | native, ~free |
+| GNOME Wayland (any GPU) | Shell extension | native, ~free |
+| Hyprland (any GPU) | CTM / screen shader | native, ~free |
+| Sway / minimal wlroots | gamescope | fallback, small cost |
 
-**The guarantee:** gamescope is the floor nobody falls through. Worst case (e.g.
-GNOME Wayland on NVIDIA) still gets working per-game vibrance, just with a small
-overhead instead of zero. Native backends are upgrades layered on top where the
-environment cooperates. So: yes, all Linux users are served. The only thing with
-no path today is desktop-wide *always-on* vibrance on GNOME Wayland specifically
-(per-game, the actual use case, is covered there via gamescope).
+**The guarantee:** every major environment gets a *native* backend - gamescope is
+no longer the answer for GNOME or NVIDIA-on-Wayland (those use compositor
+shaders). gamescope survives only as the last-resort floor for niche Wayland
+compositors that expose no hook at all, and even they get working per-game
+vibrance. The one genuine gap: desktop-wide *always-on* vibrance on those niche
+compositors (per-game still works via gamescope).
 
 ---
 
@@ -270,9 +298,10 @@ vibrance/
 │  └─ backends/
 │     ├─ kwin/             B1  D-Bus control of the shipped KWin effect
 │     ├─ drm-ctm/          B2  libdrm CTM (X11 / TTY)
-│     ├─ hyprland/         B3  Hyprland CTM protocol / IPC
-│     ├─ gamescope/        B4  launch wrapper + reshade vibrance effect
-│     └─ nv-control/       B5  NVIDIA X11 DigitalVibrance (NV-CONTROL)
+│     ├─ hyprland/         B3  Hyprland CTM protocol / screen shader
+│     ├─ gnome-shell/      B4  GNOME Shell extension (GLSL, any GPU)
+│     ├─ nv-control/       B5  NVIDIA X11 DigitalVibrance (NV-CONTROL)
+│     └─ gamescope/        B6  last-resort launch wrapper + reshade effect
 └─ assets/
    └─ kwin-effect/         the GLSL saturation effect package (shipped)
 ```
@@ -301,8 +330,9 @@ pub trait Backend {
   workflow, profiles file. Any game, zero-poll trigger.
 - **M3 - DRM CTM backend:** X11/TTY zero-cost path; broadens hardware coverage.
 - **M4 - event-driven watcher:** D-Bus focus watcher for always-on KDE use.
-- **M5 - Hyprland + gamescope backends:** cover the other major Wayland setups
-  and the universal fallback.
+- **M5 - native coverage for the rest:** GNOME Shell extension, Hyprland, and
+  NV-CONTROL backends, then gamescope as the last-resort fallback. After this
+  every major environment has a *native* path.
 - **M6 - GUI + packaging:** profile editor, system tray; AUR + Flatpak; docs.
 - **M7 - polish:** linear-light option, multi-monitor, per-output profiles,
   investigate native KWin CTM path to make KDE zero-cost.
