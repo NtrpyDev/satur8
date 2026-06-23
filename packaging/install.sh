@@ -85,9 +85,9 @@ install_all() {
     cat <<EOF
 
 Installed. Next steps:
-  * Effect:   satur8 on 1.5      (load + boost)   /   satur8 off
-  * Per-game: satur8 run --profile cs2 -- %command%   (Steam launch option)
-  * Always-on focus mode:
+  * GUI:      satur8-gui
+  * Manual:   satur8 on 1.5      (load + boost)   /   satur8 off
+  * Per-game focus mode:
       systemctl --user enable --now satur8-daemon
       kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
       qdbus6 org.kde.KWin /KWin reconfigure
