@@ -25,10 +25,10 @@ hardens the release process:
   tarballs with checksums, so the packaging sources and the website download
   stay in sync.
 
-The Arch package is ready and tested. AUR publication is prepared but pending
-while new AUR account registration is disabled upstream, unless an existing AUR
-maintainer publishes the package. The Fedora spec is authored; its first COPR
-build is what proves it on a real Fedora chroot.
+The Fedora package is live on COPR, built for Fedora 43 and 44. The Arch package
+is ready and tested; AUR publication is prepared but pending while new AUR account
+registration is disabled upstream, unless an existing AUR maintainer publishes the
+package.
 
 - KDE Plasma Wayland is implemented and tested on a real desktop.
 - The GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile
@@ -130,23 +130,19 @@ the final upstream source archive for that tag.
 
 ### Install on Fedora (COPR)
 
-The Fedora packaging lives in `packaging/satur8.spec`, with the COPR build entry
-point in `.copr/Makefile`. COPR is Fedora's hosted build service: it builds the
+The Fedora package is live on [COPR](https://copr.fedorainfracloud.org/coprs/ntrpydev/satur8/),
+built for Fedora 43 and 44. COPR is Fedora's hosted build service: it builds the
 RPM from this repository for each Fedora release and serves it like a small extra
 repo, the Fedora counterpart to the Arch AUR.
-
-Once the COPR project is live:
 
 ```sh
 sudo dnf copr enable ntrpydev/satur8
 sudo dnf install satur8
 ```
 
-The COPR project still has to be created under a Fedora account (a one-time
-login step); the full setup is documented in
-[`packaging/copr/README.md`](packaging/copr/README.md). The spec is authored and
-self-consistent, and the first COPR build is what confirms it on a real Fedora
-chroot.
+The packaging lives in `packaging/satur8.spec`, with the COPR build entry point in
+`.copr/Makefile`; the project setup and how to push a new build are documented in
+[`packaging/copr/README.md`](packaging/copr/README.md).
 
 ## GUI
 
