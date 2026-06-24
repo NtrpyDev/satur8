@@ -4,9 +4,9 @@
 > boost, applied **outside** the game process so it cannot trip anti-cheat,
 > with as close to **zero CPU cost** as the hardware allows.
 
-Status: v0.1 is working. KDE Plasma Wayland is the verified target, with the
+Status: v0.2.0 is working. KDE Plasma Wayland is the verified target, with the
 GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile config
-working together. v0.2 widens distribution: Fedora/RPM packaging for COPR
+working together. v0.2 widened distribution: a live Fedora package on COPR
 alongside the Arch package, and a tagged-release GitHub Actions workflow that
 builds the source and Linux tarballs with checksums so the packaging sources
 and the website download stay in sync. This file keeps the longer design notes
