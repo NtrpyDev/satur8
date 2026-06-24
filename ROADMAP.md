@@ -10,9 +10,11 @@ and backend architecture); for *how to install and use it* see
 v0.1.0 is shipped and working. KDE Plasma Wayland is the verified target, with
 the CLI, GUI, daemon, tray, KWin saturation effect, and KWin focus script all
 working together. Distribution today is a single Linux x86_64 tarball served
-from [satur8.app](https://satur8.app). Every other backend (GNOME, Hyprland,
-NVIDIA X11, DRM/KMS, gamescope) is implemented behind environment detection but
-not yet independently verified.
+from [satur8.app](https://satur8.app). v0.1.1 adds release/packaging polish:
+scripted tarball generation, completed Arch source metadata for the currently
+tagged source archive, and Arch install docs. Every other backend (GNOME,
+Hyprland, NVIDIA X11, DRM/KMS, gamescope) is implemented behind environment
+detection but not yet independently verified.
 
 ## Guiding principle
 
@@ -31,14 +33,14 @@ Version labels below are target tags, not dated commitments.
 Cheapest channel to ship, and the best audience fit (Arch and its derivatives,
 including CachyOS, skew heavily toward enthusiast Linux gamers).
 
-- [ ] Finish `packaging/PKGBUILD`: replace `sha256sums=('SKIP')` with the real
+- [x] Finish `packaging/PKGBUILD`: replace `sha256sums=('SKIP')` with the real
       checksum of the v0.1.0 source tarball; reconfirm `makedepends` /
       `optdepends`.
-- [ ] Generate `.SRCINFO`.
+- [x] Generate `.SRCINFO`.
 - [ ] Clean-chroot build test (`extra-x86_64-build` / `makechroot`).
 - [ ] Publish to the AUR as the tagged `satur8` package.
 - [ ] Consider a `satur8-git` variant for bleeding-edge users.
-- [ ] Add an "Install on Arch" section to the README.
+- [x] Add an "Install on Arch" section to the README.
 - [x] Release tarball + checksum, R2 download worker, and website (done in v0.1).
 
 ## v0.2: Fedora / RPM + release CI

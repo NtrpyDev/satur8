@@ -16,7 +16,10 @@ Roadmap: what ships next (packaging, backend verification, Steam Deck) lives in
 
 ## v0.1 status
 
-Satur8 v0.1 is the first working public version.
+Satur8 v0.1 is the first working public version. v0.1.1 is the packaging
+readiness patch: release tarball generation is scripted, the Arch PKGBUILD has
+a real checksum for the currently tagged v0.1.0 source archive, and Arch install
+notes are documented.
 
 - KDE Plasma Wayland is implemented and tested on a real desktop.
 - The GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile
@@ -78,8 +81,8 @@ https://github.com/NtrpyDev/satur8/releases
 Then install it:
 
 ```sh
-tar -xzf satur8-v0.1.0-linux-x86_64.tar.gz
-cd satur8-v0.1.0-linux-x86_64
+tar -xzf satur8-v0.1.1-linux-x86_64.tar.gz
+cd satur8-v0.1.1-linux-x86_64
 packaging/install.sh
 ```
 
@@ -98,7 +101,21 @@ packaging/install.sh --uninstall
 If you clone the source repository instead, the same installer builds and
 installs Satur8 from source.
 
-The Arch packaging scaffold is in `packaging/PKGBUILD`.
+### Install on Arch
+
+The Arch packaging files live in `packaging/`.
+
+Build and install from a checkout:
+
+```sh
+cd packaging
+makepkg -si
+```
+
+The package builds Satur8 from source, including the Rust workspace and the KWin
+effect. The generated `.SRCINFO` is included for AUR publication. Before
+publishing a new tagged release to the AUR, refresh `pkgver`, `pkgrel`, and
+`sha256sums` against the final upstream source archive for that tag.
 
 ## GUI
 
@@ -239,7 +256,9 @@ Every major folder has one job.
 |-- LICENSE                            GPL-3.0-or-later license
 |-- packaging/
 |   |-- install.sh                     Per-user and system installer
-|   |-- PKGBUILD                       Arch package scaffold
+|   |-- PKGBUILD                       Arch package build
+|   |-- .SRCINFO                       Generated Arch source metadata
+|   |-- release-tarball.sh             Linux x86_64 release archive builder
 |   |-- satur8.desktop                 Desktop launcher
 |   `-- satur8-daemon.service          systemd user unit
 |-- assets/
@@ -292,13 +311,20 @@ satur8 profile --help
 satur8 run --help
 ```
 
-## v0.1 release checklist
+Build the Linux x86_64 release archive:
+
+```sh
+packaging/release-tarball.sh
+```
+
+## v0.1.1 release checklist
 
 - Rust workspace builds.
 - GUI renders in bright and dark modes.
 - KDE Plasma Wayland backend verified.
 - CS2 profile matching works through the focus daemon.
 - Desktop restores when leaving the game.
+- Release tarball generation is scripted.
 - README, package metadata, and links point to the public project.
 
 ## License

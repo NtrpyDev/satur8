@@ -59,6 +59,7 @@ struct GuiConfig {
 
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
+    ui.set_version_text(format!("v{}", env!("CARGO_PKG_VERSION")).into());
     ui.global::<Pal>().set_dark(load_gui_config().dark_mode);
 
     let backend = select_backend();

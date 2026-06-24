@@ -1,19 +1,20 @@
 # Maintainer: Satur8 <ntrpydev@pm.me>
 pkgname=satur8
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Per-game digital vibrance for Linux: compositor/scanout saturation boost, never injected into the game"
 arch=('x86_64')
 url="https://github.com/NtrpyDev/satur8"
 license=('GPL-3.0-or-later')
-depends=('gcc-libs')
+depends=('fontconfig' 'freetype2' 'gcc-libs' 'glibc')
 # KWin backend (effect): kwin at runtime; build needs the KDE/KWin SDK.
 optdepends=('kwin: KDE Plasma Wayland backend (saturation effect)'
+            'gnome-shell: GNOME Wayland backend (Shell extension)'
             'gamescope: universal fallback backend for niche compositors'
             'nvidia-settings: NVIDIA X11 Digital Vibrance backend')
-makedepends=('rust' 'cmake' 'kwin' 'extra-cmake-modules' 'qt6-base' 'kcoreaddons')
+makedepends=('rust' 'cmake' 'kwin' 'extra-cmake-modules' 'qt6-base' 'kcoreaddons' 'kconfig')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('315020eb6b190bfa50d2f4931656e8c8e308c13d8fe5eb56f5e6202729ef6741')
 
 build() {
     cd "$pkgname-$pkgver"

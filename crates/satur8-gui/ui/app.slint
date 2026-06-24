@@ -170,6 +170,7 @@ export component AppWindow inherits Window {
     in-out property <bool> has-image: false;
     in-out property <string> backend-name: "none";
     in-out property <bool> backend-ok: false;
+    in-out property <string> version-text: "";
     in-out property <string> current-profile-name: "-";
     in-out property <int> current-percent: 0;
     in-out property <int> default-percent: 0;
@@ -235,7 +236,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 Text {
-                    text: "v0.1.0";
+                    text: version-text;
                     y: (parent.height - self.height) / 2;
                     color: Pal.muted;
                     font-size: 12px;

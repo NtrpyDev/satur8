@@ -1,0 +1,26 @@
+pkgbase = satur8
+	pkgdesc = Per-game digital vibrance for Linux: compositor/scanout saturation boost, never injected into the game
+	pkgver = 0.1.0
+	pkgrel = 2
+	url = https://github.com/NtrpyDev/satur8
+	arch = x86_64
+	license = GPL-3.0-or-later
+	makedepends = rust
+	makedepends = cmake
+	makedepends = kwin
+	makedepends = extra-cmake-modules
+	makedepends = qt6-base
+	makedepends = kcoreaddons
+	makedepends = kconfig
+	depends = fontconfig
+	depends = freetype2
+	depends = gcc-libs
+	depends = glibc
+	optdepends = kwin: KDE Plasma Wayland backend (saturation effect)
+	optdepends = gnome-shell: GNOME Wayland backend (Shell extension)
+	optdepends = gamescope: universal fallback backend for niche compositors
+	optdepends = nvidia-settings: NVIDIA X11 Digital Vibrance backend
+	source = satur8-0.1.0.tar.gz::https://github.com/NtrpyDev/satur8/archive/v0.1.0.tar.gz
+	sha256sums = 315020eb6b190bfa50d2f4931656e8c8e308c13d8fe5eb56f5e6202729ef6741
+
+pkgname = satur8
