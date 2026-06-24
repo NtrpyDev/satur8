@@ -16,10 +16,10 @@ Roadmap: what ships next (packaging, backend verification, Steam Deck) lives in
 
 ## v0.1 status
 
-Satur8 v0.1 is the first working public version. v0.1.1 is the packaging
-readiness patch: release tarball generation is scripted, the Arch PKGBUILD has
-a real checksum for the currently tagged v0.1.0 source archive, and Arch install
-notes are documented.
+Satur8 v0.1 is the first working public version. v0.1.2 is a packaging and
+release-notes polish patch: release tarball generation is scripted, the Arch
+PKGBUILD and `.SRCINFO` track the current tagged source archive, clean chroot
+package validation has passed, and the install notes are documented.
 
 - KDE Plasma Wayland is implemented and tested on a real desktop.
 - The GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile
@@ -81,8 +81,8 @@ https://github.com/NtrpyDev/satur8/releases
 Then install it:
 
 ```sh
-tar -xzf satur8-v0.1.1-linux-x86_64.tar.gz
-cd satur8-v0.1.1-linux-x86_64
+tar -xzf satur8-v0.1.2-linux-x86_64.tar.gz
+cd satur8-v0.1.2-linux-x86_64
 packaging/install.sh
 ```
 
@@ -317,7 +317,7 @@ Build the Linux x86_64 release archive:
 packaging/release-tarball.sh
 ```
 
-## v0.1.1 release checklist
+## v0.1.2 release checklist
 
 - Rust workspace builds.
 - GUI renders in bright and dark modes.
@@ -325,6 +325,10 @@ packaging/release-tarball.sh
 - CS2 profile matching works through the focus daemon.
 - Desktop restores when leaving the game.
 - Release tarball generation is scripted.
+- Arch package metadata validates with `makepkg --verifysource`.
+- Arch clean chroot packaging builds successfully.
+- Release notes use normal Markdown with readable bullets and no escaped
+  newline text.
 - README, package metadata, and links point to the public project.
 
 ## License
