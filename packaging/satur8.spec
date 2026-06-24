@@ -7,7 +7,7 @@
 # the crates vendored instead, because Koji builds offline.
 
 Name:           satur8
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Per-game digital vibrance for Linux
 
@@ -52,11 +52,12 @@ you leave the game. It changes the display color pipeline after the game has
 rendered, in the compositor or at scanout, so it never injects a layer, overlay,
 or hook into the game process.
 
-KDE Plasma Wayland is the verified backend in this release: it ships a KWin
-saturation effect, a KWin focus-forwarder script, a focus daemon, a CLI, a tray
-app, and a desktop GUI. GNOME, Hyprland, NVIDIA X11, DRM/KMS, and gamescope
-backends are present behind environment detection but not yet independently
-verified.
+KDE Plasma Wayland and NVIDIA X11 are the verified backends in this release:
+KDE ships a KWin saturation effect, a KWin focus-forwarder script, a focus
+daemon, a CLI, a tray app, and a desktop GUI; NVIDIA X11 drives the driver's
+Digital Vibrance control through NV-CONTROL. GNOME, Hyprland, DRM/KMS, and
+gamescope backends are present behind environment detection but not yet
+independently verified.
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -121,6 +122,10 @@ install -Dm0644 packaging/satur8.desktop \
 %{_datadir}/applications/satur8.desktop
 
 %changelog
+* Wed Jun 24 2026 Satur8 <ntrpydev@pm.me> - 0.2.1-1
+- Fix the NVIDIA X11 NV-CONTROL backend to set the driver's Digital Vibrance
+  attribute.
+
 * Wed Jun 24 2026 Satur8 <ntrpydev@pm.me> - 0.2.0-1
 - Initial Fedora/RPM packaging for COPR.
 - Builds the Rust workspace and the KWin Plasma Wayland effect from source,

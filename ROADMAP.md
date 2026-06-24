@@ -7,15 +7,16 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.2.0 is shipped and working. KDE Plasma Wayland is the verified target, with
+v0.2.1 is shipped and working. KDE Plasma Wayland is the verified target, with
 the CLI, GUI, daemon, tray, KWin saturation effect, and KWin focus script all
-working together. Distribution today is a Linux x86_64 tarball served from
+working together. NVIDIA X11 NV-CONTROL is also verified on real NVIDIA
+hardware. Distribution today is a Linux x86_64 tarball served from
 [satur8.app](https://satur8.app), a tested Arch package, and a live Fedora
 package on COPR built for Fedora 43 and 44. AUR publication is prepared but
 blocked while new AUR account registration is disabled upstream, unless an
 existing AUR maintainer publishes the package. Every other backend (GNOME,
-Hyprland, NVIDIA X11, DRM/KMS, gamescope) is implemented behind environment
-detection but not yet independently verified.
+Hyprland, DRM/KMS, gamescope) is implemented behind environment detection but
+not yet independently verified.
 
 ## Guiding principle
 
@@ -79,7 +80,7 @@ parallel with v0.4.
 
 - [ ] Verify the GNOME Wayland Shell-extension backend on real GNOME.
 - [ ] Verify the Hyprland backend.
-- [ ] Verify the NVIDIA X11 NV-CONTROL backend (needs NVIDIA hardware).
+- [x] Verify the NVIDIA X11 NV-CONTROL backend on real NVIDIA hardware.
 - [ ] Verify DRM-CTM on X11 / TTY for AMD and Intel (the read-only probe already
       passes, see PLAN.md section 10).
 - [ ] Measure gamescope fallback quality and added latency (PLAN.md open item).

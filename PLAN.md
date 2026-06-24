@@ -4,13 +4,14 @@
 > boost, applied **outside** the game process so it cannot trip anti-cheat,
 > with as close to **zero CPU cost** as the hardware allows.
 
-Status: v0.2.0 is working. KDE Plasma Wayland is the verified target, with the
+Status: v0.2.1 is working. KDE Plasma Wayland is the verified target, with the
 GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile config
-working together. v0.2 widened distribution: a live Fedora package on COPR
-alongside the Arch package, and a tagged-release GitHub Actions workflow that
-builds the source and Linux tarballs with checksums so the packaging sources
-and the website download stay in sync. This file keeps the longer design notes
-and backend roadmap; the user-facing setup guide lives in `README.md`.
+working together. NVIDIA X11 NV-CONTROL is also verified on real NVIDIA
+hardware. v0.2 widened distribution: a live Fedora package on COPR alongside
+the Arch package, and a tagged-release GitHub Actions workflow that builds the
+source and Linux tarballs with checksums so the packaging sources and the
+website download stay in sync. This file keeps the longer design notes and
+backend roadmap; the user-facing setup guide lives in `README.md`.
 
 ---
 
@@ -169,7 +170,7 @@ This is the native GNOME path; GNOME users do not need gamescope.
 
 ### B5. NV-CONTROL backend - **NVIDIA on X11, native**
 The NVIDIA proprietary driver exposes a real "Digital Vibrance" control via the
-NV-CONTROL X extension (`nvidia-settings -a "[gpu:0]/DigitalSatur8=N"`, range
+NV-CONTROL X extension (`nvidia-settings -a "[gpu:0]/DigitalVibrance=N"`, range
 roughly -1024..1023). This is the exact feature VibranceGUI drives on Windows,
 available on Linux X11. Native path for NVIDIA on X11 (the DRM CTM in B2 is
 unreliable on the proprietary driver). NVIDIA on Wayland is covered natively by
@@ -194,7 +195,7 @@ KDE Wayland         -> B1 (KWin effect)
 Hyprland            -> B3 (Hyprland CTM; screen-shader on NVIDIA)
 GNOME Wayland       -> B4 (Shell extension shader, any GPU incl. NVIDIA)
 X11 + AMD/Intel/nv  -> B2 (DRM CTM)
-X11 + NVIDIA prop   -> B5 (NV-CONTROL DigitalSatur8)
+X11 + NVIDIA prop   -> B5 (NV-CONTROL Digital Vibrance)
 Bare KMS            -> B2 (DRM CTM, we own DRM master)
 Sway / other wlr    -> B6 (gamescope)   [no native hook; upstream CTM = TODO]
 ```
@@ -305,7 +306,7 @@ satur8/
 │     ├─ drm-ctm/          B2  libdrm CTM (X11 / TTY)
 │     ├─ hyprland/         B3  Hyprland CTM protocol / screen shader
 │     ├─ gnome-shell/      B4  GNOME Shell extension (GLSL, any GPU)
-│     ├─ nv-control/       B5  NVIDIA X11 DigitalSatur8 (NV-CONTROL)
+│     ├─ nv-control/       B5  NVIDIA X11 Digital Vibrance (NV-CONTROL)
 │     └─ gamescope/        B6  last-resort launch wrapper + reshade effect
 └─ assets/
    └─ kwin-effect/         the GLSL saturation effect package (shipped)
