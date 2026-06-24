@@ -26,6 +26,7 @@ echo "==> Building Rust release binaries"
 (cd "$repo" && cargo build --release --locked)
 
 echo "==> Building KWin effect"
+rm -rf "$effect_build"
 cmake -S "$repo/assets/kwin-effect" -B "$effect_build" -DCMAKE_BUILD_TYPE=Release >/dev/null
 cmake --build "$effect_build" >/dev/null
 
