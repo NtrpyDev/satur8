@@ -1,7 +1,7 @@
 # Maintainer: Satur8 <ntrpydev@pm.me>
 pkgname=satur8
-pkgver=0.1.0
-pkgrel=2
+pkgver=0.1.1
+pkgrel=1
 pkgdesc="Per-game digital vibrance for Linux: compositor/scanout saturation boost, never injected into the game"
 arch=('x86_64')
 url="https://github.com/NtrpyDev/satur8"
@@ -14,7 +14,7 @@ optdepends=('kwin: KDE Plasma Wayland backend (saturation effect)'
             'nvidia-settings: NVIDIA X11 Digital Vibrance backend')
 makedepends=('rust' 'cmake' 'kwin' 'extra-cmake-modules' 'qt6-base' 'kcoreaddons' 'kconfig')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('315020eb6b190bfa50d2f4931656e8c8e308c13d8fe5eb56f5e6202729ef6741')
+sha256sums=('3358e7d335b142803e31b22e3aa2e79b64b0945c527a701fb3d73ccda7ce8ad1')
 
 build() {
     cd "$pkgname-$pkgver"
