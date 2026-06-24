@@ -19,8 +19,11 @@ manifest="$dist/source-files.txt"
 
 mkdir -p "$dist"
 
+# Leave the downstream packaging metadata out of the source archive: the Arch
+# PKGBUILD/.SRCINFO and the Fedora spec live in their own packaging repos and
+# would otherwise let an edit to those files change the archive's checksum.
 git -C "$repo" ls-files -z \
-    | grep -zv -E '^(packaging/PKGBUILD|packaging/\.SRCINFO)$' \
+    | grep -zv -E '^(packaging/PKGBUILD|packaging/\.SRCINFO|packaging/satur8\.spec)$' \
     > "$manifest"
 
 tar -C "$repo" \

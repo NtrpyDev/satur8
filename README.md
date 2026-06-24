@@ -14,14 +14,21 @@ Twitter / X: https://x.com/NtrpyDev
 Roadmap: what ships next (packaging, backend verification, Steam Deck) lives in
 [ROADMAP.md](ROADMAP.md).
 
-## v0.1 status
+## Status
 
-Satur8 v0.1 is the first working public version. v0.1.3 is a packaging and
-release-notes polish patch: release tarball generation is scripted, the Arch
-PKGBUILD and `.SRCINFO` track the current release source archive, clean chroot
-package validation has passed, and the install notes are documented. AUR
-publication is prepared but pending while new AUR account registration is
-disabled upstream, unless an existing AUR maintainer publishes the package.
+Satur8 v0.1 was the first working public version. v0.2 widens distribution and
+hardens the release process:
+
+- Fedora/RPM packaging (`packaging/satur8.spec`) for COPR, mirroring the Arch
+  build.
+- A tagged-release GitHub Actions workflow that builds the source and Linux
+  tarballs with checksums, so the packaging sources and the website download
+  stay in sync.
+
+The Arch package is ready and tested. AUR publication is prepared but pending
+while new AUR account registration is disabled upstream, unless an existing AUR
+maintainer publishes the package. The Fedora spec is authored; its first COPR
+build is what proves it on a real Fedora chroot.
 
 - KDE Plasma Wayland is implemented and tested on a real desktop.
 - The GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile
@@ -83,8 +90,8 @@ https://github.com/NtrpyDev/satur8/releases
 Then install it:
 
 ```sh
-tar -xzf satur8-v0.1.3-linux-x86_64.tar.gz
-cd satur8-v0.1.3-linux-x86_64
+tar -xzf satur8-v0.2.0-linux-x86_64.tar.gz
+cd satur8-v0.2.0-linux-x86_64
 packaging/install.sh
 ```
 
@@ -120,6 +127,26 @@ is currently waiting for new AUR account registration to reopen, or for an
 existing AUR maintainer to push the prepared package. Before publishing a new
 tagged release to the AUR, refresh `pkgver`, `pkgrel`, and `sha256sums` against
 the final upstream source archive for that tag.
+
+### Install on Fedora (COPR)
+
+The Fedora packaging lives in `packaging/satur8.spec`, with the COPR build entry
+point in `.copr/Makefile`. COPR is Fedora's hosted build service: it builds the
+RPM from this repository for each Fedora release and serves it like a small extra
+repo, the Fedora counterpart to the Arch AUR.
+
+Once the COPR project is live:
+
+```sh
+sudo dnf copr enable ntrpydev/satur8
+sudo dnf install satur8
+```
+
+The COPR project still has to be created under a Fedora account (a one-time
+login step); the full setup is documented in
+[`packaging/copr/README.md`](packaging/copr/README.md). The spec is authored and
+self-consistent, and the first COPR build is what confirms it on a real Fedora
+chroot.
 
 ## GUI
 
@@ -327,21 +354,21 @@ Build the source archive used by the Arch package:
 packaging/source-tarball.sh
 ```
 
-## v0.1.3 release checklist
+## v0.2.0 release checklist
 
-- Rust workspace builds.
-- GUI renders in bright and dark modes.
-- KDE Plasma Wayland backend verified.
-- CS2 profile matching works through the focus daemon.
-- Desktop restores when leaving the game.
-- Release tarball generation is scripted.
-- Arch package metadata validates with `makepkg --verifysource`.
-- Arch clean chroot packaging builds successfully.
-- Release notes use normal Markdown with readable bullets and no escaped
-  newline text.
-- README, package metadata, and links point to the public project.
+- Rust workspace builds and tests pass at v0.2.0 (`cargo check`/`cargo test
+  --workspace --locked`).
+- KDE Plasma Wayland backend remains the verified target.
+- Arch PKGBUILD and `.SRCINFO` track the v0.2.0 source archive.
+- Fedora `packaging/satur8.spec` written, mirroring the Arch build.
+- COPR build entry point (`.copr/Makefile`) and setup notes
+  (`packaging/copr/README.md`) added.
+- Tagged-release GitHub Actions workflow added to build the source and Linux
+  tarballs with checksums on `v*` tags.
 - AUR publication remains blocked until Arch reopens new account registration
   or an existing AUR maintainer can push the prepared package.
+- Fedora spec authored, not yet built on COPR; first COPR build verifies it on
+  a real Fedora chroot.
 
 ## License
 
