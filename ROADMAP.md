@@ -10,9 +10,11 @@ and backend architecture); for *how to install and use it* see
 v0.1.0 is shipped and working. KDE Plasma Wayland is the verified target, with
 the CLI, GUI, daemon, tray, KWin saturation effect, and KWin focus script all
 working together. Distribution today is a single Linux x86_64 tarball served
-from [satur8.app](https://satur8.app). v0.1.2 adds release/packaging polish:
+from [satur8.app](https://satur8.app). v0.1.3 adds release/packaging polish:
 scripted tarball generation, completed Arch source metadata for the current
-tagged source archive, clean chroot package validation, and Arch install docs.
+release source archive, clean chroot package validation, and Arch install docs.
+AUR publication is prepared but blocked while new AUR account registration is
+disabled upstream, unless an existing AUR maintainer publishes the package.
 Every other backend (GNOME, Hyprland, NVIDIA X11, DRM/KMS, gamescope) is
 implemented behind environment detection but not yet independently verified.
 
@@ -34,11 +36,12 @@ Cheapest channel to ship, and the best audience fit (Arch and its derivatives,
 including CachyOS, skew heavily toward enthusiast Linux gamers).
 
 - [x] Finish `packaging/PKGBUILD`: replace `sha256sums=('SKIP')` with the real
-      checksum of the tagged source tarball; reconfirm `makedepends` /
+      checksum of the release source archive; reconfirm `makedepends` /
       `optdepends`.
 - [x] Generate `.SRCINFO`.
 - [x] Clean-chroot build test (`extra-x86_64-build` / `makechroot`).
-- [ ] Publish to the AUR as the tagged `satur8` package.
+- [ ] Publish to the AUR as the tagged `satur8` package once new AUR account
+      registration reopens or an existing AUR maintainer can push it.
 - [ ] Consider a `satur8-git` variant for bleeding-edge users.
 - [x] Add an "Install on Arch" section to the README.
 - [x] Release tarball + checksum, R2 download worker, and website (done in v0.1).

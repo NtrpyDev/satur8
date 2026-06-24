@@ -6,7 +6,7 @@
 
 Status: v0.1 is working. KDE Plasma Wayland is the verified target, with the
 GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile config
-working together. v0.1.2 focuses on packaging readiness and release polish:
+working together. v0.1.3 focuses on packaging readiness and release polish:
 scripted release tarball generation, Arch package metadata, clean chroot
 package validation, and install docs. This file keeps the longer design notes
 and backend roadmap; the user-facing setup guide lives in `README.md`.

@@ -16,10 +16,12 @@ Roadmap: what ships next (packaging, backend verification, Steam Deck) lives in
 
 ## v0.1 status
 
-Satur8 v0.1 is the first working public version. v0.1.2 is a packaging and
+Satur8 v0.1 is the first working public version. v0.1.3 is a packaging and
 release-notes polish patch: release tarball generation is scripted, the Arch
-PKGBUILD and `.SRCINFO` track the current tagged source archive, clean chroot
-package validation has passed, and the install notes are documented.
+PKGBUILD and `.SRCINFO` track the current release source archive, clean chroot
+package validation has passed, and the install notes are documented. AUR
+publication is prepared but pending while new AUR account registration is
+disabled upstream, unless an existing AUR maintainer publishes the package.
 
 - KDE Plasma Wayland is implemented and tested on a real desktop.
 - The GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile
@@ -81,8 +83,8 @@ https://github.com/NtrpyDev/satur8/releases
 Then install it:
 
 ```sh
-tar -xzf satur8-v0.1.2-linux-x86_64.tar.gz
-cd satur8-v0.1.2-linux-x86_64
+tar -xzf satur8-v0.1.3-linux-x86_64.tar.gz
+cd satur8-v0.1.3-linux-x86_64
 packaging/install.sh
 ```
 
@@ -113,9 +115,11 @@ makepkg -si
 ```
 
 The package builds Satur8 from source, including the Rust workspace and the KWin
-effect. The generated `.SRCINFO` is included for AUR publication. Before
-publishing a new tagged release to the AUR, refresh `pkgver`, `pkgrel`, and
-`sha256sums` against the final upstream source archive for that tag.
+effect. The generated `.SRCINFO` is included for AUR publication. AUR publishing
+is currently waiting for new AUR account registration to reopen, or for an
+existing AUR maintainer to push the prepared package. Before publishing a new
+tagged release to the AUR, refresh `pkgver`, `pkgrel`, and `sha256sums` against
+the final upstream source archive for that tag.
 
 ## GUI
 
@@ -317,7 +321,13 @@ Build the Linux x86_64 release archive:
 packaging/release-tarball.sh
 ```
 
-## v0.1.2 release checklist
+Build the source archive used by the Arch package:
+
+```sh
+packaging/source-tarball.sh
+```
+
+## v0.1.3 release checklist
 
 - Rust workspace builds.
 - GUI renders in bright and dark modes.
@@ -330,6 +340,8 @@ packaging/release-tarball.sh
 - Release notes use normal Markdown with readable bullets and no escaped
   newline text.
 - README, package metadata, and links point to the public project.
+- AUR publication remains blocked until Arch reopens new account registration
+  or an existing AUR maintainer can push the prepared package.
 
 ## License
 
