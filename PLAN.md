@@ -6,9 +6,10 @@
 
 Status: v0.1 is working. KDE Plasma Wayland is the verified target, with the
 GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile config
-working together. v0.1.3 focuses on packaging readiness and release polish:
-scripted release tarball generation, Arch package metadata, clean chroot
-package validation, and install docs. This file keeps the longer design notes
+working together. v0.2 widens distribution: Fedora/RPM packaging for COPR
+alongside the Arch package, and a tagged-release GitHub Actions workflow that
+builds the source and Linux tarballs with checksums so the packaging sources
+and the website download stay in sync. This file keeps the longer design notes
 and backend roadmap; the user-facing setup guide lives in `README.md`.
 
 ---

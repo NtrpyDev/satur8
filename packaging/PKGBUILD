@@ -1,6 +1,6 @@
 # Maintainer: Satur8 <ntrpydev@pm.me>
 pkgname=satur8
-pkgver=0.1.3
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Per-game digital vibrance for Linux: compositor/scanout saturation boost, never injected into the game"
 arch=('x86_64')
@@ -14,7 +14,7 @@ optdepends=('kwin: KDE Plasma Wayland backend (saturation effect)'
             'nvidia-settings: NVIDIA X11 Digital Vibrance backend')
 makedepends=('rust' 'cmake' 'kwin' 'extra-cmake-modules' 'qt6-base' 'kcoreaddons' 'kconfig')
 source=("$pkgname-v$pkgver-source.tar.gz::$url/releases/download/v$pkgver/$pkgname-v$pkgver-source.tar.gz")
-sha256sums=('3e7336e3939214951f4e8f8dc2f2d5f9210665c05a809a08ffc214b6c56c1a6b')
+sha256sums=('f62b0406f8f5f55cd1c4a5a64d4e6a1ef752936d664cbae9cb375279dc16e21e')
 
 build() {
     cd "$pkgname-$pkgver"
@@ -49,8 +49,12 @@ package() {
     install -Dm644 assets/gamescope/Satur8.fx \
         "$pkgdir/usr/share/gamescope/reshade/Shaders/Satur8.fx"
 
-    install -Dm644 packaging/satur8-daemon.service \
-        "$pkgdir/usr/lib/systemd/user/satur8-daemon.service"
+    # The shipped unit targets the per-user tarball install (~/.local/bin); for
+    # the packaged install the daemon binary is in /usr/bin, so rewrite ExecStart.
+    install -d "$pkgdir/usr/lib/systemd/user"
+    sed 's|%h/.local/bin/satur8-daemon|/usr/bin/satur8-daemon|' \
+        packaging/satur8-daemon.service \
+        > "$pkgdir/usr/lib/systemd/user/satur8-daemon.service"
     install -Dm644 packaging/satur8.desktop "$pkgdir/usr/share/applications/satur8.desktop"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

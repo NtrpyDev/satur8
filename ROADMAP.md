@@ -10,12 +10,11 @@ and backend architecture); for *how to install and use it* see
 v0.1.0 is shipped and working. KDE Plasma Wayland is the verified target, with
 the CLI, GUI, daemon, tray, KWin saturation effect, and KWin focus script all
 working together. Distribution today is a single Linux x86_64 tarball served
-from [satur8.app](https://satur8.app). v0.1.3 adds release/packaging polish:
-scripted tarball generation, completed Arch source metadata for the current
-release source archive, clean chroot package validation, and Arch install docs.
-AUR publication is prepared but blocked while new AUR account registration is
+from [satur8.app](https://satur8.app), plus a tested Arch package. AUR
+publication is prepared but blocked while new AUR account registration is
 disabled upstream, unless an existing AUR maintainer publishes the package.
-Every other backend (GNOME, Hyprland, NVIDIA X11, DRM/KMS, gamescope) is
+v0.2 adds Fedora/RPM packaging for COPR and a tagged-release CI workflow (see
+below). Every other backend (GNOME, Hyprland, NVIDIA X11, DRM/KMS, gamescope) is
 implemented behind environment detection but not yet independently verified.
 
 ## Guiding principle
@@ -51,14 +50,21 @@ including CachyOS, skew heavily toward enthusiast Linux gamers).
 Second-biggest desktop and gaming audience. COPR is the practical path (an
 auto-building hosted repo, the Fedora equivalent of the AUR).
 
-- [ ] Write the RPM `.spec` (mirror the PKGBUILD build: `cargo build --release`
-      plus the cmake KWin effect, then install the same components).
-- [ ] Stand up a COPR repo with auto-builds.
-- [ ] Test on Fedora Workstation and the KDE spin.
-- [ ] GitHub Actions: on tag, build the release tarball and `.sha256`
-      reproducibly so packaging sources stay trustworthy and the site download
-      stays in sync.
-- [ ] Docs: "Install on Fedora (COPR)".
+- [x] Write the RPM `.spec` (mirrors the PKGBUILD build: `cargo build --release`
+      plus the cmake KWin effect, then installs the same components into the
+      Fedora system paths). Lives in `packaging/satur8.spec`.
+- [x] COPR build entry point (`.copr/Makefile`, "make srpm" method) and setup
+      notes (`packaging/copr/README.md`) so creating the project is one step.
+- [ ] Create the COPR project under a Fedora account and run the first build.
+      Blocked on a Fedora Account System login, the same shape of blocker as the
+      AUR. The first build is also what verifies the `BuildRequires` list on a
+      real Fedora chroot.
+- [ ] Test on Fedora Workstation and the KDE spin (needs real Fedora hardware).
+- [x] GitHub Actions: on a `v*` tag, build the source and Linux tarballs with
+      `.sha256` so packaging sources stay trustworthy and the site download
+      stays in sync (`.github/workflows/release.yml`). Verified on the first
+      tagged run.
+- [x] Docs: "Install on Fedora (COPR)" in the README.
 
 ## v0.3: Backend verification sweep
 

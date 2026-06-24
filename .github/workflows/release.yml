@@ -1,0 +1,61 @@
+name: release
+
+# On a version tag, build the release artifacts reproducibly and attach them to
+# the GitHub release for that tag. The source archive is the trust anchor: it is
+# deterministic and is what the Arch (PKGBUILD) and Fedora (spec) packaging fetch
+# and checksum. The Linux binary tarball is the convenience download the website
+# serves.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  source-archive:
+    name: source archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build source archive and checksum
+        run: packaging/source-tarball.sh
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/dist/satur8-v*-source.tar.gz
+            target/dist/satur8-v*-source.tar.gz.sha256
+
+  linux-x86_64:
+    name: linux-x86_64 tarball
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          # Rust workspace + cmake for the KWin effect, the KDE/Qt6 SDK the
+          # effect links, and the system libraries the Slint GUI links.
+          sudo apt-get install -y --no-install-recommends \
+            cargo rustc cmake \
+            kwin-dev qt6-base-dev extra-cmake-modules \
+            libkf6coreaddons-dev libkf6config-dev \
+            libfontconfig-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+
+      - name: Build release tarball and checksum
+        run: packaging/release-tarball.sh
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/dist/satur8-v*-linux-x86_64.tar.gz
+            target/dist/satur8-v*-linux-x86_64.tar.gz.sha256
