@@ -11,11 +11,12 @@ Fedora account (a one-time step that needs a Fedora Account System login).
 
 1. Log in at https://copr.fedorainfracloud.org with a Fedora account.
 2. Create a new project named `satur8`.
-3. Enable the chroots to build for. Start with the current Fedora Workstation
-   and KDE releases, for example `fedora-40-x86_64` and `fedora-41-x86_64`.
+3. Enable the chroots to build for. Start with the current Fedora x86_64
+   releases, for example `fedora-43-x86_64` and `fedora-44-x86_64`.
 4. Add a package using the **SCM** source type:
    - Clone URL: `https://github.com/NtrpyDev/satur8`
-   - Committish: the release tag, e.g. `v0.2.0`
+   - Committish: `main` for the first smoke build, then the release tag,
+     e.g. `v0.2.0`
    - Build method: **make srpm** (uses `.copr/Makefile` in this repo)
    - Spec file: `packaging/satur8.spec`
 5. Optionally enable auto-rebuild on new tags via a GitHub webhook so a tagged

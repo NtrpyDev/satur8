@@ -48,6 +48,7 @@ jobs:
             cargo rustc cmake \
             kwin-dev qt6-base-dev extra-cmake-modules \
             libkf6coreaddons-dev libkf6config-dev \
+            libepoxy-dev \
             libfontconfig-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev
 
       - name: Build release tarball and checksum
