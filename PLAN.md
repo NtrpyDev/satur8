@@ -324,6 +324,11 @@ pub trait Backend {
 
 ## 9. Roadmap / milestones
 
+> These M0-M7 entries are the original *design* milestones and are kept as
+> history; they are largely complete through v0.1. Forward-looking, trackable
+> work (packaging, backend verification, Steam Deck) now lives in
+> [ROADMAP.md](ROADMAP.md).
+
 - **M0 - scaffold** (this commit): repo, workspace, core math + traits, plan.
 - **M1 - MVP for the author's box:** KWin effect backend + saturation that
   visibly works on KDE Wayland, set via CLI. "I can boost CS2 and restore on

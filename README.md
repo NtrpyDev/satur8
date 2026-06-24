@@ -13,6 +13,9 @@ GitHub: https://github.com/NtrpyDev/satur8
 
 Twitter / X: https://x.com/NtrpyDev
 
+Roadmap: what ships next (packaging, backend verification, Steam Deck) lives in
+[ROADMAP.md](ROADMAP.md).
+
 ## v0.1 status
 
 Satur8 v0.1 is the first working public version.
