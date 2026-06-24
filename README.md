@@ -9,8 +9,6 @@ injecting anything into the game process and without wasting CPU while you play.
 
 Website: https://satur8.app
 
-GitHub: https://github.com/NtrpyDev/satur8
-
 Twitter / X: https://x.com/NtrpyDev
 
 ## v0.1 status
