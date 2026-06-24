@@ -29,6 +29,7 @@ BuildRequires:  qt6-qtbase-devel
 BuildRequires:  kf6-kcoreaddons-devel
 BuildRequires:  kf6-kconfig-devel
 BuildRequires:  kwin-devel
+BuildRequires:  libepoxy-devel
 # Slint GUI (winit + femtovg/OpenGL); these are the system libraries it links.
 BuildRequires:  fontconfig-devel
 BuildRequires:  freetype-devel
