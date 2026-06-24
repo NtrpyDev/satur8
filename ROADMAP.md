@@ -58,9 +58,11 @@ auto-building hosted repo, the Fedora equivalent of the AUR).
 - [x] COPR project live with auto-builds, publishing `satur8` for Fedora 43 and
       44 (https://copr.fedorainfracloud.org/coprs/ntrpydev/satur8/). The first
       build also confirmed the `BuildRequires` list on a real Fedora chroot.
-- [ ] Runtime-verify the KWin effect on a Fedora Workstation / KDE spin desktop
-      (the package builds and installs; the on-desktop effect check still needs
-      real Fedora hardware).
+- [ ] Visually verify the KWin saturation effect in a live Fedora KDE Plasma
+      Wayland session (needs real Fedora hardware). Verified in a Fedora 43
+      container so far: the COPR package installs, the CLI runs, the daemon unit
+      points at `/usr/bin`, and every library the effect plugin needs (libkwin,
+      libepoxy, Qt6, KF6) resolves.
 - [x] GitHub Actions: on a `v*` tag, build the source and Linux tarballs with
       `.sha256` so packaging sources stay trustworthy and the site download
       stays in sync (`.github/workflows/release.yml`). Verified on the first
