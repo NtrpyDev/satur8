@@ -22,6 +22,9 @@ export global Pal {
     in-out property <bool> dark: false;
     out property <color> accent:      dark ? #1fe3cb : #0fb3a0;
     out property <color> accent-2:    dark ? #6cf5e6 : #0a8e80;
+    // Secondary accent for everything that is not the saturation controls.
+    out property <color> alt:         dark ? #7c6cff : #6a5af0;
+    out property <color> alt-2:       dark ? #9b8dff : #8779f5;
     out property <color> accent-soft: dark ? #0d2a26 : #d2f1ec;
     out property <color> bg:          dark ? #07080b : #eef1f6;
     out property <color> card:        dark ? #0e1117 : #ffffff;
@@ -70,7 +73,7 @@ component NavItem inherits Rectangle {
     width: nav-label.preferred-width + 32px;
     border-radius: 10px;
     border-width: active ? 1px : 0px;
-    border-color: Pal.accent;
+    border-color: Pal.line;
     background: active ? Pal.note : (touch.has-hover ? Pal.hover : transparent);
     touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
@@ -81,7 +84,7 @@ component NavItem inherits Rectangle {
             font-family: "Fira Sans";
             font-size: 15px;
             font-weight: active ? 700 : 600;
-            color: active ? Pal.accent : Pal.ink;
+            color: Pal.ink;
             vertical-alignment: center;
         }
     }
@@ -97,14 +100,14 @@ component Button inherits Rectangle {
     border-width: primary ? 0px : 1px;
     border-color: Pal.line;
     background: primary
-        ? (touch.pressed || touch.has-hover ? Pal.accent-2 : Pal.accent)
+        ? (touch.pressed || touch.has-hover ? Pal.alt-2 : Pal.alt)
         : (touch.pressed ? Pal.line : (touch.has-hover ? Pal.hover : Pal.note));
 
     touch := TouchArea { clicked => { root.clicked(); } }
 
     label := Text {
         text: root.text;
-        color: primary ? #07080b : Pal.ink;
+        color: primary ? white : Pal.ink;
         font-family: "Fira Sans";
         font-size: 14px;
         font-weight: primary ? 700 : 600;
@@ -131,7 +134,7 @@ component ThemeToggle inherits Rectangle {
 
     Text {
         text: Pal.dark ? "☾" : "☀";
-        color: Pal.accent;
+        color: Pal.muted;
         font-size: 18px;
         font-weight: 700;
         horizontal-alignment: center;
@@ -296,13 +299,13 @@ export component AppWindow inherits Window {
                     border-radius: 16px;
                     background: backend-ok ? Pal.accent-soft : Pal.danger-soft;
                     border-width: 1px;
-                    border-color: backend-ok ? Pal.accent : Pal.danger;
+                    border-color: backend-ok ? Pal.line : Pal.danger;
                     pill := HorizontalLayout {
                         padding-left: 14px; padding-right: 14px; spacing: 8px;
                         Rectangle {
                             width: 9px; height: 9px; border-radius: 5px;
                             y: (parent.height - 9px) / 2;
-                            background: backend-ok ? Pal.accent : Pal.danger;
+                            background: backend-ok ? Pal.alt : Pal.danger;
                         }
                         Text {
                             text: backend-ok ? (backend-name + " backend active") : "no backend in this session";
@@ -437,7 +440,7 @@ export component AppWindow inherits Window {
                                             spacing: 6px;
                                             Text {
                                                 text: (game.percent > 0 ? "+" : "") + game.percent + "%";
-                                                color: Pal.accent; font-size: 14px; font-weight: 700;
+                                                color: Pal.ink; font-size: 14px; font-weight: 700;
                                             }
                                             VibSlider {
                                                 minimum: -100; maximum: 100; value: game.percent;
@@ -503,7 +506,7 @@ export component AppWindow inherits Window {
                                         Rectangle {
                                             width: 16px; height: 16px; border-radius: 8px;
                                             y: (parent.height - 16px) / 2;
-                                            background: entry.ok ? Pal.accent : #7c6cff;
+                                            background: entry.ok ? Pal.alt : Pal.muted;
                                         }
                                         Text { text: entry.text; color: Pal.ink; font-size: 13px; vertical-alignment: center; }
                                         Rectangle { horizontal-stretch: 1; }
@@ -530,7 +533,7 @@ export component AppWindow inherits Window {
                         HorizontalLayout {
                             spacing: 6px;
                             Text { text: "Saturation:"; color: Pal.muted; font-size: 13px; }
-                            Text { text: (current-percent > 0 ? "+" : "") + current-percent + "%"; color: Pal.accent; font-size: 13px; font-weight: 700; }
+                            Text { text: (current-percent > 0 ? "+" : "") + current-percent + "%"; color: Pal.ink; font-size: 13px; font-weight: 700; }
                         }
                         Rectangle { height: 1px; background: Pal.line; }
 
@@ -544,7 +547,7 @@ export component AppWindow inherits Window {
                                 Image { source: before-image; image-fit: contain; width: 100%; height: 100%; }
                             }
                             Rectangle { height: 4px; }
-                            Text { text: "After"; color: Pal.accent; font-size: 12px; font-weight: 600; }
+                            Text { text: "After"; color: Pal.muted; font-size: 12px; font-weight: 600; }
                             Rectangle {
                                 height: 100px; border-radius: 10px; clip: true; background: #05070a;
                                 border-width: 1px; border-color: Pal.line;
@@ -610,7 +613,7 @@ export component AppWindow inherits Window {
                                 y: (parent.height - self.height) / 2;
                                 changed(v) => { root.default-changed(v); }
                             }
-                            Text { text: (default-percent > 0 ? "+" : "") + default-percent + "%"; color: Pal.accent; font-weight: 700; width: 52px; vertical-alignment: center; }
+                            Text { text: (default-percent > 0 ? "+" : "") + default-percent + "%"; color: Pal.ink; font-weight: 700; width: 52px; vertical-alignment: center; }
                         }
                         HorizontalLayout {
                             Button { text: "↺ Restore desktop to normal"; clicked => { root.default-changed(0); } }
