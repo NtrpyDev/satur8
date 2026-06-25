@@ -10,10 +10,10 @@ No game injection. No Vulkan layer. No overlay. Built for modern Linux display s
 
 [Website](https://satur8.app) · [Releases](https://github.com/NtrpyDev/satur8/releases) · [Roadmap](ROADMAP.md) · [Issues](https://github.com/NtrpyDev/satur8/issues) · [Buy Me a Coffee](https://buymeacoffee.com/ntrpydev)
 
-![License](https://img.shields.io/github/license/NtrpyDev/satur8)
-![Release](https://img.shields.io/github/v/release/NtrpyDev/satur8)
-![Platform](https://img.shields.io/badge/platform-Linux-blue)
-![Language](https://img.shields.io/badge/language-Rust-orange)
+![License](https://img.shields.io/github/license/NtrpyDev/satur8?color=ff3d8a)
+![Release](https://img.shields.io/github/v/release/NtrpyDev/satur8?color=ffc24b)
+![Platform](https://img.shields.io/badge/platform-Linux-1fe3cb)
+![Language](https://img.shields.io/badge/language-Rust-7c6cff)
 
 </div>
 
