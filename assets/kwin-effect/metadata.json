@@ -1,0 +1,17 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Satur8"
+            }
+        ],
+        "Category": "Appearance",
+        "Description": "Per-game digital vibrance: boosts saturation in the compositor, never inside the game process.",
+        "EnabledByDefault": false,
+        "License": "GPL-3.0+",
+        "Name": "Satur8"
+    },
+    "org.kde.kwin.effect": {
+        "internal": false
+    }
+}

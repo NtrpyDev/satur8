@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1284" height="320" viewBox="0 0 1284 320" font-family="DejaVu Sans, Noto Sans, Arial, sans-serif">
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#1fe3cb"/></marker><marker id="arrow-spec" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#ff3d8a"/></marker><linearGradient id="box" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#141821"/><stop offset="1" stop-color="#0c0e13"/></linearGradient><linearGradient id="spectrum" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff3d8a"/><stop offset="0.26" stop-color="#ff6a3d"/><stop offset="0.48" stop-color="#ffc24b"/><stop offset="0.74" stop-color="#1fe3cb"/><stop offset="1" stop-color="#7c6cff"/></linearGradient></defs>
+<rect x="0" y="0" width="1284" height="320" rx="16" fill="#07080b"/>
+<rect x="30" y="60" width="200" height="86" rx="12" fill="url(#box)" stroke="#1fe3cb" stroke-width="1.5"/>
+<text x="130" y="94" fill="#f3f6fb" font-size="18" font-weight="700" text-anchor="middle">Focused game</text>
+<text x="130" y="120" fill="#828c9d" font-size="13" text-anchor="middle">active window</text>
+<rect x="286" y="60" width="200" height="86" rx="12" fill="url(#box)" stroke="#1fe3cb" stroke-width="1.5"/>
+<text x="386" y="94" fill="#f3f6fb" font-size="18" font-weight="700" text-anchor="middle">Focus detection</text>
+<text x="386" y="120" fill="#828c9d" font-size="13" text-anchor="middle">KWin script / poll</text>
+<line x1="236" y1="103" x2="280" y2="103" stroke="#1fe3cb" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="542" y="60" width="200" height="86" rx="12" fill="url(#box)" stroke="#1fe3cb" stroke-width="1.5"/>
+<text x="642" y="94" fill="#f3f6fb" font-size="18" font-weight="700" text-anchor="middle">Profile match</text>
+<text x="642" y="120" fill="#828c9d" font-size="13" text-anchor="middle">exe, class, AppID</text>
+<line x1="492" y1="103" x2="536" y2="103" stroke="#1fe3cb" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="798" y="60" width="200" height="86" rx="12" fill="url(#box)" stroke="#1fe3cb" stroke-width="1.5"/>
+<text x="898" y="94" fill="#f3f6fb" font-size="18" font-weight="700" text-anchor="middle">Display backend</text>
+<text x="898" y="120" fill="#828c9d" font-size="13" text-anchor="middle">compositor / driver</text>
+<line x1="748" y1="103" x2="792" y2="103" stroke="#1fe3cb" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="1054" y="60" width="200" height="86" rx="12" fill="url(#box)" stroke="#1fe3cb" stroke-width="1.5"/>
+<text x="1154" y="94" fill="#f3f6fb" font-size="18" font-weight="700" text-anchor="middle">Monitor output</text>
+<text x="1154" y="120" fill="#828c9d" font-size="13" text-anchor="middle">adjusted color</text>
+<line x1="1004" y1="103" x2="1048" y2="103" stroke="#1fe3cb" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M1154,146 L1154,202 L130,202 L130,146" fill="none" stroke="url(#spectrum)" stroke-width="2.5" stroke-dasharray="7 6" marker-end="url(#arrow-spec)"/>
+<text x="642" y="224" fill="url(#spectrum)" font-size="14" font-weight="700" text-anchor="middle">Restore desktop when focus changes</text>
+</svg>
