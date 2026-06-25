@@ -86,12 +86,14 @@ milestone, and the place we de-risk the 1.0 north star: SteamOS and Bazzite both
 run gamescope, so proving the gamescope path here is the priority, ahead of the
 other backends.
 
-- [ ] **Verify the gamescope path (priority).** Confirm satur8 can drive a live
-      gamescope session's color saturation. This is the load-bearing assumption
-      for the SteamOS/Bazzite 1.0 target, so it gets verified first. The current
-      gamescope backend wraps a *nested* gamescope and bakes the value at launch;
-      the Deck needs driving the *running* compositor's native saturation at
-      runtime.
+- [x] **Verify the gamescope path (priority).** Done: the gamescope-native
+      backend (drives the *running* compositor via its Xwayland color atoms,
+      added in v0.3.0) was verified on a real full-screen gamescope session
+      (NVIDIA, glxgears) where the saturation visibly changed across the range.
+      Note: a *nested* gamescope on a desktop sets the atoms but does not apply
+      the LUT to its nested output, so verification needs a full-screen
+      (Game-Mode-style) session. Real Steam Deck / Bazzite field-testing is the
+      separate v0.4 work below.
 - [ ] Verify the Hyprland backend.
 - [ ] Verify DRM-CTM on X11 / TTY for AMD and Intel (the read-only probe already
       passes, see PLAN.md section 10). Also relevant to the Deck, an AMD APU.
@@ -112,9 +114,10 @@ stamp. Gated on the gamescope path being proven in v0.3. The packaging groundwor
 is already done: SteamOS is Arch-based (the tested Arch package is the on-ramp)
 and Bazzite is Fedora-based (the live COPR work carries over).
 
-- [ ] Build a gamescope-native backend that drives the running compositor's color
+- [x] Build a gamescope-native backend that drives the running compositor's color
       saturation per-game at runtime (zero extra pass, no injection), instead of
-      the nested-gamescope reshade fallback.
+      the nested-gamescope reshade fallback. Landed in v0.3.0 and verified on a
+      full-screen gamescope session; on-Deck field-testing is the remaining work.
 - [ ] Per-game auto-apply in Game Mode. This is the differentiator versus the
       existing global-saturation tools (e.g. vibrantDeck).
 - [ ] SteamOS: install story on a read-only root (a Decky plugin is the likely
