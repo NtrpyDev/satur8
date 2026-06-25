@@ -35,9 +35,9 @@ It is built for Linux gaming setups that want the punchy color controls common o
 
 ## Demo
 
-<img src="assets/readme/demo-v031.gif" alt="Satur8 applying and restoring a per-game saturation profile" width="900">
-
 Satur8 watches the focused game, applies the matching color profile, and restores your normal desktop colors when you switch away.
+
+<img src="assets/readme/demo-v031.gif" alt="Satur8 applying and restoring a per-game saturation profile" width="900">
 
 ## Why Satur8?
 
