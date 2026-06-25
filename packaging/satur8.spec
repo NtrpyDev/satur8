@@ -7,7 +7,7 @@
 # the crates vendored instead, because Koji builds offline.
 
 Name:           satur8
-Version:        0.2.2
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Per-game digital vibrance for Linux
 
@@ -122,6 +122,10 @@ install -Dm0644 packaging/satur8.desktop \
 %{_datadir}/applications/satur8.desktop
 
 %changelog
+* Wed Jun 24 2026 Satur8 <ntrpydev@pm.me> - 0.3.0-1
+- Add a gamescope-native run strategy that drives a running gamescope compositor
+  with runtime shaper and 3D LUT override atoms.
+
 * Wed Jun 24 2026 Satur8 <ntrpydev@pm.me> - 0.2.2-1
 - Fix the GNOME Shell backend for GNOME 50: extend the extension shell-version
   range and stop using the Clutter.ShaderType enum removed in Mutter 18, so the

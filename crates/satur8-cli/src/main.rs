@@ -58,7 +58,7 @@ enum Command {
         #[arg(long)]
         saturation: Option<f32>,
         /// Force a run strategy instead of the native backend. Supported:
-        /// `gamescope` (the universal fallback; nested compositor).
+        /// `gamescope` (nested fallback) and `gamescope-native` (running compositor).
         #[arg(long)]
         via: Option<String>,
         /// Extra args for gamescope before `--`, comma-separated

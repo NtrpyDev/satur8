@@ -11,10 +11,10 @@
 //! reset the backend once it has exited.
 
 use anyhow::{bail, Context, Result};
+use satur8_core::{Profiles, Saturation};
 use std::path::Path;
 use std::process::Command;
 use std::thread;
-use satur8_core::{Profiles, Saturation};
 
 use crate::backend::{all_outputs, select_backend};
 use crate::config;
@@ -22,7 +22,7 @@ use crate::config;
 pub struct RunArgs {
     pub profile: Option<String>,
     pub saturation: Option<f32>,
-    /// Force a specific run strategy. Currently only "gamescope".
+    /// Force a specific run strategy. Currently "gamescope" or "gamescope-native".
     pub via: Option<String>,
     /// Extra args passed to gamescope before `--` (e.g. -W 2560 -H 1440).
     pub gamescope_args: Vec<String>,
@@ -37,6 +37,26 @@ pub fn run(args: RunArgs) -> Result<i32> {
     let profiles = config::load_profiles().unwrap_or_default();
     let resolved = resolve_saturation(&profiles, &args)?;
 
+    // SteamOS/Bazzite path: drive the running gamescope compositor at runtime.
+    if args.via.as_deref() == Some("gamescope-native") {
+        let sat = resolved.unwrap_or(Saturation::IDENTITY);
+        let session = satur8_gamescope::native_session()
+            .context("connecting to the running gamescope compositor")?;
+        session
+            .apply(sat)
+            .context("applying native gamescope LUT override")?;
+        eprintln!(
+            "satur8: {:.2} via gamescope-native (running compositor), launching {}",
+            sat.get(),
+            args.command[0]
+        );
+        return launch_with_restore(&args.command, move || {
+            if let Err(e) = session.restore() {
+                eprintln!("satur8: warning, failed to restore gamescope color state: {e}");
+            }
+        });
+    }
+
     // The gamescope fallback wraps the whole launch in a nested compositor and
     // exits with the game, so it bypasses the apply/restore backend entirely.
     if args.via.as_deref() == Some("gamescope") {
@@ -50,7 +70,7 @@ pub fn run(args: RunArgs) -> Result<i32> {
             .context("running via gamescope");
     }
     if let Some(other) = &args.via {
-        bail!("unknown --via '{other}' (supported: gamescope)");
+        bail!("unknown --via '{other}' (supported: gamescope, gamescope-native)");
     }
 
     // Apply before launch (if we have something to apply).
@@ -124,6 +144,47 @@ pub fn run(args: RunArgs) -> Result<i32> {
 
     let code = status?.code().unwrap_or(1);
     Ok(code)
+}
+
+fn launch_with_restore<F>(command: &[String], restore: F) -> Result<i32>
+where
+    F: FnOnce(),
+{
+    let mut restore = Some(restore);
+    let mut child = match Command::new(&command[0]).args(&command[1..]).spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            if let Some(restore) = restore.take() {
+                restore();
+            }
+            return Err(e).with_context(|| format!("launching {}", command[0]));
+        }
+    };
+    let pid = child.id() as libc::pid_t;
+
+    let mut signals = signal_hook::iterator::Signals::new([
+        signal_hook::consts::SIGINT,
+        signal_hook::consts::SIGTERM,
+    ])
+    .context("installing signal handlers")?;
+    let handle = signals.handle();
+    let forwarder = thread::spawn(move || {
+        for sig in signals.forever() {
+            unsafe {
+                libc::kill(pid, sig);
+            }
+        }
+    });
+
+    let status = child.wait().context("waiting for game to exit");
+
+    handle.close();
+    let _ = forwarder.join();
+    if let Some(restore) = restore.take() {
+        restore();
+    }
+
+    Ok(status?.code().unwrap_or(1))
 }
 
 /// Decide the saturation to apply, in priority order:
