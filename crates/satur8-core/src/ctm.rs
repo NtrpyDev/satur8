@@ -67,6 +67,23 @@ mod tests {
         sign * mag
     }
 
+    fn apply_matrix(matrix: [[f32; 3]; 3], pixel: [f32; 3]) -> [f32; 3] {
+        [
+            matrix[0][0] * pixel[0] + matrix[0][1] * pixel[1] + matrix[0][2] * pixel[2],
+            matrix[1][0] * pixel[0] + matrix[1][1] * pixel[1] + matrix[1][2] * pixel[2],
+            matrix[2][0] * pixel[0] + matrix[2][1] * pixel[1] + matrix[2][2] * pixel[2],
+        ]
+    }
+
+    fn luma(pixel: [f32; 3]) -> f32 {
+        crate::LUMA_R * pixel[0] + crate::LUMA_G * pixel[1] + crate::LUMA_B * pixel[2]
+    }
+
+    fn distance_from_luma(pixel: [f32; 3]) -> f32 {
+        let luma = luma(pixel);
+        (pixel[0] - luma).abs() + (pixel[1] - luma).abs() + (pixel[2] - luma).abs()
+    }
+
     #[test]
     fn identity_packs_to_one_and_zero() {
         let ctm = identity_drm_ctm();
@@ -74,8 +91,50 @@ mod tests {
         assert_eq!(ctm[0], 1u64 << 32);
         assert_eq!(ctm[4], 1u64 << 32);
         assert_eq!(ctm[8], 1u64 << 32);
-        assert_eq!(ctm[1], 0);
-        assert_eq!(ctm[2], 0);
+        for i in [1, 2, 3, 5, 6, 7] {
+            assert_eq!(ctm[i], 0);
+        }
+    }
+
+    #[test]
+    fn greyscale_ctm_rows_sum_to_one() {
+        let ctm = saturation_to_drm_ctm(Saturation::new(0.0));
+        for row in 0..3 {
+            let sum = unpack(ctm[row * 3]) + unpack(ctm[row * 3 + 1]) + unpack(ctm[row * 3 + 2]);
+            assert!((sum - 1.0).abs() < 1e-6, "row {row} sums to {sum}");
+        }
+    }
+
+    #[test]
+    fn greyscale_ctm_uses_rec709_luma_weights() {
+        let ctm = saturation_to_drm_ctm(Saturation::new(0.0));
+        for row in 0..3 {
+            assert!((unpack(ctm[row * 3]) - crate::LUMA_R as f64).abs() < 1e-6);
+            assert!((unpack(ctm[row * 3 + 1]) - crate::LUMA_G as f64).abs() < 1e-6);
+            assert!((unpack(ctm[row * 3 + 2]) - crate::LUMA_B as f64).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn pure_grey_input_is_unchanged_at_any_saturation() {
+        let grey = [0.42, 0.42, 0.42];
+        for &s in &[0.0f32, 0.5, 1.0, 2.0, 4.0] {
+            let out = apply_matrix(Saturation::new(s).matrix(), grey);
+            for channel in out {
+                assert!((channel - 0.42).abs() < 1e-6, "s={s} channel={channel}");
+            }
+        }
+    }
+
+    #[test]
+    fn higher_saturation_pushes_colored_pixel_farther_from_luma() {
+        let pixel = [0.9, 0.2, 0.1];
+        let muted = apply_matrix(Saturation::new(0.5).matrix(), pixel);
+        let identity = apply_matrix(Saturation::new(1.0).matrix(), pixel);
+        let vivid = apply_matrix(Saturation::new(2.0).matrix(), pixel);
+
+        assert!(distance_from_luma(muted) < distance_from_luma(identity));
+        assert!(distance_from_luma(identity) < distance_from_luma(vivid));
     }
 
     #[test]
@@ -102,7 +161,10 @@ mod tests {
         // For s>1, w=1-s<0, so off-diagonal coefficients (w*L) are negative.
         let ctm = saturation_to_drm_ctm(Saturation::new(2.0));
         // entry [0][1] = w*Lg = -1 * 0.7152 < 0 -> sign bit set.
-        assert!(ctm[1] & SIGN_BIT != 0, "expected sign bit for negative coeff");
+        assert!(
+            ctm[1] & SIGN_BIT != 0,
+            "expected sign bit for negative coeff"
+        );
         assert!(unpack(ctm[1]) < 0.0);
     }
 

@@ -37,6 +37,14 @@ impl Saturation {
         self.0
     }
 
+    pub fn from_percent(percent: f32) -> Saturation {
+        Saturation::new(1.0 + percent / 100.0)
+    }
+
+    pub fn to_percent(self) -> f32 {
+        (self.0 - 1.0) * 100.0
+    }
+
     pub fn is_identity(self) -> bool {
         (self.0 - 1.0).abs() < f32::EPSILON
     }
@@ -163,5 +171,33 @@ mod tests {
     fn saturation_clamps_to_range() {
         assert_eq!(Saturation::new(-1.0).get(), Saturation::MIN);
         assert_eq!(Saturation::new(99.0).get(), Saturation::MAX);
+    }
+
+    #[test]
+    fn identity_reports_identity_only_at_one() {
+        assert!(Saturation::IDENTITY.is_identity());
+        assert!(Saturation::new(1.0).is_identity());
+        assert!(!Saturation::new(0.99).is_identity());
+        assert!(!Saturation::new(1.01).is_identity());
+    }
+
+    #[test]
+    fn percent_conversion_maps_gui_range_to_saturation() {
+        for (percent, saturation) in [(-100.0, 0.0), (0.0, 1.0), (75.0, 1.75), (100.0, 2.0)] {
+            let sat = Saturation::from_percent(percent);
+            assert!(approx(sat.get(), saturation), "{percent}% -> {}", sat.get());
+            assert!(
+                approx(sat.to_percent(), percent),
+                "{saturation} -> {}%",
+                sat.to_percent()
+            );
+        }
+    }
+
+    #[test]
+    fn percent_conversion_clamps_to_supported_saturation_range() {
+        assert_eq!(Saturation::from_percent(-200.0).get(), Saturation::MIN);
+        assert_eq!(Saturation::from_percent(400.0).get(), Saturation::MAX);
+        assert!(approx(Saturation::new(Saturation::MAX).to_percent(), 300.0));
     }
 }

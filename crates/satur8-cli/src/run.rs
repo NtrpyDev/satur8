@@ -214,3 +214,86 @@ fn exe_basename(cmd: &str) -> String {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| cmd.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use satur8_core::{MatchRule, Profile};
+
+    fn profiles() -> Profiles {
+        Profiles {
+            default_saturation: 1.0,
+            profiles: vec![
+                Profile {
+                    name: "named".into(),
+                    saturation: 1.4,
+                    match_rule: MatchRule {
+                        exe: Some("named-exe".into()),
+                        window_class: None,
+                        steam_app_id: None,
+                    },
+                    outputs: vec![],
+                },
+                Profile {
+                    name: "auto".into(),
+                    saturation: 1.8,
+                    match_rule: MatchRule {
+                        exe: Some("auto-game".into()),
+                        window_class: None,
+                        steam_app_id: None,
+                    },
+                    outputs: vec![],
+                },
+            ],
+        }
+    }
+
+    fn args(profile: Option<&str>, saturation: Option<f32>, command: &str) -> RunArgs {
+        RunArgs {
+            profile: profile.map(str::to_string),
+            saturation,
+            via: None,
+            gamescope_args: vec![],
+            command: vec![command.into()],
+        }
+    }
+
+    #[test]
+    fn resolve_saturation_prefers_explicit_saturation() {
+        let args = args(Some("named"), Some(2.2), "/games/auto-game");
+        let sat = resolve_saturation(&profiles(), &args).unwrap().unwrap();
+        assert_eq!(sat.get(), 2.2);
+    }
+
+    #[test]
+    fn resolve_saturation_uses_named_profile_before_exe_match() {
+        let args = args(Some("named"), None, "/games/auto-game");
+        let sat = resolve_saturation(&profiles(), &args).unwrap().unwrap();
+        assert_eq!(sat.get(), 1.4);
+    }
+
+    #[test]
+    fn resolve_saturation_auto_matches_command_exe() {
+        let args = args(None, None, "/games/auto-game");
+        let sat = resolve_saturation(&profiles(), &args).unwrap().unwrap();
+        assert_eq!(sat.get(), 1.8);
+    }
+
+    #[test]
+    fn resolve_saturation_returns_none_without_match() {
+        let args = args(None, None, "/games/missing");
+        assert!(resolve_saturation(&profiles(), &args).unwrap().is_none());
+    }
+
+    #[test]
+    fn resolve_saturation_errors_for_missing_named_profile() {
+        let args = args(Some("missing"), None, "/games/auto-game");
+        assert!(resolve_saturation(&profiles(), &args).is_err());
+    }
+
+    #[test]
+    fn exe_basename_strips_paths_and_keeps_plain_names() {
+        assert_eq!(exe_basename("/home/noah/Games/cs2"), "cs2");
+        assert_eq!(exe_basename("cs2"), "cs2");
+    }
+}

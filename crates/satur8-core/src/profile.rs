@@ -125,10 +125,10 @@ impl Profiles {
 }
 
 fn normalize_game_id(id: &str) -> String {
-    id.trim()
-        .trim_end_matches(".exe")
+    let id = id.trim().to_ascii_lowercase();
+    id.trim_end_matches(".exe")
         .trim_end_matches(".x86_64")
-        .to_ascii_lowercase()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -138,16 +138,38 @@ mod tests {
     fn sample() -> Profiles {
         Profiles {
             default_saturation: 1.0,
-            profiles: vec![Profile {
-                name: "cs2".into(),
-                saturation: 1.6,
-                match_rule: MatchRule {
-                    exe: Some("cs2".into()),
-                    window_class: None,
-                    steam_app_id: Some(730),
+            profiles: vec![
+                Profile {
+                    name: "cs2".into(),
+                    saturation: 1.6,
+                    match_rule: MatchRule {
+                        exe: Some("cs2".into()),
+                        window_class: None,
+                        steam_app_id: Some(730),
+                    },
+                    outputs: vec![],
                 },
-                outputs: vec![],
-            }],
+                Profile {
+                    name: "Dota 2".into(),
+                    saturation: 1.4,
+                    match_rule: MatchRule {
+                        exe: Some("dota2".into()),
+                        window_class: Some("dota2.x86_64".into()),
+                        steam_app_id: Some(570),
+                    },
+                    outputs: vec!["DP-1".into()],
+                },
+                Profile {
+                    name: "Window Only".into(),
+                    saturation: 1.2,
+                    match_rule: MatchRule {
+                        exe: None,
+                        window_class: Some("com.example.Game".into()),
+                        steam_app_id: None,
+                    },
+                    outputs: vec![],
+                },
+            ],
         }
     }
 
@@ -155,14 +177,67 @@ mod tests {
     fn matches_by_exe_case_insensitive() {
         let p = sample();
         assert_eq!(p.match_exe("CS2").unwrap().name, "cs2");
-        assert!(p.match_exe("dota2").is_none());
+        assert_eq!(p.match_exe("dota2").unwrap().name, "Dota 2");
+        assert!(p.match_exe("unknown").is_none());
     }
 
     #[test]
     fn matches_by_steam_app_id() {
         let p = sample();
         assert_eq!(p.match_steam_app_id(730).unwrap().saturation, 1.6);
-        assert!(p.match_steam_app_id(570).is_none());
+        assert_eq!(p.match_steam_app_id(570).unwrap().name, "Dota 2");
+        assert!(p.match_steam_app_id(440).is_none());
+    }
+
+    #[test]
+    fn matches_by_window_class_case_insensitive() {
+        let p = sample();
+        assert_eq!(
+            p.match_window_class("COM.EXAMPLE.GAME").unwrap().name,
+            "Window Only"
+        );
+        assert_eq!(p.match_window_class("DOTA2.X86_64").unwrap().name, "Dota 2");
+    }
+
+    #[test]
+    fn first_matching_profile_wins() {
+        let p = Profiles {
+            default_saturation: 1.0,
+            profiles: vec![
+                Profile {
+                    name: "first".into(),
+                    saturation: 1.2,
+                    match_rule: MatchRule {
+                        exe: Some("same-game".into()),
+                        window_class: Some("same-class".into()),
+                        steam_app_id: Some(1),
+                    },
+                    outputs: vec![],
+                },
+                Profile {
+                    name: "second".into(),
+                    saturation: 1.8,
+                    match_rule: MatchRule {
+                        exe: Some("same-game".into()),
+                        window_class: Some("same-class".into()),
+                        steam_app_id: Some(1),
+                    },
+                    outputs: vec![],
+                },
+            ],
+        };
+
+        assert_eq!(p.match_exe("same-game").unwrap().name, "first");
+        assert_eq!(p.match_window_class("same-class").unwrap().name, "first");
+        assert_eq!(p.match_steam_app_id(1).unwrap().name, "first");
+    }
+
+    #[test]
+    fn finds_profile_by_name_case_insensitive() {
+        let p = sample();
+        assert_eq!(p.by_name("CS2").unwrap().name, "cs2");
+        assert_eq!(p.by_name("dota 2").unwrap().name, "Dota 2");
+        assert!(p.by_name("missing").is_none());
     }
 
     #[test]
@@ -171,7 +246,14 @@ mod tests {
         assert_eq!(p.match_window_class("cs2").unwrap().name, "cs2");
         assert_eq!(p.match_window_class("cs2.x86_64").unwrap().name, "cs2");
         assert_eq!(p.match_window_class("steam_app_730").unwrap().name, "cs2");
-        assert!(p.match_window_class("dota2").is_none());
+        assert!(p.match_window_class("unknown").is_none());
+    }
+
+    #[test]
+    fn missing_default_saturation_defaults_to_identity() {
+        let p = Profiles::from_toml("").unwrap();
+        assert!(p.default_saturation().is_identity());
+        assert!(p.profiles.is_empty());
     }
 
     #[test]
