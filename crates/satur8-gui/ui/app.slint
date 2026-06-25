@@ -96,21 +96,9 @@ component Button inherits Rectangle {
     border-radius: 9px;
     border-width: primary ? 0px : 1px;
     border-color: Pal.line;
-    background: primary ? transparent
+    background: primary
+        ? (touch.pressed || touch.has-hover ? Pal.accent-2 : Pal.accent)
         : (touch.pressed ? Pal.line : (touch.has-hover ? Pal.hover : Pal.note));
-
-    // Spectrum fill + hover/press sheen for primary buttons.
-    if primary: Rectangle {
-        width: 100%; height: 100%;
-        border-radius: parent.border-radius;
-        background: Pal.spectrum;
-    }
-    if primary: Rectangle {
-        width: 100%; height: 100%;
-        border-radius: parent.border-radius;
-        background: white;
-        opacity: touch.pressed ? 0.22 : (touch.has-hover ? 0.12 : 0.0);
-    }
 
     touch := TouchArea { clicked => { root.clicked(); } }
 
@@ -280,7 +268,7 @@ export component AppWindow inherits Window {
             height: 72px;
             background: Pal.dark ? #0a0c12 : Pal.card;
             // spectrum accent line along the bottom edge
-            Rectangle { height: 2px; y: parent.height - 2px; background: Pal.spectrum; opacity: 0.9; }
+            Rectangle { height: 2px; y: parent.height - 2px; background: Pal.spectrum; opacity: 0.45; }
             HorizontalLayout {
                 padding-left: 24px;
                 padding-right: 24px;
