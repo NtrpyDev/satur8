@@ -3,6 +3,19 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## v0.3.2 - 2026-06-25
+
+Hyprland linear-light release.
+
+- Make `satur8 set --linear` apply before the Hyprland shader is written, so
+  the requested linear-light mode affects the current command.
+- Add a Hyprland linear-light shader path using the standard sRGB transfer
+  functions instead of a simple gamma approximation.
+- Keep the default Hyprland gamma-encoded shader path unchanged unless
+  `--linear` is requested.
+- Verify on AMD RX 9070 / Hyprland 0.55.4 that linear-light output differs from
+  the gamma path as expected.
+
 ## v0.3.1 - 2026-06-25
 
 GUI visual refresh to match satur8.app.
