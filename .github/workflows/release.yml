@@ -1,0 +1,74 @@
+name: release
+
+# On a version tag, build the release artifacts reproducibly and attach them to
+# the GitHub release for that tag. The source archive is the trust anchor: it is
+# deterministic and is what the Arch (PKGBUILD) and Fedora (spec) packaging fetch
+# and checksum. The Linux binary tarball is the convenience download the website
+# serves.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  source-archive:
+    name: source archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build source archive and checksum
+        run: packaging/source-tarball.sh
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          mkdir -p target/dist
+          packaging/release-notes.sh "${GITHUB_REF_NAME}" > target/dist/release-notes.md
+          echo "--- release notes ---"
+          cat target/dist/release-notes.md
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Satur8 ${{ github.ref_name }}
+          body_path: target/dist/release-notes.md
+          files: |
+            target/dist/satur8-v*-source.tar.gz
+            target/dist/satur8-v*-source.tar.gz.sha256
+
+  linux-x86_64:
+    name: linux-x86_64 tarball
+    # Runs after source-archive so the release already has its title and notes
+    # set; this job only attaches the binary tarball and leaves the body intact.
+    needs: source-archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release tarball and checksum
+        run: |
+          docker run --rm \
+            -e HOST_UID="$(id -u)" \
+            -e HOST_GID="$(id -g)" \
+            -v "$PWD:/work" \
+            -w /work \
+            fedora:latest \
+            bash -lc '
+              dnf -y install dnf-plugins-core rpm-build git tar gzip >/tmp/dnf-base.log &&
+              dnf -y builddep packaging/satur8.spec >/tmp/dnf-builddep.log &&
+              bash packaging/release-tarball.sh &&
+              chown -R "$HOST_UID:$HOST_GID" target
+            '
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/dist/satur8-v*-linux-x86_64.tar.gz
+            target/dist/satur8-v*-linux-x86_64.tar.gz.sha256
