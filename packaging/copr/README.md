@@ -4,8 +4,9 @@ COPR is Fedora's hosted build service: you point it at this repository, it
 builds the RPM for each Fedora release you pick, and users install with a couple
 of `dnf` commands. It is the Fedora equivalent of the Arch AUR.
 
-The packaging is ready; the COPR project itself still has to be created under a
-Fedora account (a one-time step that needs a Fedora Account System login).
+The COPR project is live at https://copr.fedorainfracloud.org/coprs/ntrpydev/satur8/.
+The setup notes below are kept for future maintainers or for recreating the
+project under another namespace.
 
 ## One-time project setup
 
@@ -43,7 +44,6 @@ sudo dnf install satur8
 
 ## Status
 
-Authored and self-consistent, not yet built on COPR. The first COPR build is
-what confirms the `BuildRequires` list and the Fedora paths on a real Fedora
-chroot; treat any first-build adjustments as expected, the same way an AUR
-package gets its first clean-chroot pass.
+Live and building for Fedora 43 and 44. Treat new Fedora release targets like a
+fresh validation pass: the COPR build confirms the `BuildRequires` list and the
+Fedora paths in a real Fedora chroot.
