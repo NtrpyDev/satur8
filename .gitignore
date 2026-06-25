@@ -10,3 +10,4 @@ packaging/*-build.log
 packaging/*-package.log
 packaging/*-namcap.log
 packaging/PKGBUILD-namcap.log
+__pycache__/
