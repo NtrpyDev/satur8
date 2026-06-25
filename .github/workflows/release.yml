@@ -26,15 +26,27 @@ jobs:
       - name: Build source archive and checksum
         run: packaging/source-tarball.sh
 
+      - name: Extract release notes from CHANGELOG
+        run: |
+          mkdir -p target/dist
+          packaging/release-notes.sh "${GITHUB_REF_NAME}" > target/dist/release-notes.md
+          echo "--- release notes ---"
+          cat target/dist/release-notes.md
+
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
+          name: Satur8 ${{ github.ref_name }}
+          body_path: target/dist/release-notes.md
           files: |
             target/dist/satur8-v*-source.tar.gz
             target/dist/satur8-v*-source.tar.gz.sha256
 
   linux-x86_64:
     name: linux-x86_64 tarball
+    # Runs after source-archive so the release already has its title and notes
+    # set; this job only attaches the binary tarball and leaves the body intact.
+    needs: source-archive
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
