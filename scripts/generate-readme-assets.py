@@ -471,14 +471,24 @@ def make_demo():
             if key not in cache:
                 cache[key] = hud(satur(scene, fac), status, slider_t(fac), f"{fac:.2f}x", dot)
             cache[key].save(os.path.join(tmp, f"f{i:04d}.png"))
-        out = os.path.join(OUT, "demo.gif")
+        frames_in = os.path.join(tmp, "f%04d.png")
         subprocess.run([
             "ffmpeg", "-y", "-loglevel", "error", "-framerate", str(fps),
-            "-i", os.path.join(tmp, "f%04d.png"),
+            "-i", frames_in,
             "-filter_complex",
             "split[s0][s1];[s0]palettegen=stats_mode=diff[p];"
             "[s1][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle",
-            "-loop", "0", out,
+            "-loop", "0", os.path.join(OUT, "demo.gif"),
+        ], check=True)
+        # H.264 MP4 for autoplay-loop <video> in the README (avoids GitHub's
+        # gif player overlay and autoplays inline).
+        subprocess.run([
+            "ffmpeg", "-y", "-loglevel", "error", "-framerate", str(fps),
+            "-i", frames_in,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-movflags", "+faststart", "-an",
+            os.path.join(OUT, "demo.mp4"),
         ], check=True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
