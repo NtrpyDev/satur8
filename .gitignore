@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+.direnv/
+*.qsb
+packaging/pkg/
+packaging/src/
+packaging/*.pkg.tar.*
+packaging/*.tar.gz
+packaging/*-build.log
+packaging/*-package.log
+packaging/*-namcap.log
+packaging/PKGBUILD-namcap.log
