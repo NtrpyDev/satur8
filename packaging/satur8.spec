@@ -7,7 +7,7 @@
 # the crates vendored instead, because Koji builds offline.
 
 Name:           satur8
-Version:        0.2.1
+Version:        0.2.2
 Release:        1%{?dist}
 Summary:        Per-game digital vibrance for Linux
 
@@ -122,6 +122,11 @@ install -Dm0644 packaging/satur8.desktop \
 %{_datadir}/applications/satur8.desktop
 
 %changelog
+* Wed Jun 24 2026 Satur8 <ntrpydev@pm.me> - 0.2.2-1
+- Fix the GNOME Shell backend for GNOME 50: extend the extension shell-version
+  range and stop using the Clutter.ShaderType enum removed in Mutter 18, so the
+  saturation shader loads and applies. Verified on GNOME 50.2.
+
 * Wed Jun 24 2026 Satur8 <ntrpydev@pm.me> - 0.2.1-1
 - Fix the NVIDIA X11 NV-CONTROL backend to set the driver's Digital Vibrance
   attribute.

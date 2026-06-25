@@ -90,8 +90,8 @@ https://github.com/NtrpyDev/satur8/releases
 Then install it:
 
 ```sh
-tar -xzf satur8-v0.2.1-linux-x86_64.tar.gz
-cd satur8-v0.2.1-linux-x86_64
+tar -xzf satur8-v0.2.2-linux-x86_64.tar.gz
+cd satur8-v0.2.2-linux-x86_64
 packaging/install.sh
 ```
 
@@ -261,7 +261,7 @@ Satur8 uses the best backend available for the current session.
 | Environment | Backend | Cost | v0.1 status |
 |---|---|---:|---|
 | KDE Plasma Wayland | KWin saturation effect | One compositor pass | Verified |
-| GNOME Wayland | GNOME Shell shader extension | One compositor pass | Implemented |
+| GNOME Wayland | GNOME Shell shader extension | One compositor pass | Verified |
 | Hyprland | hyprctl shader backend | One compositor pass | Implemented |
 | X11 with NVIDIA | NV-CONTROL Digital Vibrance | Zero per-frame cost | Verified |
 | DRM/KMS capable sessions | DRM CTM | Zero per-frame cost | Implemented |
@@ -350,13 +350,13 @@ Build the source archive used by the Arch package:
 packaging/source-tarball.sh
 ```
 
-## v0.2.1 release checklist
+## v0.2.2 release checklist
 
-- Rust workspace builds and tests pass at v0.2.1 (`cargo check`/`cargo test
+- Rust workspace builds and tests pass at v0.2.2 (`cargo check`/`cargo test
   --workspace --locked`).
 - KDE Plasma Wayland backend remains verified, and NVIDIA X11 NV-CONTROL is
   verified on real NVIDIA hardware.
-- Arch PKGBUILD and `.SRCINFO` track the v0.2.1 source archive.
+- Arch PKGBUILD and `.SRCINFO` track the v0.2.2 source archive.
 - Fedora `packaging/satur8.spec` written, mirroring the Arch build.
 - COPR build entry point (`.copr/Makefile`) and setup notes
   (`packaging/copr/README.md`) added.
