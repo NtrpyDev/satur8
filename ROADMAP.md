@@ -19,6 +19,12 @@ existing AUR maintainer publishes the package. The remaining backends
 (Hyprland, DRM/KMS, gamescope) are implemented behind environment detection but
 not yet independently verified.
 
+The north star is **v1.0 = Satur8 running well on SteamOS and Bazzite**. Both run
+gamescope rather than KWin, so everything between here and 1.0 is sequenced to
+de-risk and reach that: prove the gamescope path (v0.3), land and field-test
+Deck/Bazzite support (v0.4), then stamp 1.0 once it is proven. Broader desktop
+reach (Debian/Ubuntu, non-gaming uses) comes after 1.0.
+
 ## Guiding principle
 
 Ship where it is cheap and where the audience already is, widen reach as the
@@ -75,44 +81,71 @@ auto-building hosted repo, the Fedora equivalent of the AUR).
 
 ## v0.3: Backend verification sweep
 
-Turn the backend table's "implemented" rows into "verified". This is a
-credibility milestone and a prerequisite for the Steam Deck work. It can run in
-parallel with v0.4.
+Turn the backend table's "implemented" rows into "verified". A credibility
+milestone, and the place we de-risk the 1.0 north star: SteamOS and Bazzite both
+run gamescope, so proving the gamescope path here is the priority, ahead of the
+other backends.
 
+- [ ] **Verify the gamescope path (priority).** Confirm satur8 can drive a live
+      gamescope session's color saturation. This is the load-bearing assumption
+      for the SteamOS/Bazzite 1.0 target, so it gets verified first. The current
+      gamescope backend wraps a *nested* gamescope and bakes the value at launch;
+      the Deck needs driving the *running* compositor's native saturation at
+      runtime.
+- [ ] Verify the Hyprland backend.
+- [ ] Verify DRM-CTM on X11 / TTY for AMD and Intel (the read-only probe already
+      passes, see PLAN.md section 10). Also relevant to the Deck, an AMD APU.
 - [x] Verify the GNOME Wayland Shell-extension backend on real GNOME (GNOME
       50.2, NVIDIA Wayland). Required fixes: shell-version range and the
       Clutter.ShaderType enum removed in Mutter 18.
-- [ ] Verify the Hyprland backend.
 - [x] Verify the NVIDIA X11 NV-CONTROL backend on real NVIDIA hardware.
-- [ ] Verify DRM-CTM on X11 / TTY for AMD and Intel (the read-only probe already
-      passes, see PLAN.md section 10).
-- [ ] Measure gamescope fallback quality and added latency (PLAN.md open item).
 - [ ] Measure KWin effect in-game cost at 1440p / 240Hz in CS2 (PLAN.md open
       item).
 - [ ] Update the backend status table in the README and on the website to match
       reality.
 
-## v0.4: Debian / Ubuntu
+## v0.4: SteamOS / Bazzite support
 
-Largest raw install base, more packaging friction and older libraries.
+The north star. A per-game vibrance tool is tailor-made for a Steam Deck, and
+this is where that support lands and gets tested in the wild before the stable
+stamp. Gated on the gamescope path being proven in v0.3. The packaging groundwork
+is already done: SteamOS is Arch-based (the tested Arch package is the on-ramp)
+and Bazzite is Fedora-based (the live COPR work carries over).
 
-- [ ] `.deb` packaging plus a Launchpad PPA.
-- [ ] Handle older Qt6 / KWin library skew on Ubuntu LTS; pick the minimum
-      supported release.
-- [ ] Test on Ubuntu LTS with KDE.
-- [ ] Add Mint and Pop!_OS notes.
-
-## v0.5: SteamOS / Bazzite
-
-Highest-value target conceptually (a per-game vibrance tool is tailor-made for a
-Steam Deck) and the hardest. Gated on v0.3, because SteamOS runs gamescope, not
-KWin, so the gamescope backend must be verified first.
-
-- [ ] SteamOS: work out the install story on a read-only root (a Decky plugin or
-      a layered install); ship only honest, tested docs.
-- [ ] Bazzite (atomic Fedora): evaluate rpm-ostree layering versus Flatpak for
-      the parts that can live in a Flatpak.
+- [ ] Build a gamescope-native backend that drives the running compositor's color
+      saturation per-game at runtime (zero extra pass, no injection), instead of
+      the nested-gamescope reshade fallback.
+- [ ] Per-game auto-apply in Game Mode. This is the differentiator versus the
+      existing global-saturation tools (e.g. vibrantDeck).
+- [ ] SteamOS: install story on a read-only root (a Decky plugin is the likely
+      path); ship only honest, tested docs.
+- [ ] Bazzite (atomic Fedora): evaluate rpm-ostree layering versus a Decky/
+      Flatpak split.
 - [ ] Document clearly what works and what does not on each.
+
+## v1.0: Stable on the north star
+
+1.0 is a stability stamp, not a feature drop. It means the SteamOS and Bazzite
+support from v0.4 has been proven on real hardware and the bugs found there are
+fixed. Shipping Deck/Bazzite as a pre-1.0 version first is deliberate: it shakes
+out the hard target before the 1.0 label goes on it.
+
+- [ ] Shake out the v0.4 Deck/Bazzite bugs on real hardware.
+- [ ] Lock the supported backend matrix and only the install stories that are
+      actually tested.
+- [ ] Tag v1.0.0.
+
+## Post-1.0: broaden beyond gamers
+
+Once the beachhead is solid, widen reach. Per-app vibrance has uses beyond
+gaming, but this is demand-pull: do it when the proven Deck/enthusiast audience
+is served and there is real pull for more, not on speculation.
+
+- [ ] Debian / Ubuntu: `.deb` packaging plus a Launchpad PPA; handle the older
+      Qt6 / KWin skew on Ubuntu LTS; pick a minimum supported release; Mint and
+      Pop!_OS notes.
+- [ ] Evaluate non-gaming use cases (photo/video editing, accessibility) if the
+      demand shows up.
 
 ## Ongoing: features and project health
 
