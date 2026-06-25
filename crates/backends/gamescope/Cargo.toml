@@ -9,3 +9,4 @@ description = "gamescope fallback backend (B6) for Satur8: runs a game inside ga
 [dependencies]
 satur8-core = { workspace = true }
 anyhow = { workspace = true }
+x11rb = { workspace = true }
