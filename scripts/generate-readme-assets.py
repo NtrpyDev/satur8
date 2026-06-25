@@ -565,9 +565,93 @@ def make_architecture():
         f.write("\n".join(parts))
 
 
+def _wrap(draw, text, font, max_w):
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        t = (cur + " " + w).strip()
+        if draw.textlength(t, font=font) <= max_w:
+            cur = t
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _icon_sliders(d, x, y, s, c):
+    for i, frac in enumerate([0.7, 0.4, 0.85]):
+        yy = y + i * (s // 2)
+        d.line([(x, yy), (x + s, yy)], fill=c + (90,), width=3)
+        kx = x + int(s * frac)
+        d.ellipse([kx - 5, yy - 5, kx + 5, yy + 5], fill=c + (255,))
+
+
+def _icon_shield(d, x, y, s, c):
+    cx = x + s // 2
+    pts = [(cx, y), (x + s, y + s * 0.22), (x + s, y + s * 0.55),
+           (cx, y + s), (x, y + s * 0.55), (x, y + s * 0.22)]
+    d.polygon(pts, outline=c + (255,), width=3)
+    d.line([(cx - s * 0.22, y + s * 0.5), (cx - s * 0.04, y + s * 0.66),
+            (cx + s * 0.26, y + s * 0.32)], fill=c + (255,), width=3, joint="curve")
+
+
+def _icon_chip(d, x, y, s, c):
+    d.rounded_rectangle([x, y, x + s, y + s], radius=6, outline=c + (255,), width=3)
+    inset = int(s * 0.28)
+    d.rounded_rectangle([x + inset, y + inset, x + s - inset, y + s - inset],
+                        radius=3, outline=c + (200,), width=2)
+    for i in range(3):
+        px = x + int(s * (0.3 + 0.2 * i))
+        d.line([(px, y - 6), (px, y)], fill=c + (255,), width=3)
+        d.line([(px, y + s), (px, y + s + 6)], fill=c + (255,), width=3)
+        d.line([(x - 6, px), (x, px)], fill=c + (255,), width=3)
+        d.line([(x + s, px), (x + s + 6, px)], fill=c + (255,), width=3)
+
+
+def make_why():
+    W, H = 1200, 360
+    img = site_background(W, H)
+    d = ImageDraw.Draw(img, "RGBA")
+    cards = [
+        ("Per-game profiles",
+         "Tune saturation per game instead of changing your whole desktop every "
+         "time. Profiles match by executable name, window class, or Steam AppID.",
+         _icon_sliders),
+        ("Game-safe approach",
+         "Satur8 works outside the game process. It does not inject code, hook "
+         "rendering APIs, or require an overlay. It changes the display pipeline "
+         "after the game has rendered.",
+         _icon_shield),
+        ("Native Linux backends",
+         "Uses the compositor, driver, or display color path that fits your "
+         "session, across both Wayland and X11.",
+         _icon_chip),
+    ]
+    margin, gap = 40, 24
+    cw = (W - margin * 2 - gap * 2) // 3
+    ch = H - margin * 2
+    title_f, body_f = F_BOLD(27), F_REG(18)
+    for i, (title, body, icon) in enumerate(cards):
+        x = margin + i * (cw + gap)
+        y = margin
+        d.rounded_rectangle([x, y, x + cw, y + ch], radius=14,
+                            fill=(14, 17, 23, 235), outline=(30, 37, 50, 255), width=1)
+        pad = 26
+        icon(d, x + pad, y + pad + 4, 30, VIOLET)
+        d.text((x + pad, y + pad + 58), title, font=title_f, fill=TEXT)
+        ty = y + pad + 100
+        for ln in _wrap(d, body, body_f, cw - pad * 2):
+            d.text((x + pad, ty), ln, font=body_f, fill=MUTED)
+            ty += 27
+    return img.convert("RGB")
+
+
 def main():
     make_hero().save(os.path.join(OUT, "hero.png"))
     make_before_after().convert("RGB").save(os.path.join(OUT, "before-after.png"))
+    make_why().save(os.path.join(OUT, "why-satur8.png"))
     make_demo()
     make_architecture()
     print("wrote:", ", ".join(sorted(os.listdir(OUT))))
