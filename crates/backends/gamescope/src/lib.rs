@@ -18,6 +18,10 @@ use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use satur8_core::Saturation;
+use x11rb::connection::Connection;
+use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt, PropMode, Window};
+use x11rb::rust_connection::RustConnection;
+use x11rb::wrapper::ConnectionExt as _;
 
 /// Self-contained ReShade FX. gamescope does not ship `ReShade.fxh`, so we
 /// declare the backbuffer sampler and a full-screen-triangle vertex shader
@@ -50,6 +54,13 @@ technique Satur8
 "#;
 
 const EFFECT_NAME: &str = "Satur8.fx";
+const LUT_EDGE_SIZE_3D: usize = 17;
+const LUT_SIZE_1D: usize = 4096;
+
+const ATOM_PID: &[u8] = b"GAMESCOPE_PID";
+const ATOM_3DLUT_OVERRIDE: &[u8] = b"GAMESCOPE_COLOR_3DLUT_OVERRIDE";
+const ATOM_SHAPERLUT_OVERRIDE: &[u8] = b"GAMESCOPE_COLOR_SHAPERLUT_OVERRIDE";
+const ATOM_COLOR_MANAGEMENT_DISABLE: &[u8] = b"GAMESCOPE_COLOR_MANAGEMENT_DISABLE";
 
 /// Is gamescope available to wrap a launch?
 pub fn is_available() -> bool {
@@ -77,7 +88,8 @@ pub fn install_effect(saturation: Saturation) -> Result<String> {
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let fx = RESHADE_FX_TEMPLATE.replace("{SATURATION}", &format!("{:.4}", saturation.get()));
     let path = dir.join(EFFECT_NAME);
-    let mut f = std::fs::File::create(&path).with_context(|| format!("writing {}", path.display()))?;
+    let mut f =
+        std::fs::File::create(&path).with_context(|| format!("writing {}", path.display()))?;
     f.write_all(fx.as_bytes())?;
     Ok(EFFECT_NAME.to_string())
 }
@@ -105,6 +117,246 @@ pub fn run(saturation: Saturation, extra_args: &[String], command: &[String]) ->
         .status()
         .with_context(|| "launching gamescope (is it installed and runnable?)")?;
     Ok(status.code().unwrap_or(1))
+}
+
+/// A saved live gamescope color state, restored when dropped by `satur8 run`.
+pub struct NativeSession {
+    conn: RustConnection,
+    root: Window,
+    atoms: NativeAtoms,
+    previous_3dlut: SavedProperty,
+    previous_shaper: SavedProperty,
+    previous_disable: SavedProperty,
+}
+
+#[derive(Clone, Copy)]
+struct NativeAtoms {
+    lut3d_override: Atom,
+    shaperlut_override: Atom,
+    color_management_disable: Atom,
+}
+
+enum SavedProperty {
+    Missing,
+    Present {
+        type_: Atom,
+        format: u8,
+        bytes: Vec<u8>,
+    },
+}
+
+/// Connect to the current X server and verify it is gamescope's embedded
+/// Xwayland server. In Steam Game Mode, Steam launch options run with DISPLAY
+/// pointed at this server, so no compositor window wrapping is needed.
+pub fn native_session() -> Result<NativeSession> {
+    let (conn, screen_num) = RustConnection::connect(None)
+        .context("connecting to X11; is DISPLAY set to gamescope's Xwayland display?")?;
+    let root = conn.setup().roots[screen_num].root;
+    let pid_atom = intern(&conn, ATOM_PID)?;
+    let pid = conn
+        .get_property(false, root, pid_atom, AtomEnum::CARDINAL, 0, 1)?
+        .reply()
+        .context("reading GAMESCOPE_PID root property")?;
+    if pid.value32().and_then(|mut v| v.next()).is_none() {
+        bail!("current X11 root is not gamescope (missing GAMESCOPE_PID)");
+    }
+
+    let atoms = NativeAtoms {
+        lut3d_override: intern(&conn, ATOM_3DLUT_OVERRIDE)?,
+        shaperlut_override: intern(&conn, ATOM_SHAPERLUT_OVERRIDE)?,
+        color_management_disable: intern(&conn, ATOM_COLOR_MANAGEMENT_DISABLE)?,
+    };
+
+    let previous_3dlut = save_property(&conn, root, atoms.lut3d_override)?;
+    let previous_shaper = save_property(&conn, root, atoms.shaperlut_override)?;
+    let previous_disable = save_property(&conn, root, atoms.color_management_disable)?;
+
+    Ok(NativeSession {
+        conn,
+        root,
+        atoms,
+        previous_3dlut,
+        previous_shaper,
+        previous_disable,
+    })
+}
+
+impl NativeSession {
+    /// Apply Satur8 to the running gamescope compositor using gamescope's raw
+    /// shaper + 3D LUT override atoms. This is the SteamOS/Bazzite-shaped path:
+    /// drive the existing compositor at runtime instead of launching a nested
+    /// gamescope.
+    pub fn apply(&self, saturation: Saturation) -> Result<()> {
+        if saturation.is_identity() {
+            return Ok(());
+        }
+
+        let dir = native_lut_dir()?;
+        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let shaper_path = dir.join("shaper-lut-u16-rgba.bin");
+        let lut3d_path = dir.join("lut3d-u16-rgba.bin");
+
+        let (shaper, lut3d) = generate_native_luts(saturation);
+        std::fs::write(&shaper_path, shaper)
+            .with_context(|| format!("writing {}", shaper_path.display()))?;
+        std::fs::write(&lut3d_path, lut3d)
+            .with_context(|| format!("writing {}", lut3d_path.display()))?;
+
+        // gamescope interprets non-zero as disabled. Force color management on
+        // while Satur8 owns these overrides, then restore the previous property.
+        self.conn.change_property32(
+            PropMode::REPLACE,
+            self.root,
+            self.atoms.color_management_disable,
+            AtomEnum::CARDINAL,
+            &[0],
+        )?;
+        self.set_string(self.atoms.shaperlut_override, &shaper_path)?;
+        self.set_string(self.atoms.lut3d_override, &lut3d_path)?;
+        self.conn.flush()?;
+        Ok(())
+    }
+
+    pub fn restore(self) -> Result<()> {
+        restore_property(
+            &self.conn,
+            self.root,
+            self.atoms.lut3d_override,
+            self.previous_3dlut,
+        )?;
+        restore_property(
+            &self.conn,
+            self.root,
+            self.atoms.shaperlut_override,
+            self.previous_shaper,
+        )?;
+        restore_property(
+            &self.conn,
+            self.root,
+            self.atoms.color_management_disable,
+            self.previous_disable,
+        )?;
+        self.conn.flush()?;
+        Ok(())
+    }
+
+    fn set_string(&self, atom: Atom, path: &std::path::Path) -> Result<()> {
+        self.conn.change_property8(
+            PropMode::REPLACE,
+            self.root,
+            atom,
+            AtomEnum::STRING,
+            path.to_string_lossy().as_bytes(),
+        )?;
+        Ok(())
+    }
+}
+
+fn intern(conn: &RustConnection, name: &[u8]) -> Result<Atom> {
+    Ok(conn.intern_atom(false, name)?.reply()?.atom)
+}
+
+fn save_property(conn: &RustConnection, root: Window, atom: Atom) -> Result<SavedProperty> {
+    let reply = conn
+        .get_property(false, root, atom, AtomEnum::ANY, 0, u32::MAX)?
+        .reply()?;
+    if reply.type_ == AtomEnum::NONE.into() {
+        Ok(SavedProperty::Missing)
+    } else {
+        Ok(SavedProperty::Present {
+            type_: reply.type_,
+            format: reply.format,
+            bytes: reply.value,
+        })
+    }
+}
+
+fn restore_property(
+    conn: &RustConnection,
+    root: Window,
+    atom: Atom,
+    saved: SavedProperty,
+) -> Result<()> {
+    match saved {
+        SavedProperty::Missing => {
+            conn.delete_property(root, atom)?;
+        }
+        SavedProperty::Present {
+            type_,
+            format,
+            bytes,
+        } => {
+            let len = match format {
+                8 => bytes.len(),
+                16 => bytes.len() / 2,
+                32 => bytes.len() / 4,
+                _ => bytes.len(),
+            } as u32;
+            conn.change_property(
+                PropMode::REPLACE,
+                root,
+                atom,
+                type_,
+                format,
+                len,
+                &bytes,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn native_lut_dir() -> Result<PathBuf> {
+    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
+        if !runtime.is_empty() {
+            return Ok(PathBuf::from(runtime).join("satur8/gamescope"));
+        }
+    }
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .context("XDG_RUNTIME_DIR, XDG_CACHE_HOME, and HOME are unset")?;
+    Ok(base.join("satur8/gamescope"))
+}
+
+fn generate_native_luts(saturation: Saturation) -> (Vec<u8>, Vec<u8>) {
+    let mut shaper = Vec::with_capacity(LUT_SIZE_1D * 4 * 2);
+    for i in 0..LUT_SIZE_1D {
+        let v = i as f32 / (LUT_SIZE_1D - 1) as f32;
+        push_rgba16(&mut shaper, v, v, v, 0.0);
+    }
+
+    let m = saturation.matrix();
+    let mut lut3d = Vec::with_capacity(LUT_EDGE_SIZE_3D.pow(3) * 4 * 2);
+    for b in 0..LUT_EDGE_SIZE_3D {
+        for g in 0..LUT_EDGE_SIZE_3D {
+            for r in 0..LUT_EDGE_SIZE_3D {
+                let rgb = [
+                    r as f32 / (LUT_EDGE_SIZE_3D - 1) as f32,
+                    g as f32 / (LUT_EDGE_SIZE_3D - 1) as f32,
+                    b as f32 / (LUT_EDGE_SIZE_3D - 1) as f32,
+                ];
+                let out = [
+                    m[0][0] * rgb[0] + m[0][1] * rgb[1] + m[0][2] * rgb[2],
+                    m[1][0] * rgb[0] + m[1][1] * rgb[1] + m[1][2] * rgb[2],
+                    m[2][0] * rgb[0] + m[2][1] * rgb[1] + m[2][2] * rgb[2],
+                ];
+                push_rgba16(&mut lut3d, out[0], out[1], out[2], 0.0);
+            }
+        }
+    }
+    (shaper, lut3d)
+}
+
+fn push_rgba16(buf: &mut Vec<u8>, r: f32, g: f32, b: f32, a: f32) {
+    for value in [r, g, b, a] {
+        buf.extend_from_slice(&quantize_u16(value).to_le_bytes());
+    }
+}
+
+fn quantize_u16(value: f32) -> u16 {
+    (value.clamp(0.0, 1.0) * u16::MAX as f32).round() as u16
 }
 
 /// Build the gamescope argv we would exec, for diagnostics / dry-run.
@@ -143,5 +395,37 @@ mod tests {
         assert!(argv.contains(&"--reshade-effect".to_string()));
         assert!(argv.contains(&"--".to_string()));
         assert_eq!(argv.last().unwrap(), "cs2");
+    }
+
+    #[test]
+    fn native_luts_have_gamescope_sizes() {
+        let (shaper, lut3d) = generate_native_luts(Saturation::IDENTITY);
+        assert_eq!(shaper.len(), LUT_SIZE_1D * 4 * 2);
+        assert_eq!(lut3d.len(), LUT_EDGE_SIZE_3D.pow(3) * 4 * 2);
+    }
+
+    #[test]
+    fn native_identity_lut_keeps_red_red() {
+        let (_, lut3d) = generate_native_luts(Saturation::IDENTITY);
+        let red_index = 16 * 4 * 2;
+        let r = u16::from_le_bytes(lut3d[red_index..red_index + 2].try_into().unwrap());
+        let g = u16::from_le_bytes(lut3d[red_index + 2..red_index + 4].try_into().unwrap());
+        let b = u16::from_le_bytes(lut3d[red_index + 4..red_index + 6].try_into().unwrap());
+        assert_eq!(r, u16::MAX);
+        assert_eq!(g, 0);
+        assert_eq!(b, 0);
+    }
+
+    #[test]
+    fn native_zero_saturation_lut_turns_red_to_luma() {
+        let (_, lut3d) = generate_native_luts(Saturation::new(0.0));
+        let red_index = 16 * 4 * 2;
+        let r = u16::from_le_bytes(lut3d[red_index..red_index + 2].try_into().unwrap());
+        let g = u16::from_le_bytes(lut3d[red_index + 2..red_index + 4].try_into().unwrap());
+        let b = u16::from_le_bytes(lut3d[red_index + 4..red_index + 6].try_into().unwrap());
+        let luma = quantize_u16(satur8_core::LUMA_R);
+        assert_eq!(r, luma);
+        assert_eq!(g, luma);
+        assert_eq!(b, luma);
     }
 }
