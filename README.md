@@ -8,7 +8,7 @@
 Boost saturation when your game is focused. Restore your desktop when you leave.  
 No game injection. No Vulkan layer. No overlay. Built for modern Linux display stacks.
 
-[Website](https://satur8.app) · [Releases](https://github.com/NtrpyDev/satur8/releases) · [Roadmap](ROADMAP.md) · [Issues](https://github.com/NtrpyDev/satur8/issues) · [Buy Me a Coffee](https://buymeacoffee.com/ntrpydev)
+[Website](https://satur8.app) · [Releases](https://github.com/NtrpyDev/satur8/releases) · [Roadmap](ROADMAP.md) · [Packaging](PACKAGING.md) · [Issues](https://github.com/NtrpyDev/satur8/issues) · [Buy Me a Coffee](https://buymeacoffee.com/ntrpydev)
 
 ![License](https://img.shields.io/github/license/NtrpyDev/satur8?color=ff3d8a)
 ![Release](https://img.shields.io/github/v/release/NtrpyDev/satur8?color=ffc24b)
@@ -292,6 +292,7 @@ packaging/source-tarball.sh
 |-- Cargo.lock                     Pinned dependency versions
 |-- README.md                      This file
 |-- ROADMAP.md                     What ships next and in what order
+|-- PACKAGING.md                   Maintainer guide for release and packaging work
 |-- PLAN.md                        Design notes and backend architecture
 |-- CHANGELOG.md                   Release notes, newest first
 |-- AGENTS.md                      Working notes for AI/code agents on this repo
