@@ -155,9 +155,12 @@ Not blocking the packaging spine; picked up as time allows.
 - [ ] Multi-monitor and per-output profiles.
 - [ ] Re-check whether a future KWin release exposes a client CTM path that would
       make the KDE backend zero-cost (none in KWin 6.7, see PLAN.md section 10).
-- [ ] `CONTRIBUTING.md`, issue and PR templates, and a packager guide.
-- [ ] A documented release process: tag, CI artifacts, update AUR and COPR,
-      refresh the site download.
+- [x] `CONTRIBUTING.md`, issue and PR templates. (A dedicated packager guide is
+      still TODO.)
+- [x] A documented release process: `scripts/release.sh` automates the version
+      bump, packaging metadata + reproducible checksum, focused commits, tag and
+      push (which triggers the CI artifacts), and the COPR build. Refreshing the
+      website download in the satur8-site repo is still a manual follow-up.
 
 ---
 
