@@ -7,23 +7,21 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.2.2 is shipped and working. KDE Plasma Wayland is the verified target, with
-the CLI, GUI, daemon, tray, KWin saturation effect, and KWin focus script all
-working together. NVIDIA X11 NV-CONTROL and the GNOME Wayland Shell-extension
-backend are also verified on real hardware (the latter on GNOME 50.2, NVIDIA
-Wayland). Distribution today is a Linux x86_64 tarball served from
-[satur8.app](https://satur8.app), a tested Arch package, and a live Fedora
-package on COPR built for Fedora 43 and 44. AUR publication is prepared but
-blocked while new AUR account registration is disabled upstream, unless an
-existing AUR maintainer publishes the package. The remaining backends
-(Hyprland, DRM/KMS, gamescope) are implemented behind environment detection but
-not yet independently verified.
+v0.3.1 is shipped and working. Five of the seven backend paths are now verified:
+KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland, NVIDIA X11
+NV-CONTROL, and gamescope-native for a running full-screen gamescope compositor.
+The remaining implemented-but-unverified paths are DRM/KMS and the nested
+gamescope fallback for unsupported Wayland sessions. Distribution today is a
+Linux x86_64 tarball served from [satur8.app](https://satur8.app), a tested Arch
+package, and a live Fedora package on COPR built for Fedora 43 and 44. AUR
+publication is prepared but blocked while new AUR account registration is
+disabled upstream, unless an existing AUR maintainer publishes the package.
 
 The north star is **v1.0 = Satur8 running well on SteamOS and Bazzite**. Both run
-gamescope rather than KWin, so everything between here and 1.0 is sequenced to
-de-risk and reach that: prove the gamescope path (v0.3), land and field-test
-Deck/Bazzite support (v0.4), then stamp 1.0 once it is proven. Broader desktop
-reach (Debian/Ubuntu, non-gaming uses) comes after 1.0.
+gamescope rather than KWin. The gamescope path has been proven in v0.3; the next
+major work is landing and field-testing Deck/Bazzite support in v0.4 on real
+hardware, then stamping 1.0 once it is proven. Broader desktop reach
+(Debian/Ubuntu, non-gaming uses) comes after 1.0.
 
 ## Guiding principle
 
