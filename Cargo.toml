@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/satur8-core",
+    "crates/satur8-cli",
+    "crates/backends/kwin",
+    "crates/backends/drm-ctm",
+    "crates/backends/hyprland",
+    "crates/backends/nv-control",
+    "crates/backends/gnome-shell",
+    "crates/backends/gamescope",
+    "crates/satur8-daemon",
+    "crates/satur8-tray",
+    "crates/satur8-gui",
+]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/NtrpyDev/satur8"
+
+[workspace.dependencies]
+satur8-core = { path = "crates/satur8-core" }
+satur8-kwin = { path = "crates/backends/kwin" }
+satur8-drm-ctm = { path = "crates/backends/drm-ctm" }
+satur8-hyprland = { path = "crates/backends/hyprland" }
+satur8-nv-control = { path = "crates/backends/nv-control" }
+satur8-gnome = { path = "crates/backends/gnome-shell" }
+satur8-gamescope = { path = "crates/backends/gamescope" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+x11rb = "0.13.2"
+
+[profile.release]
+# small, fast binary; this runs as a long-lived daemon next to a CPU-bound game
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
