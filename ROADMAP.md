@@ -94,7 +94,11 @@ other backends.
       the LUT to its nested output, so verification needs a full-screen
       (Game-Mode-style) session. Real Steam Deck / Bazzite field-testing is the
       separate v0.4 work below.
-- [ ] Verify the Hyprland backend.
+- [x] Verify the Hyprland backend. Done on PC1 (AMD RX 9070): satur8 selected
+      the hyprland backend and set `decoration:screen_shader`; a headless
+      Hyprland capture measured mean saturation dropping 0.975 -> 0.244 at
+      satur8 0.2, confirming the screen-shader pass applies and changes output
+      saturation.
 - [ ] Verify DRM-CTM on X11 / TTY for AMD and Intel (the read-only probe already
       passes, see PLAN.md section 10). Also relevant to the Deck, an AMD APU.
 - [x] Verify the GNOME Wayland Shell-extension backend on real GNOME (GNOME
