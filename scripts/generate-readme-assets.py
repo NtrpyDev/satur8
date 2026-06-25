@@ -131,7 +131,7 @@ def radial_glow(size, center, radius, color, max_alpha):
     return layer.resize((W, H), Image.BICUBIC)
 
 
-def site_background(W, H):
+def site_background(W, H, grid=True):
     """The satur8.app background: ink base, three-color mesh, faint top grid."""
     img = Image.new("RGBA", (W, H), INK + (255,))
     # Mesh glows: violet top-right, magenta top-left, cyan bottom-center.
@@ -143,22 +143,23 @@ def site_background(W, H):
         img.alpha_composite(radial_glow((W, H), center, rad, color, alpha))
 
     # Faint line grid, 88px cells, fading out toward the bottom (mask from top).
-    grid = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    gd = ImageDraw.Draw(grid)
-    step, line = 88, (233, 240, 255, 22)
-    for x in range(0, W + 1, step):
-        gd.line([(x, 0), (x, H)], fill=line, width=1)
-    for y in range(0, H + 1, step):
-        gd.line([(0, y), (W, y)], fill=line, width=1)
-    fade = Image.new("L", (W, H), 0)
-    fp = fade.load()
-    span = H * 0.82
-    for y in range(H):
-        a = max(0, int(255 * (1 - y / span)))
-        for x in range(W):
-            fp[x, y] = a
-    grid.putalpha(ImageChops.multiply(grid.getchannel("A"), fade))
-    img.alpha_composite(grid)
+    if grid:
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(layer)
+        step, line = 88, (233, 240, 255, 22)
+        for x in range(0, W + 1, step):
+            gd.line([(x, 0), (x, H)], fill=line, width=1)
+        for y in range(0, H + 1, step):
+            gd.line([(0, y), (W, y)], fill=line, width=1)
+        fade = Image.new("L", (W, H), 0)
+        fp = fade.load()
+        span = H * 0.82
+        for y in range(H):
+            a = max(0, int(255 * (1 - y / span)))
+            for x in range(W):
+                fp[x, y] = a
+        layer.putalpha(ImageChops.multiply(layer.getchannel("A"), fade))
+        img.alpha_composite(layer)
     return img
 
 
@@ -611,8 +612,8 @@ def _icon_chip(d, x, y, s, c):
 
 
 def make_why():
-    W, H = 1200, 360
-    img = site_background(W, H)
+    W, H = 1200, 420
+    img = site_background(W, H, grid=False)
     d = ImageDraw.Draw(img, "RGBA")
     cards = [
         ("Per-game profiles",
