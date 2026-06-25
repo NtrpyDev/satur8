@@ -1,0 +1,11 @@
+[package]
+name = "satur8-nv-control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "NVIDIA X11 backend (B5) for Satur8: drives the proprietary driver's Digital Vibrance via nvidia-settings."
+
+[dependencies]
+satur8-core = { workspace = true }
+anyhow = { workspace = true }

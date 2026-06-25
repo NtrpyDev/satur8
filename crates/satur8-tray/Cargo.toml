@@ -1,0 +1,21 @@
+[package]
+name = "satur8-tray"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "System-tray control for Satur8 (StatusNotifierItem): toggle and pick saturation/profiles."
+
+[[bin]]
+name = "satur8-tray"
+path = "src/main.rs"
+
+[dependencies]
+satur8-core = { workspace = true }
+satur8-kwin = { workspace = true }
+satur8-drm-ctm = { workspace = true }
+satur8-hyprland = { workspace = true }
+satur8-nv-control = { workspace = true }
+satur8-gnome = { workspace = true }
+anyhow = { workspace = true }
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }

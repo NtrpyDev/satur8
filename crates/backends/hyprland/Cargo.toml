@@ -1,0 +1,11 @@
+[package]
+name = "satur8-hyprland"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hyprland backend (B3) for Satur8: applies a saturation screen shader via hyprctl."
+
+[dependencies]
+satur8-core = { workspace = true }
+anyhow = { workspace = true }

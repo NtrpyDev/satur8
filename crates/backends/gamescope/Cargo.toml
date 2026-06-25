@@ -1,0 +1,12 @@
+[package]
+name = "satur8-gamescope"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "gamescope fallback backend (B6) for Satur8: runs a game inside gamescope with a saturation ReShade effect."
+
+[dependencies]
+satur8-core = { workspace = true }
+anyhow = { workspace = true }
+x11rb = { workspace = true }

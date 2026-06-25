@@ -1,0 +1,28 @@
+[package]
+name = "satur8-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Satur8 desktop app: pick a running game and set its per-game saturation, with a clean Slint UI."
+build = "build.rs"
+
+[[bin]]
+name = "satur8-gui"
+path = "src/main.rs"
+
+[dependencies]
+satur8-core = { workspace = true }
+satur8-kwin = { workspace = true }
+satur8-drm-ctm = { workspace = true }
+satur8-hyprland = { workspace = true }
+satur8-nv-control = { workspace = true }
+satur8-gnome = { workspace = true }
+slint = "1.16"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+zbus = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+
+[build-dependencies]
+slint-build = "1.16"

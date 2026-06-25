@@ -1,0 +1,11 @@
+[package]
+name = "satur8-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared saturation math, backend abstraction and profile model for Satur8."
+
+[dependencies]
+serde = { workspace = true }
+toml = { workspace = true }

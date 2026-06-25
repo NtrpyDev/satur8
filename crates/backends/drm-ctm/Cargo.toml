@@ -1,0 +1,12 @@
+[package]
+name = "satur8-drm-ctm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "DRM/KMS CTM backend (B2) for Satur8: zero-cost hardware saturation via the scanout color matrix."
+
+[dependencies]
+satur8-core = { workspace = true }
+drm = "0.15"
+anyhow = { workspace = true }

@@ -1,0 +1,17 @@
+[package]
+name = "satur8-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Event-driven satur8 daemon: applies/restores per-game profiles on window focus changes."
+
+[[bin]]
+name = "satur8-daemon"
+path = "src/main.rs"
+
+[dependencies]
+satur8-core = { workspace = true }
+satur8-kwin = { workspace = true }
+zbus = { workspace = true }
+anyhow = { workspace = true }

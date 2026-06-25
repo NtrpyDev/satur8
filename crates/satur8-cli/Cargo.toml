@@ -1,0 +1,24 @@
+[package]
+name = "satur8-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The `satur8` command-line tool."
+
+[[bin]]
+name = "satur8"
+path = "src/main.rs"
+
+[dependencies]
+satur8-core = { workspace = true }
+satur8-kwin = { workspace = true }
+satur8-drm-ctm = { workspace = true }
+satur8-hyprland = { workspace = true }
+satur8-nv-control = { workspace = true }
+satur8-gnome = { workspace = true }
+satur8-gamescope = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+signal-hook = "0.3"
+libc = "0.2"

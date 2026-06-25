@@ -1,0 +1,625 @@
+import { Slider, ListView, Switch, ScrollView } from "std-widgets.slint";
+
+export struct GameRow {
+    name: string,
+    exe: string,
+    percent: int,      // -100..+100 ; 0 = no change (saturation 1.0)
+    enabled: bool,
+    accent: color,
+    initial: string,
+    icon: image,
+    has-icon: bool,
+}
+
+export struct LogRow {
+    text: string,
+    time: string,
+    ok: bool,
+}
+
+export global Pal {
+    in-out property <bool> dark: false;
+    out property <color> accent: dark ? #14b8a6 : #0f9f8f;
+    out property <color> accent-soft: dark ? #173f3c : #bfded7;
+    out property <color> bg: dark ? #1f2427 : #cfd3ce;
+    out property <color> card: dark ? #2a3033 : #dde2dc;
+    out property <color> line: dark ? #3a4246 : #b8c0b8;
+    out property <color> ink: dark ? #eef3f2 : #20262b;
+    out property <color> muted: dark ? #a8b3b1 : #69737a;
+    out property <color> hover: dark ? #343d41 : #c4cbc4;
+    out property <color> note: dark ? #232a2d : #d2d8d1;
+    out property <color> danger-soft: dark ? #4c292b : #e8ccc8;
+}
+
+component BrandLogo inherits HorizontalLayout {
+    height: 48px;
+    HorizontalLayout {
+        spacing: 0px;
+        alignment: center;
+        Text {
+            text: "Satur";
+            color: Pal.ink;
+            font-family: "Fira Sans Condensed";
+            font-size: 30px;
+            font-weight: 800;
+            vertical-alignment: center;
+        }
+        Text {
+            text: "8";
+            color: Pal.accent;
+            font-family: "Fira Sans Condensed";
+            font-size: 32px;
+            font-weight: 800;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked;
+    height: 38px;
+    width: nav-label.preferred-width + 30px;
+    border-radius: 10px;
+    background: active ? Pal.accent : (touch.has-hover ? Pal.hover : transparent);
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 15px;
+        padding-right: 15px;
+        nav-label := Text {
+            text: label;
+            font-family: "Fira Sans";
+            font-size: 15px;
+            font-weight: 700;
+            color: active ? white : Pal.ink;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component Button inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    callback clicked;
+    height: 36px;
+    width: label.preferred-width + 28px;
+    border-radius: 7px;
+    border-width: primary ? 0px : 1px;
+    border-color: Pal.line;
+    background: primary
+        ? (touch.pressed ? #0d8f81 : (touch.has-hover ? #13b5a5 : Pal.accent))
+        : (touch.pressed ? Pal.line : (touch.has-hover ? Pal.hover : Pal.note));
+
+    touch := TouchArea { clicked => { root.clicked(); } }
+
+    label := Text {
+        text: root.text;
+        color: primary ? white : Pal.ink;
+        font-family: "Fira Sans";
+        font-size: 14px;
+        font-weight: primary ? 700 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component ThemeToggle inherits Rectangle {
+    callback toggled(bool);
+    width: 38px;
+    height: 38px;
+    border-radius: 19px;
+    border-width: 1px;
+    border-color: Pal.line;
+    background: touch.pressed ? Pal.line : (touch.has-hover ? Pal.hover : Pal.note);
+
+    touch := TouchArea {
+        clicked => {
+            Pal.dark = !Pal.dark;
+            root.toggled(Pal.dark);
+        }
+    }
+
+    Text {
+        text: Pal.dark ? "☾" : "☀";
+        color: Pal.accent;
+        font-size: 18px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component Card inherits Rectangle {
+    background: Pal.card;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Pal.line;
+}
+
+component Swatches inherits HorizontalLayout {
+    in property <[color]> colors;
+    spacing: 8px;
+    for c in colors: Rectangle {
+        height: 34px;
+        horizontal-stretch: 1;
+        border-radius: 7px;
+        background: c;
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Satur8";
+    icon: @image-url("icon.png");
+    default-font-family: "Fira Sans";
+    default-font-size: 15px;
+    preferred-width: 1140px;
+    preferred-height: 700px;
+    min-width: 1040px;
+    min-height: 560px;
+    background: Pal.bg;
+
+    in-out property <[GameRow]> games;
+    in-out property <[string]> running;
+    in-out property <string> outputs-note;
+    in-out property <[LogRow]> activity;
+    in-out property <[color]> before-swatches;
+    in-out property <[color]> after-swatches;
+    in-out property <image> before-image;
+    in-out property <image> after-image;
+    in-out property <bool> has-image: false;
+    in-out property <string> backend-name: "none";
+    in-out property <bool> backend-ok: false;
+    in-out property <string> version-text: "";
+    in-out property <string> current-profile-name: "-";
+    in-out property <int> current-percent: 0;
+    in-out property <int> default-percent: 0;
+    in-out property <int> nav: 0;
+
+    callback default-changed(float);
+    callback percent-changed(int, float);
+    callback toggle-enabled(int, bool);
+    callback remove(int);
+    callback add-running(int);
+    callback refresh-running();
+    callback preview-profile(int);
+    callback apply-output();
+    callback restore-output();
+    callback preview-output();
+    callback clear-activity();
+    callback dark-mode-changed(bool);
+    callback open-link(string);
+
+    VerticalLayout {
+        // ================= Header =================
+        Rectangle {
+            height: 72px;
+            background: Pal.card;
+            Rectangle { height: 1px; y: parent.height - 1px; background: Pal.line; }
+            HorizontalLayout {
+                padding-left: 24px;
+                padding-right: 24px;
+                spacing: 22px;
+                BrandLogo {
+                    y: (parent.height - self.height) / 2;
+                }
+                HorizontalLayout {
+                    height: 38px;
+                    y: (parent.height - self.height) / 2;
+                    spacing: 8px;
+                    NavItem { label: "Profiles"; active: nav == 0; clicked => { nav = 0; } }
+                    NavItem { label: "Settings"; active: nav == 1; clicked => { nav = 1; } }
+                    NavItem { label: "About"; active: nav == 2; clicked => { nav = 2; } }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                ThemeToggle {
+                    y: (parent.height - self.height) / 2;
+                    toggled(dark) => { root.dark-mode-changed(dark); }
+                }
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 32px;
+                    width: pill.preferred-width + 28px;
+                    border-radius: 16px;
+                    background: backend-ok ? Pal.accent-soft : Pal.danger-soft;
+                    pill := HorizontalLayout {
+                        padding-left: 14px; padding-right: 14px; spacing: 8px;
+                        Rectangle {
+                            width: 9px; height: 9px; border-radius: 5px;
+                            y: (parent.height - 9px) / 2;
+                            background: backend-ok ? #16a34a : #dc2626;
+                        }
+                        Text {
+                            text: backend-ok ? (backend-name + " backend active") : "no backend in this session";
+                            color: Pal.ink; font-size: 14px; vertical-alignment: center;
+                        }
+                    }
+                }
+                Text {
+                    text: version-text;
+                    y: (parent.height - self.height) / 2;
+                    color: Pal.muted;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+            // ---- body: Profiles page ----
+            if nav == 0: HorizontalLayout {
+                vertical-stretch: 1;
+                padding: 22px;
+                spacing: 18px;
+
+                // ============ main column ============
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 16px;
+
+                    Card {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            padding: 18px;
+                            spacing: 4px;
+
+                            HorizontalLayout {
+                                VerticalLayout {
+                                    Text { text: "Profiles"; font-size: 20px; font-weight: 700; color: Pal.ink; }
+                                    Text { text: "Configure per-game digital vibrance (saturation) profiles."; color: Pal.muted; font-size: 13px; }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                Button {
+                                    text: "＋  Add running game  ▾";
+                                    primary: true;
+                                    clicked => { running-popup.show(); }
+                                }
+                            }
+
+                            running-popup := PopupWindow {
+                                x: parent.width - 280px;
+                                y: 52px;
+                                width: 270px;
+                                height: 320px;
+                                Rectangle {
+                                    background: Pal.card; border-radius: 10px; border-width: 1px; border-color: Pal.line;
+                                    VerticalLayout {
+                                        padding: 10px; spacing: 6px;
+                                        HorizontalLayout {
+                                            Text { text: "Running programs"; font-weight: 700; font-size: 13px; color: Pal.ink; }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            Button { text: "Refresh"; clicked => { root.refresh-running(); } }
+                                        }
+                                        ScrollView {
+                                            VerticalLayout {
+                                                spacing: 2px;
+                                                for r[i] in running: Rectangle {
+                                                    height: 30px; border-radius: 6px;
+                                                    background: rt.has-hover ? Pal.hover : transparent;
+                                                    rt := TouchArea { clicked => { root.add-running(i); running-popup.close(); } }
+                                                    HorizontalLayout {
+                                                        padding-left: 8px;
+                                                        Text { text: r; vertical-alignment: center; color: Pal.ink; overflow: elide; }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle { height: 10px; }
+
+                            // table header
+                            HorizontalLayout {
+                                height: 22px;
+                                Text { text: "Profile"; width: 212px; color: Pal.muted; font-size: 12px; font-weight: 600; }
+                                Text { text: "Saturation"; horizontal-stretch: 1; color: Pal.muted; font-size: 12px; font-weight: 600; }
+                                Text { text: "Enabled"; width: 76px; color: Pal.muted; font-size: 12px; font-weight: 600; horizontal-alignment: center; }
+                                Text { text: "Preview"; width: 130px; color: Pal.muted; font-size: 12px; font-weight: 600; horizontal-alignment: center; }
+                            }
+                            Rectangle { height: 1px; background: Pal.line; }
+
+                            if games.length == 0: Rectangle {
+                                height: 130px;
+                                Text {
+                                    text: "No games yet.\nClick “Add running game”, pick your game, and set its satur8.";
+                                    color: Pal.muted; horizontal-alignment: center; vertical-alignment: center;
+                                }
+                            }
+
+                            ListView {
+                                vertical-stretch: 1;
+                                for game[i] in games: Rectangle {
+                                    height: 88px;
+                                    Rectangle { height: 1px; y: parent.height - 1px; background: Pal.line; }
+                                    HorizontalLayout {
+                                        spacing: 0px;
+                                        // Profile (icon + name/exe) = 212px
+                                        HorizontalLayout {
+                                            width: 212px;
+                                            spacing: 12px;
+                                            Rectangle {
+                                                width: 48px; height: 48px; border-radius: 11px;
+                                                y: (parent.height - 48px) / 2; background: game.accent;
+                                                clip: true;
+                                                if game.has-icon: Image {
+                                                    width: 48px; height: 48px;
+                                                    source: game.icon;
+                                                    image-fit: cover;
+                                                }
+                                                if !game.has-icon: Text { text: game.initial; color: white; font-size: 20px; font-weight: 800; }
+                                            }
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Text { text: game.name; font-size: 15px; font-weight: 700; color: Pal.ink; overflow: elide; }
+                                                Text { text: game.exe; font-size: 12px; color: Pal.muted; overflow: elide; }
+                                            }
+                                        }
+                                        // Saturation
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 3px;
+                                            Text {
+                                                text: (game.percent > 0 ? "+" : "") + game.percent + "%";
+                                                color: Pal.accent; font-size: 14px; font-weight: 700;
+                                            }
+                                            Slider {
+                                                minimum: -100; maximum: 100; value: game.percent;
+                                                changed(v) => { root.percent-changed(i, v); }
+                                            }
+                                            HorizontalLayout {
+                                                Text { text: "-100%"; color: Pal.muted; font-size: 10px; }
+                                                Rectangle { horizontal-stretch: 1; }
+                                                Text { text: "0%"; color: Pal.muted; font-size: 10px; }
+                                                Rectangle { horizontal-stretch: 1; }
+                                                Text { text: "+100%"; color: Pal.muted; font-size: 10px; }
+                                            }
+                                        }
+                                        // Enabled
+                                        HorizontalLayout {
+                                            width: 76px;
+                                            alignment: center;
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Switch { checked: game.enabled; toggled => { root.toggle-enabled(i, self.checked); } }
+                                            }
+                                        }
+                                        // Preview + menu
+                                        HorizontalLayout {
+                                            width: 130px;
+                                            alignment: center;
+                                            spacing: 4px;
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Button { text: "Preview"; clicked => { root.preview-profile(i); } }
+                                            }
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Button { text: "✕"; clicked => { root.remove(i); } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle { height: 6px; }
+                            Text { text: "ⓘ  Profiles are matched by the game's executable name."; color: Pal.muted; font-size: 12px; }
+                        }
+                    }
+
+                    // Activity
+                    Card {
+                        height: 176px;
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 6px;
+                            HorizontalLayout {
+                                Text { text: "Activity"; font-size: 15px; font-weight: 700; color: Pal.ink; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Button { text: "Clear"; clicked => { root.clear-activity(); } }
+                            }
+                            ScrollView {
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    for entry in activity: HorizontalLayout {
+                                        spacing: 10px;
+                                        height: 24px;
+                                        Rectangle {
+                                            width: 16px; height: 16px; border-radius: 8px;
+                                            y: (parent.height - 16px) / 2;
+                                            background: entry.ok ? #16a34a : #2f86c9;
+                                        }
+                                        Text { text: entry.text; color: Pal.ink; font-size: 13px; vertical-alignment: center; }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Text { text: entry.time; color: Pal.muted; font-size: 12px; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ============ right: Live Preview ============
+                Card {
+                    width: 300px;
+                    VerticalLayout {
+                        padding: 18px;
+                        spacing: 10px;
+                        Text { text: "Live Preview"; font-size: 16px; font-weight: 700; color: Pal.ink; }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text { text: "Current profile:"; color: Pal.muted; font-size: 13px; }
+                            Text { text: current-profile-name; color: Pal.ink; font-size: 13px; font-weight: 600; }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text { text: "Saturation:"; color: Pal.muted; font-size: 13px; }
+                            Text { text: (current-percent > 0 ? "+" : "") + current-percent + "%"; color: Pal.accent; font-size: 13px; font-weight: 700; }
+                        }
+                        Rectangle { height: 1px; background: Pal.line; }
+
+                        // Before / After preview - real game art, shown whole.
+                        if has-image: VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Before"; color: Pal.muted; font-size: 12px; }
+                            Rectangle {
+                                height: 100px; border-radius: 8px; clip: true; background: #11151a;
+                                Image { source: before-image; image-fit: contain; width: 100%; height: 100%; }
+                            }
+                            Rectangle { height: 4px; }
+                            Text { text: "After"; color: Pal.accent; font-size: 12px; font-weight: 600; }
+                            Rectangle {
+                                height: 100px; border-radius: 8px; clip: true; background: #11151a;
+                                Image { source: after-image; image-fit: contain; width: 100%; height: 100%; }
+                            }
+                        }
+                        if !has-image: VerticalLayout {
+                            spacing: 8px;
+                            Text { text: "Before"; color: Pal.muted; font-size: 12px; }
+                            Swatches { colors: before-swatches; }
+                            Text { text: "After"; color: Pal.muted; font-size: 12px; }
+                            Swatches { colors: after-swatches; }
+                        }
+                        Rectangle { height: 4px; }
+                        Rectangle {
+                            height: 66px;
+                            background: Pal.note; border-radius: 8px;
+                            VerticalLayout {
+                                padding: 10px;
+                                Text {
+                                    text: "Preview applies to your whole desktop temporarily so you can eyeball it. Click Restore to undo. " + outputs-note;
+                                    color: Pal.muted;
+                                    font-size: 11px;
+                                    wrap: word-wrap;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button { text: "↺ Restore"; clicked => { root.restore-output(); } }
+                            Button { text: "Preview on desktop"; clicked => { root.preview-output(); } }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                }
+            }
+
+            // ---- Settings page ----
+            if nav == 1: VerticalLayout {
+                vertical-stretch: 1;
+                alignment: start;
+                padding: 24px;
+                spacing: 14px;
+                Text { text: "Settings"; font-size: 20px; font-weight: 700; color: Pal.ink; }
+                Card {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 8px;
+                        Text { text: "Desktop vibrance"; font-weight: 600; color: Pal.ink; }
+                        Text {
+                            text: "Saturates your whole desktop now, and is the default when no game profile is active. Leave at 0% to keep the desktop untouched.";
+                            color: Pal.muted; font-size: 12px; wrap: word-wrap;
+                        }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            Slider {
+                                minimum: -100; maximum: 100; value: default-percent;
+                                horizontal-stretch: 1;
+                                changed(v) => { root.default-changed(v); }
+                            }
+                            Text { text: (default-percent > 0 ? "+" : "") + default-percent + "%"; color: Pal.accent; font-weight: 700; width: 52px; vertical-alignment: center; }
+                        }
+                        HorizontalLayout {
+                            Button { text: "↺ Restore desktop to normal"; clicked => { root.default-changed(0); } }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                }
+                Card {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 8px;
+                        Text { text: "Auto-apply per game"; font-weight: 600; color: Pal.ink; }
+                        Text {
+                            text: "Satur8 watches the focused game window and applies the matching profile automatically. No Steam launch options are required.";
+                            color: Pal.muted; font-size: 12px; wrap: word-wrap;
+                        }
+                        Text {
+                            text: "When you leave the game, Satur8 restores your desktop vibrance setting.";
+                            color: Pal.muted; font-size: 12px; wrap: word-wrap;
+                        }
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+
+            // ---- About page ----
+            if nav == 2: VerticalLayout {
+                vertical-stretch: 1;
+                padding: 24px;
+                spacing: 14px;
+                Text { text: "About"; font-size: 20px; font-weight: 700; color: Pal.ink; }
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        spacing: 14px;
+                        Card {
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 10px;
+                                Text { text: "Satur8"; font-size: 28px; font-weight: 800; color: Pal.ink; }
+                                Text {
+                                    text: "Per-game digital vibrance for Linux. Satur8 watches focused game windows, applies the matching saturation profile, and restores your desktop setting when you leave the game.";
+                                    color: Pal.muted; font-size: 14px; wrap: word-wrap;
+                                }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 8px;
+                                Text { text: "Why it is different"; font-size: 16px; font-weight: 700; color: Pal.ink; }
+                                Text {
+                                    text: "Satur8 changes the display color pipeline after the game renders. It does not inject into, read, or modify the game process.";
+                                    color: Pal.muted; font-size: 13px; wrap: word-wrap;
+                                }
+                                Text {
+                                    text: "That makes it a cleaner fit for games with trusted or anti-cheat modes than shader injectors like vkBasalt or ReShade-style tools.";
+                                    color: Pal.muted; font-size: 13px; wrap: word-wrap;
+                                }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 8px;
+                                Text { text: "Built in Rust"; font-size: 16px; font-weight: 700; color: Pal.ink; }
+                                Text {
+                                    text: "The CLI, GUI, daemon, tray, profile model, and backends are written in Rust so the app stays native, small, and event-driven with no garbage collector running while you play.";
+                                    color: Pal.muted; font-size: 13px; wrap: word-wrap;
+                                }
+                            }
+                        }
+                        Card {
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 12px;
+                                Text { text: "Links"; font-size: 16px; font-weight: 700; color: Pal.ink; }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    Button { text: "satur8.app"; clicked => { root.open-link("https://satur8.app"); } }
+                                    Button { text: "Twitter / X  @NtrpyDev"; clicked => { root.open-link("https://x.com/NtrpyDev"); } }
+                                    Button { text: "GitHub  NtrpyDev/satur8"; clicked => { root.open-link("https://github.com/NtrpyDev/satur8"); } }
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }

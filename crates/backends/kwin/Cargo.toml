@@ -1,0 +1,12 @@
+[package]
+name = "satur8-kwin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "KWin (KDE Plasma Wayland) backend for Satur8: drives the shipped saturation effect over D-Bus."
+
+[dependencies]
+satur8-core = { workspace = true }
+zbus = { workspace = true }
+anyhow = { workspace = true }
