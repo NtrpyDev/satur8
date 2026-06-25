@@ -35,13 +35,13 @@ It is built for Linux gaming setups that want the punchy color controls common o
 
 ## Demo
 
-<img src="assets/readme/demo.gif" alt="Satur8 applying and restoring a per-game saturation profile" width="900">
+<video src="assets/readme/demo.mp4" alt="Satur8 applying and restoring a per-game saturation profile" autoplay loop muted playsinline width="900"></video>
 
 Satur8 watches the focused game, applies the matching color profile, and restores your normal desktop colors when you switch away.
 
 ## Why Satur8?
 
-<img src="assets/readme/why-satur8.png" alt="Why Satur8: per-game profiles, game-safe approach, and native Linux backends" width="900">
+<img src="assets/readme/why-satur8-v031.png" alt="Why Satur8: per-game profiles, game-safe approach, and native Linux backends" width="900">
 
 ## Install
 
@@ -159,7 +159,7 @@ The gamescope-native path drives an already-running gamescope compositor through
 
 The screenshots below show the Satur8 GUI.
 
-<img src="assets/readme/gui-profiles.png" alt="Satur8 profile editor" width="900">
+<img src="assets/readme/gui-profiles-v031.png" alt="Satur8 profile editor" width="900">
 
 In the profile editor you can:
 
@@ -169,7 +169,7 @@ In the profile editor you can:
 - Preview a profile on the desktop.
 - See the active backend and recent activity.
 
-<img src="assets/readme/gui-settings.png" alt="Satur8 backend settings" width="900">
+<img src="assets/readme/gui-settings-v031.png" alt="Satur8 backend settings" width="900">
 
 Settings cover the default desktop vibrance, the manual restore action, and the auto-apply behavior. Profiles auto-save the moment you change them. The GUI also ships dark and bright themes and an in-app About page with project links.
 
