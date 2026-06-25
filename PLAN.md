@@ -4,7 +4,7 @@
 > boost, applied **outside** the game process so it cannot trip anti-cheat,
 > with as close to **zero CPU cost** as the hardware allows.
 
-Status: v0.2.1 is working. KDE Plasma Wayland is the verified target, with the
+Status: v0.2.2 is working. KDE Plasma Wayland is the verified target, with the
 GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile config
 working together. NVIDIA X11 NV-CONTROL is also verified on real NVIDIA
 hardware. v0.2 widened distribution: a live Fedora package on COPR alongside

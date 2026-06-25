@@ -7,7 +7,7 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.2.1 is shipped and working. KDE Plasma Wayland is the verified target, with
+v0.2.2 is shipped and working. KDE Plasma Wayland is the verified target, with
 the CLI, GUI, daemon, tray, KWin saturation effect, and KWin focus script all
 working together. NVIDIA X11 NV-CONTROL and the GNOME Wayland Shell-extension
 backend are also verified on real hardware (the latter on GNOME 50.2, NVIDIA
