@@ -156,7 +156,11 @@ is served and there is real pull for more, not on speculation.
 
 Not blocking the packaging spine; picked up as time allows.
 
-- [ ] Linear-light blend option (more correct than the gamma-encoded blend).
+- [x] Linear-light blend option (more correct than the gamma-encoded blend).
+      Implemented for the Hyprland backend and verified on PC1 / Glorgy
+      (AMD RX 9070, Hyprland 0.55.4): at saturation 0.0, gamma output sampled
+      red as `(54,54,54)` while linear-light output sampled red as
+      `(127,127,127)`, matching the expected sRGB transfer-function path.
 - [ ] Multi-monitor and per-output profiles.
 - [ ] Re-check whether a future KWin release exposes a client CTM path that would
       make the KDE backend zero-cost (none in KWin 6.7, see PLAN.md section 10).
