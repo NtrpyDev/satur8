@@ -18,17 +18,18 @@ export struct LogRow {
 }
 
 export global Pal {
-    in-out property <bool> dark: false;
-    out property <color> accent: dark ? #14b8a6 : #0f9f8f;
-    out property <color> accent-soft: dark ? #173f3c : #bfded7;
-    out property <color> bg: dark ? #1f2427 : #cfd3ce;
-    out property <color> card: dark ? #2a3033 : #dde2dc;
-    out property <color> line: dark ? #3a4246 : #b8c0b8;
-    out property <color> ink: dark ? #eef3f2 : #20262b;
-    out property <color> muted: dark ? #a8b3b1 : #69737a;
-    out property <color> hover: dark ? #343d41 : #c4cbc4;
-    out property <color> note: dark ? #232a2d : #d2d8d1;
-    out property <color> danger-soft: dark ? #4c292b : #e8ccc8;
+    in-out property <bool> dark: true;
+    out property <color> accent: dark ? #00e6c7 : #0f9f8f;
+    out property <color> accent-soft: dark ? #0f302f : #c5efe8;
+    out property <color> brand-hot: dark ? #ffb000 : #ff8a00;
+    out property <color> bg: dark ? #090a0f : #edf0f5;
+    out property <color> card: dark ? #111821 : #ffffff;
+    out property <color> line: dark ? #25313a : #c9d2dd;
+    out property <color> ink: dark ? #f4f7ff : #151922;
+    out property <color> muted: dark ? #9ca8ba : #667386;
+    out property <color> hover: dark ? #1a2530 : #dde7ef;
+    out property <color> note: dark ? #16212a : #e7edf3;
+    out property <color> danger-soft: dark ? #3d1d25 : #f3d0d5;
 }
 
 component BrandLogo inherits HorizontalLayout {
@@ -46,7 +47,7 @@ component BrandLogo inherits HorizontalLayout {
         }
         Text {
             text: "8";
-            color: Pal.accent;
+            color: Pal.brand-hot;
             font-family: "Fira Sans Condensed";
             font-size: 32px;
             font-weight: 800;
@@ -88,14 +89,14 @@ component Button inherits Rectangle {
     border-width: primary ? 0px : 1px;
     border-color: Pal.line;
     background: primary
-        ? (touch.pressed ? #0d8f81 : (touch.has-hover ? #13b5a5 : Pal.accent))
+        ? (touch.pressed ? #00bfa8 : (touch.has-hover ? #20f5d6 : Pal.accent))
         : (touch.pressed ? Pal.line : (touch.has-hover ? Pal.hover : Pal.note));
 
     touch := TouchArea { clicked => { root.clicked(); } }
 
     label := Text {
         text: root.text;
-        color: primary ? white : Pal.ink;
+        color: primary ? #07100f : Pal.ink;
         font-family: "Fira Sans";
         font-size: 14px;
         font-weight: primary ? 700 : 500;
@@ -227,7 +228,7 @@ export component AppWindow inherits Window {
                         Rectangle {
                             width: 9px; height: 9px; border-radius: 5px;
                             y: (parent.height - 9px) / 2;
-                            background: backend-ok ? #16a34a : #dc2626;
+                            background: backend-ok ? #00e676 : #ff3d6e;
                         }
                         Text {
                             text: backend-ok ? (backend-name + " backend active") : "no backend in this session";
@@ -428,7 +429,7 @@ export component AppWindow inherits Window {
                                         Rectangle {
                                             width: 16px; height: 16px; border-radius: 8px;
                                             y: (parent.height - 16px) / 2;
-                                            background: entry.ok ? #16a34a : #2f86c9;
+                                            background: entry.ok ? #00e676 : #1fe3cb;
                                         }
                                         Text { text: entry.text; color: Pal.ink; font-size: 13px; vertical-alignment: center; }
                                         Rectangle { horizontal-stretch: 1; }

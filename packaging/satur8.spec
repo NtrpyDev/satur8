@@ -7,7 +7,7 @@
 # the crates vendored instead, because Koji builds offline.
 
 Name:           satur8
-Version:        0.3.0
+Version:        0.3.1
 Release:        1%{?dist}
 Summary:        Per-game digital vibrance for Linux
 
@@ -122,6 +122,10 @@ install -Dm0644 packaging/satur8.desktop \
 %{_datadir}/applications/satur8.desktop
 
 %changelog
+* Thu Jun 25 2026 Satur8 <ntrpydev@pm.me> - 0.3.1-1
+- Retheme the GUI to match the Satur8 site redesign and make dark mode the
+  default for fresh GUI installs.
+
 * Wed Jun 24 2026 Satur8 <ntrpydev@pm.me> - 0.3.0-1
 - Add a gamescope-native run strategy that drives a running gamescope compositor
   with runtime shaper and 3D LUT override atoms.

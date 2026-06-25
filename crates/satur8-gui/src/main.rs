@@ -51,10 +51,16 @@ struct State {
     previewing: bool,
 }
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 struct GuiConfig {
     #[serde(default)]
     dark_mode: bool,
+}
+
+impl Default for GuiConfig {
+    fn default() -> Self {
+        Self { dark_mode: true }
+    }
 }
 
 fn main() -> Result<(), slint::PlatformError> {

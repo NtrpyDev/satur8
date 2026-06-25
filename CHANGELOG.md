@@ -3,6 +3,15 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## v0.3.1 - 2026-06-25
+
+GUI polish release for the site redesign.
+
+- Retheme the GUI around Satur8's current dark site palette: near-black
+  surfaces, cyan controls, warmer brand accent, and sharper panel contrast.
+- Make dark mode the default for fresh GUI installs so the app and site present
+  the same visual identity.
+
 ## v0.3.0 - 2026-06-25
 
 Backend-verification work for gamescope, aimed at SteamOS and Bazzite.
