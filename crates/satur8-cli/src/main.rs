@@ -129,29 +129,18 @@ fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> 
         None => all_outputs(),
     };
 
-    backend
-        .apply(&target, clamped)
-        .with_context(|| "applying saturation")?;
-
-    if linear {
-        if backend.supports_linear_light() {
-            backend
-                .set_linear_light(true)
-                .with_context(|| "enabling linear-light blending")?;
-        } else {
-            eprintln!(
-                "note: the {} backend works in its native color space and ignores --linear",
-                backend.name()
-            );
-        }
-    } else {
-        let _ = backend.set_linear_light(false);
+    let linear_active = apply_with_linear_flag(backend.as_mut(), &target, clamped, linear)?;
+    if linear && !linear_active {
+        eprintln!(
+            "note: the {} backend works in its native color space and ignores --linear",
+            backend.name()
+        );
     }
 
     println!(
         "satur8: saturation {:.2}{} on {} via {} backend{}",
         clamped.get(),
-        if linear && backend.supports_linear_light() { " (linear light)" } else { "" },
+        if linear_active { " (linear light)" } else { "" },
         target.human_name,
         backend.name(),
         cost_suffix(backend.cost())
@@ -163,6 +152,26 @@ fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> 
         );
     }
     Ok(())
+}
+
+fn apply_with_linear_flag(
+    backend: &mut dyn satur8_core::Backend,
+    target: &satur8_core::Output,
+    saturation: Saturation,
+    linear: bool,
+) -> Result<bool> {
+    let linear_active = linear && backend.supports_linear_light();
+    if linear_active {
+        backend
+            .set_linear_light(true)
+            .with_context(|| "enabling linear-light blending")?;
+    } else if !linear {
+        let _ = backend.set_linear_light(false);
+    }
+    backend
+        .apply(target, saturation)
+        .with_context(|| "applying saturation")?;
+    Ok(linear_active)
 }
 
 fn cmd_outputs() -> Result<()> {
@@ -272,5 +281,98 @@ fn cost_suffix(cost: CostNote) -> &'static str {
         CostNote::ZeroCost => " (zero per-frame cost)",
         CostNote::CompositorShaderPass => " (one compositor GPU pass)",
         CostNote::NestedCompositor => " (nested compositor: extra pass + latency)",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use satur8_core::{Backend, BackendError, Output};
+
+    #[derive(Default)]
+    struct FakeBackend {
+        supports_linear: bool,
+        linear_light: bool,
+        linear_at_apply: Option<bool>,
+        set_calls: Vec<bool>,
+    }
+
+    impl Backend for FakeBackend {
+        fn name(&self) -> &'static str {
+            "fake"
+        }
+
+        fn cost(&self) -> CostNote {
+            CostNote::ZeroCost
+        }
+
+        fn outputs(&self) -> Vec<Output> {
+            vec![all_outputs()]
+        }
+
+        fn apply(&mut self, _output: &Output, _saturation: Saturation) -> Result<(), BackendError> {
+            self.linear_at_apply = Some(self.linear_light);
+            Ok(())
+        }
+
+        fn reset(&mut self, _output: &Output) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        fn set_linear_light(&mut self, enabled: bool) -> Result<(), BackendError> {
+            self.linear_light = enabled;
+            self.set_calls.push(enabled);
+            Ok(())
+        }
+
+        fn supports_linear_light(&self) -> bool {
+            self.supports_linear
+        }
+    }
+
+    #[test]
+    fn linear_flag_is_set_before_apply_when_supported() {
+        let mut backend = FakeBackend {
+            supports_linear: true,
+            ..FakeBackend::default()
+        };
+
+        let active =
+            apply_with_linear_flag(&mut backend, &all_outputs(), Saturation::new(1.5), true)
+                .unwrap();
+
+        assert!(active);
+        assert_eq!(backend.set_calls, vec![true]);
+        assert_eq!(backend.linear_at_apply, Some(true));
+    }
+
+    #[test]
+    fn linear_flag_is_ignored_without_backend_support() {
+        let mut backend = FakeBackend::default();
+
+        let active =
+            apply_with_linear_flag(&mut backend, &all_outputs(), Saturation::new(1.5), true)
+                .unwrap();
+
+        assert!(!active);
+        assert!(backend.set_calls.is_empty());
+        assert_eq!(backend.linear_at_apply, Some(false));
+    }
+
+    #[test]
+    fn non_linear_apply_disables_linear_mode_before_apply() {
+        let mut backend = FakeBackend {
+            supports_linear: true,
+            linear_light: true,
+            ..FakeBackend::default()
+        };
+
+        let active =
+            apply_with_linear_flag(&mut backend, &all_outputs(), Saturation::new(1.5), false)
+                .unwrap();
+
+        assert!(!active);
+        assert_eq!(backend.set_calls, vec![false]);
+        assert_eq!(backend.linear_at_apply, Some(false));
     }
 }
