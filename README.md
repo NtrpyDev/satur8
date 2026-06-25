@@ -261,7 +261,7 @@ Satur8 uses the best backend available for the current session.
 | Environment | Backend | Cost | v0.1 status |
 |---|---|---:|---|
 | KDE Plasma Wayland | KWin saturation effect | One compositor pass | Verified |
-| GNOME Wayland | GNOME Shell shader extension | One compositor pass | Implemented |
+| GNOME Wayland | GNOME Shell shader extension | One compositor pass | Verified |
 | Hyprland | hyprctl shader backend | One compositor pass | Implemented |
 | X11 with NVIDIA | NV-CONTROL Digital Vibrance | Zero per-frame cost | Verified |
 | DRM/KMS capable sessions | DRM CTM | Zero per-frame cost | Implemented |

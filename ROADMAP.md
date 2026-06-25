@@ -9,13 +9,14 @@ and backend architecture); for *how to install and use it* see
 
 v0.2.1 is shipped and working. KDE Plasma Wayland is the verified target, with
 the CLI, GUI, daemon, tray, KWin saturation effect, and KWin focus script all
-working together. NVIDIA X11 NV-CONTROL is also verified on real NVIDIA
-hardware. Distribution today is a Linux x86_64 tarball served from
+working together. NVIDIA X11 NV-CONTROL and the GNOME Wayland Shell-extension
+backend are also verified on real hardware (the latter on GNOME 50.2, NVIDIA
+Wayland). Distribution today is a Linux x86_64 tarball served from
 [satur8.app](https://satur8.app), a tested Arch package, and a live Fedora
 package on COPR built for Fedora 43 and 44. AUR publication is prepared but
 blocked while new AUR account registration is disabled upstream, unless an
-existing AUR maintainer publishes the package. Every other backend (GNOME,
-Hyprland, DRM/KMS, gamescope) is implemented behind environment detection but
+existing AUR maintainer publishes the package. The remaining backends
+(Hyprland, DRM/KMS, gamescope) are implemented behind environment detection but
 not yet independently verified.
 
 ## Guiding principle
@@ -78,7 +79,9 @@ Turn the backend table's "implemented" rows into "verified". This is a
 credibility milestone and a prerequisite for the Steam Deck work. It can run in
 parallel with v0.4.
 
-- [ ] Verify the GNOME Wayland Shell-extension backend on real GNOME.
+- [x] Verify the GNOME Wayland Shell-extension backend on real GNOME (GNOME
+      50.2, NVIDIA Wayland). Required fixes: shell-version range and the
+      Clutter.ShaderType enum removed in Mutter 18.
 - [ ] Verify the Hyprland backend.
 - [x] Verify the NVIDIA X11 NV-CONTROL backend on real NVIDIA hardware.
 - [ ] Verify DRM-CTM on X11 / TTY for AMD and Intel (the read-only probe already

@@ -6,8 +6,9 @@
 // (VAC-safe, same category as the KWin effect) and is GPU-agnostic - it works on
 // NVIDIA Wayland too, where gamescope would otherwise be the only option.
 //
-// GNOME 45+ ESM extension. Untested on the dev box (no GNOME session); written
-// against the documented Clutter.ShaderEffect / GLSL shell-effect API.
+// GNOME 45+ ESM extension, built on Clutter.ShaderEffect. Verified on real
+// hardware (GNOME Shell 50.2, NVIDIA, Wayland): the shader desaturates and
+// boosts the whole shell, confirmed by screenshot across the saturation range.
 
 import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
@@ -38,10 +39,16 @@ void main() {
     cogl_color_out = vec4(clamp(mix(vec3(luma), c.rgb, satur8), 0.0, 1.0), c.a);
 }`;
 
+// Mutter 18 (GNOME 50) dropped the Clutter.ShaderType enum from its GI binding,
+// but ShaderEffect's `shader-type` construct property still takes the raw enum
+// value. 1 = CLUTTER_FRAGMENT_SHADER (0 = vertex); the literal is stable across
+// every Clutter version, so this works on GNOME 45 through 50.
+const CLUTTER_FRAGMENT_SHADER = 1;
+
 const Satur8Effect = GObject.registerClass(
 class Satur8Effect extends Clutter.ShaderEffect {
     _init(saturation) {
-        super._init({shader_type: Clutter.ShaderType.FRAGMENT_SHADER});
+        super._init({shader_type: CLUTTER_FRAGMENT_SHADER});
         this.set_shader_source(SHADER);
         this.setSaturation(saturation);
     }
@@ -107,7 +114,10 @@ export default class Satur8Extension extends Extension {
         }
         this._ensureEffect();
         this._effect.setSaturation(saturation);
-        Main.layoutManager.uiGroup.queue_redraw();
+        // A uniform-only change can reuse the effect's cached offscreen buffer,
+        // so on an idle desktop the new saturation would not show until some
+        // other repaint happened. queue_repaint() forces the effect to re-run.
+        this._effect.queue_repaint();
     }
 
     Reset() {
