@@ -41,31 +41,7 @@ Satur8 watches the focused game, applies the matching color profile, and restore
 
 ## Why Satur8?
 
-<table>
-<tr>
-<td width="33%">
-
-### Per-game profiles
-
-Tune saturation per game instead of changing your whole desktop every time. Profiles match by executable name, window class, or Steam AppID.
-
-</td>
-<td width="33%">
-
-### Game-safe approach
-
-Satur8 works outside the game process. It does not inject code, hook rendering APIs, or require an overlay. It changes the display pipeline after the game has rendered.
-
-</td>
-<td width="33%">
-
-### Native Linux backends
-
-Uses the compositor, driver, or display color path that fits your session, across both Wayland and X11.
-
-</td>
-</tr>
-</table>
+<img src="assets/readme/why-satur8.png" alt="Why Satur8: per-game profiles, game-safe approach, and native Linux backends" width="900">
 
 ## Install
 
