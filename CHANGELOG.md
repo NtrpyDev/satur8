@@ -3,6 +3,20 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## v0.3.0 - 2026-06-25
+
+Backend-verification work for gamescope, aimed at SteamOS and Bazzite.
+
+- Add `satur8 run --via gamescope-native`, which drives the already-running
+  gamescope compositor through its Xwayland root-window color atoms instead of
+  launching a nested gamescope.
+- Generate gamescope-format shaper and 3D LUT override files using Satur8's
+  shared saturation matrix, so this path can represent the full Satur8 range
+  including desaturation.
+- Save and restore the previous gamescope LUT override/color-management
+  properties around the launched game.
+- Keep the existing nested `--via gamescope` ReShade fallback unchanged.
+
 ## v0.2.2 - 2026-06-24
 
 Bug-fix release for the GNOME Wayland backend.
