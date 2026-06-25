@@ -20,8 +20,9 @@ export struct LogRow {
 // Brand palette, matched to satur8.app.
 export global Pal {
     in-out property <bool> dark: false;
-    out property <color> accent:      dark ? #1fe3cb : #0fb3a0;
-    out property <color> accent-2:    dark ? #6cf5e6 : #0a8e80;
+    // Saturation controls (sliders, toggles): magenta, accenting the violet.
+    out property <color> accent:      dark ? #ff3d8a : #e0246f;
+    out property <color> accent-2:    dark ? #ff6aa6 : #c81d5d;
     // Secondary accent for everything that is not the saturation controls.
     out property <color> alt:         dark ? #7c6cff : #6a5af0;
     out property <color> alt-2:       dark ? #9b8dff : #8779f5;
