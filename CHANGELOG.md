@@ -3,6 +3,18 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## v0.3.1 - 2026-06-25
+
+GUI visual refresh to match satur8.app.
+
+- Restyle the desktop app to the website's dark theme: ink background, cyan
+  accent, and the spectrum gradient on the brand mark and primary buttons.
+- Replace the old green and blue widgets with custom cyan saturation sliders and
+  toggles.
+- Add a spectrum accent line under the header and align card, text, and status
+  colors to the site palette.
+- No backend, daemon, or CLI behavior changes.
+
 ## v0.3.0 - 2026-06-25
 
 Backend-verification work for gamescope, aimed at SteamOS and Bazzite.
