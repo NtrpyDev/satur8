@@ -146,7 +146,7 @@ Satur8 chooses the best available backend for your session. Zero per-frame cost 
 | Hyprland | `hyprctl` shader backend | One compositor pass | Verified |
 | DRM/KMS sessions | DRM CTM | Zero | Implemented |
 | gamescope (running compositor) | gamescope-native color atoms | Reuses existing gamescope | Verified |
-| Unsupported Wayland | gamescope nested fallback | Extra nested compositor pass | Implemented |
+| Unsupported Wayland | gamescope nested fallback | Extra nested compositor pass | Verified |
 
 Status legend:
 

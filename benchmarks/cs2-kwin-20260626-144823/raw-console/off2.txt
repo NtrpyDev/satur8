@@ -1,0 +1,27 @@
+[VProf] 
+[VProf] -- Performance report --
+[VProf] Summary of 53554 frames and 129 1-second intervals.  (0 frames excluded from analysis.)
+[VProf] FPS: Avg=413.9, P1=166.0
+[VProf] 
+[VProf]                         All frames         Active frames       1s max (all)      1s max (active)  
+[VProf]                           Avg    P99        N    Avg    P99      P50    P95        N    P50    P95
+[VProf] ---------------------- ------ ------   ------ ------ ------   ------ ------   ------ ------ ------
+[VProf]             FrameTotal   2.42   6.03    53554   2.42   6.03     5.27   7.80      129   5.27   7.80
+[VProf]       Client Rendering   1.61   4.03    53554   1.61   4.03     2.79   4.61      129   2.79   4.61
+[VProf]         Frame Boundary   1.23   3.04    53554   1.23   3.04     2.54   4.02      129   2.54   4.02
+[VProf]   Present_RenderDevice   0.67   2.17    53554   0.67   2.17     1.79   3.19      129   1.79   3.19
+[VProf]      Client Simulation   0.28   0.93    53554   0.28   0.93     0.99   1.46      129   0.99   1.46
+[VProf]      Server Simulation   0.24   2.33     8281   1.55   2.98     1.99   3.20      129   1.99   3.20
+[VProf]    ClientSimulateFrame   0.23   0.44    53554   0.23   0.44     0.53   0.95      129   0.53   0.95
+[VProf]            Server Game   0.19   1.88     8281   1.24   2.22     1.66   2.74      129   1.66   2.74
+[VProf]             Prediction   0.09   0.49    53554   0.09   0.49     0.49   0.76      129   0.49   0.76
+[VProf]           UserCommands   0.08   0.63     8281   0.49   0.73     0.60   1.02      129   0.60   1.02
+[VProf]     ClientSimulateTick   0.05   0.54     8281   0.31   0.73     0.59   1.02      129   0.59   1.02
+[VProf]       Server Animation   0.03   0.25     8281   0.19   0.28     0.24   0.35      129   0.24   0.35
+[VProf]                   NPCs   0.03   0.24     8281   0.17   0.27     0.24   0.69      129   0.24   0.69
+[VProf]             Networking   0.02   0.22     8285   0.16   0.28     0.25   0.57      129   0.25   0.57
+[VProf] Server Send Networking   0.02   0.21     8281   0.16   0.28     0.23   0.31      129   0.23   0.31
+[VProf]                  Magic   0.00   0.00      330   0.12   0.40     0.00   0.26       40   0.21   0.45
+[VProf]         SoundOperators   0.00   0.00      152   0.17   0.36     0.12   0.31       77   0.18   0.32
+[VProf] 
+[VProf] VProfLite stopped.

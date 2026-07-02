@@ -3,6 +3,25 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## v0.3.3 - 2026-06-26
+
+Backend-sweep release prep.
+
+- Fix the nested gamescope fallback so its per-launch ReShade shader is written
+  to the directory gamescope actually searches,
+  `$HOME/.local/share/gamescope/reshade/Shaders`, instead of following
+  `XDG_DATA_HOME`.
+- Verify `satur8 run --via gamescope` on KDE Wayland / AMD RX 9070 XT by
+  wrapping `glxgears` in nested gamescope and comparing `0.0` vs `4.0`
+  screenshots.
+- Improve the DRM-CTM backend's multi-GPU behavior by preferring a card with an
+  active CTM-capable CRTC and by applying the shared `all` output target to all
+  active CTM-capable CRTCs.
+- Add DRM-CTM unit coverage for active CRTC detection, target resolution, and
+  partial apply success/failure.
+- Keep DRM/KMS listed as Implemented rather than Verified; runtime apply/off
+  verification remains deferred.
+
 ## v0.3.2 - 2026-06-25
 
 Hyprland linear-light release.

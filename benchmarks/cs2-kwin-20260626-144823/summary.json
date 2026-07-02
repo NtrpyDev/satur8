@@ -1,0 +1,229 @@
+{
+  "all_runs": {
+    "delta": {
+      "avg_fps_delta": 6.800000000000011,
+      "avg_fps_delta_percent": 1.7302798982188325,
+      "avg_frame_time_delta_ms": -0.043278636773858015,
+      "avg_frame_time_off_ms": 2.544529262086514,
+      "avg_frame_time_on_ms": 2.501250625312656,
+      "client_rendering_avg_ms_delta": -0.030000000000000027,
+      "p1_fps_delta": 0.30000000000001137,
+      "p1_fps_delta_percent": 0.1850709438618207,
+      "present_renderdevice_avg_ms_delta": -0.020000000000000018
+    },
+    "kwin": {
+      "avg_fps_max": 403.3,
+      "avg_fps_median": 399.8,
+      "avg_fps_min": 372.8,
+      "avg_fps_values": [
+        399.8,
+        402.6,
+        382.7,
+        372.8,
+        403.3,
+        402.2,
+        375.2
+      ],
+      "client_rendering_avg_ms_median": 1.67,
+      "frame_total_avg_ms_median": 2.5,
+      "frames_excluded_total": 17615,
+      "n": 7,
+      "p1_fps_max": 169.2,
+      "p1_fps_median": 162.4,
+      "p1_fps_min": 153.7,
+      "p1_fps_values": [
+        169.2,
+        162.4,
+        167.9,
+        158.2,
+        167.6,
+        153.7,
+        155.2
+      ],
+      "present_renderdevice_avg_ms_median": 0.71
+    },
+    "off": {
+      "avg_fps_max": 413.9,
+      "avg_fps_median": 393.0,
+      "avg_fps_min": 379.9,
+      "avg_fps_values": [
+        393.0,
+        413.9,
+        409.4,
+        382.0,
+        389.0,
+        408.5,
+        379.9
+      ],
+      "client_rendering_avg_ms_median": 1.7,
+      "frame_total_avg_ms_median": 2.54,
+      "frames_excluded_total": 19626,
+      "n": 7,
+      "p1_fps_max": 168.5,
+      "p1_fps_median": 162.1,
+      "p1_fps_min": 153.6,
+      "p1_fps_values": [
+        153.6,
+        166.0,
+        162.4,
+        155.9,
+        162.1,
+        168.5,
+        155.2
+      ],
+      "present_renderdevice_avg_ms_median": 0.73
+    }
+  },
+  "clean_runs_frames_excluded_0": {
+    "delta": {
+      "avg_fps_delta": -7.0,
+      "avg_fps_delta_percent": -1.709819247679531,
+      "avg_frame_time_delta_ms": 0.04249053796420288,
+      "avg_frame_time_off_ms": 2.442598925256473,
+      "avg_frame_time_on_ms": 2.485089463220676,
+      "client_rendering_avg_ms_delta": 0.020000000000000018,
+      "p1_fps_delta": -1.0,
+      "p1_fps_delta_percent": -0.6024096385542169,
+      "present_renderdevice_avg_ms_delta": 0.019999999999999907
+    },
+    "kwin": {
+      "avg_fps_max": 403.3,
+      "avg_fps_median": 402.4,
+      "avg_fps_min": 399.8,
+      "avg_fps_values": [
+        399.8,
+        402.6,
+        403.3,
+        402.2
+      ],
+      "client_rendering_avg_ms_median": 1.65,
+      "frame_total_avg_ms_median": 2.4850000000000003,
+      "frames_excluded_total": 0,
+      "n": 4,
+      "p1_fps_max": 169.2,
+      "p1_fps_median": 165.0,
+      "p1_fps_min": 153.7,
+      "p1_fps_values": [
+        169.2,
+        162.4,
+        167.6,
+        153.7
+      ],
+      "present_renderdevice_avg_ms_median": 0.7
+    },
+    "off": {
+      "avg_fps_max": 413.9,
+      "avg_fps_median": 409.4,
+      "avg_fps_min": 408.5,
+      "avg_fps_values": [
+        413.9,
+        409.4,
+        408.5
+      ],
+      "client_rendering_avg_ms_median": 1.63,
+      "frame_total_avg_ms_median": 2.44,
+      "frames_excluded_total": 0,
+      "n": 3,
+      "p1_fps_max": 168.5,
+      "p1_fps_median": 166.0,
+      "p1_fps_min": 162.4,
+      "p1_fps_values": [
+        166.0,
+        162.4,
+        168.5
+      ],
+      "present_renderdevice_avg_ms_median": 0.68
+    }
+  },
+  "date": "2026-06-26",
+  "environment": {
+    "backend": "Satur8 KWin effect",
+    "display": "DP-2, 2560x1440 @ 239.998 Hz, scale 1.2",
+    "game": "Counter-Strike 2",
+    "gpu": "AMD Radeon RX 9070 XT",
+    "machine": "PC1",
+    "map": "CS2 FPS BENCHMARK DUST2 / de_dust2",
+    "session": "KDE Plasma Wayland / KWin 6.7.0"
+  },
+  "interpretation": "Measured cost is within run-to-run noise. All-run medians slightly favor ON; clean-run and paired-delta views show a small possible cost around 0.04 ms/frame. Excluded-frame counts vary by run and should be shown in any site visualization.",
+  "paired_delta_medians": {
+    "avg_fps_delta": -6.300000000000011,
+    "avg_fps_delta_percent": -1.5422276621787052,
+    "avg_frame_time_delta_ms": 0.03834479518097211,
+    "p1_fps_delta": 2.299999999999983
+  },
+  "paired_deltas": [
+    {
+      "avg_fps_delta": 6.800000000000011,
+      "avg_fps_delta_percent": 1.7302798982188325,
+      "avg_frame_time_delta_ms": -0.043278636773858015,
+      "kwin_frames_excluded": 0,
+      "off_frames_excluded": 2566,
+      "p1_fps_delta": 15.599999999999994,
+      "pair": 1
+    },
+    {
+      "avg_fps_delta": -11.299999999999955,
+      "avg_fps_delta_percent": -2.7301280502536733,
+      "avg_frame_time_delta_ms": 0.06781242052294267,
+      "kwin_frames_excluded": 0,
+      "off_frames_excluded": 0,
+      "p1_fps_delta": -3.5999999999999943,
+      "pair": 2
+    },
+    {
+      "avg_fps_delta": -26.69999999999999,
+      "avg_fps_delta_percent": -6.52173913043478,
+      "avg_frame_time_delta_ms": 0.17041387850626544,
+      "kwin_frames_excluded": 4387,
+      "off_frames_excluded": 0,
+      "p1_fps_delta": 5.5,
+      "pair": 3
+    },
+    {
+      "avg_fps_delta": -9.199999999999989,
+      "avg_fps_delta_percent": -2.4083769633507823,
+      "avg_frame_time_delta_ms": 0.06460238635597593,
+      "kwin_frames_excluded": 6952,
+      "off_frames_excluded": 5963,
+      "p1_fps_delta": 2.299999999999983,
+      "pair": 4
+    },
+    {
+      "avg_fps_delta": 14.300000000000011,
+      "avg_fps_delta_percent": 3.6760925449871493,
+      "avg_frame_time_delta_ms": -0.09115032345616525,
+      "kwin_frames_excluded": 0,
+      "off_frames_excluded": 4587,
+      "p1_fps_delta": 5.5,
+      "pair": 5
+    },
+    {
+      "avg_fps_delta": -6.300000000000011,
+      "avg_fps_delta_percent": -1.5422276621787052,
+      "avg_frame_time_delta_ms": 0.03834479518097211,
+      "kwin_frames_excluded": 0,
+      "off_frames_excluded": 0,
+      "p1_fps_delta": -14.800000000000011,
+      "pair": 6
+    },
+    {
+      "avg_fps_delta": -4.699999999999989,
+      "avg_fps_delta_percent": -1.2371676757041297,
+      "avg_frame_time_delta_ms": 0.03297355212431041,
+      "kwin_frames_excluded": 6276,
+      "off_frames_excluded": 6510,
+      "p1_fps_delta": 0.0,
+      "pair": 7
+    }
+  ],
+  "protocol": "One unscored OFF warm-up, then seven alternating OFF/ON scored pairs. ON is Satur8 KWin effect at saturation 1.75.",
+  "sequence_correlations": {
+    "avg_fps": -0.3617878075937073,
+    "frame_total_avg_ms": 0.384671324603262,
+    "frames_excluded": 0.3778981263937145,
+    "p1_fps": -0.2964318120188432,
+    "present_renderdevice_avg_ms": 0.24222283344206488
+  },
+  "test_id": "cs2-kwin-20260626-144823"
+}

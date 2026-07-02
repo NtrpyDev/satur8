@@ -27,9 +27,7 @@ use drm::control::{
 use drm::{ClientCapability, Device as BasicDevice};
 
 use satur8_core::ctm::drm_ctm_blob_bytes;
-use satur8_core::{
-    Backend, BackendError, CostNote, Environment, Output, Saturation, SessionType,
-};
+use satur8_core::{Backend, BackendError, CostNote, Environment, Output, Saturation, SessionType};
 
 /// A DRM device node we can talk modesetting to.
 struct Card(File);
@@ -75,22 +73,42 @@ impl DrmCtmBackend {
         DrmCtmBackend::open_first_capable().ok()
     }
 
-    /// Open the first card that exposes a CTM-capable CRTC and enable the client
-    /// capabilities atomic modesetting needs.
+    /// Open the card we should drive and enable the client capabilities atomic
+    /// modesetting needs. On a multi-GPU box (e.g. an iGPU plus a discrete card)
+    /// several nodes expose CTM-capable CRTCs but only one is actually driving
+    /// the monitor, so prefer the first card with an *active* CTM CRTC and fall
+    /// back to any CTM-capable card if none reports an active display.
     pub fn open_first_capable() -> Result<DrmCtmBackend> {
         let mut last_err = None;
+        let mut fallback: Option<DrmCtmBackend> = None;
         for n in 0..16 {
             let path = format!("/dev/dri/card{n}");
             if !std::path::Path::new(&path).exists() {
                 continue;
             }
             match DrmCtmBackend::open_path(&path) {
-                Ok(backend) if !backend.crtcs.is_empty() => return Ok(backend),
+                Ok(backend) if !backend.crtcs.is_empty() => {
+                    if backend.has_active_ctm_crtc() {
+                        return Ok(backend);
+                    }
+                    fallback.get_or_insert(backend);
+                }
                 Ok(_) => {}
                 Err(e) => last_err = Some(e),
             }
         }
-        Err(last_err.unwrap_or_else(|| anyhow!("no CTM-capable DRM device found")))
+        fallback
+            .ok_or_else(|| last_err.unwrap_or_else(|| anyhow!("no CTM-capable DRM device found")))
+    }
+
+    /// Does any CTM-capable CRTC on this card currently drive a display?
+    fn has_active_ctm_crtc(&self) -> bool {
+        has_active_ctm_crtc_id(self.crtcs.keys().copied(), |id| {
+            self.crtcs
+                .get(&id)
+                .map(|c| self.crtc_is_active(c.crtc))
+                .unwrap_or(false)
+        })
     }
 
     fn open_path(path: &str) -> Result<DrmCtmBackend> {
@@ -119,6 +137,105 @@ impl DrmCtmBackend {
             .context("atomic commit of CTM (needs DRM master - run from a TTY)")?;
         Ok(())
     }
+
+    /// Is this CRTC currently driving a display (has a mode set)? Setting a CTM
+    /// on a disabled CRTC is pointless and the kernel may reject the commit, so
+    /// the "all outputs" path only touches active ones.
+    fn crtc_is_active(&self, handle: crtc::Handle) -> bool {
+        self.card
+            .get_crtc(handle)
+            .map(|info| info.mode().is_some())
+            .unwrap_or(false)
+    }
+
+    /// Resolve the CTM CRTCs an `Output` refers to. The shared `"all"` sentinel
+    /// (what `satur8 set`/`off` use with no explicit `--output`) fans out across
+    /// every active CTM-capable CRTC; a numeric id targets exactly that CRTC.
+    fn resolve_targets(&self, output: &Output) -> Result<Vec<&CtmCrtc>, BackendError> {
+        let ids = resolve_target_ids(output, self.crtcs.keys().copied(), |id| {
+            self.crtcs
+                .get(&id)
+                .map(|c| self.crtc_is_active(c.crtc))
+                .unwrap_or(false)
+        })?;
+        ids.into_iter()
+            .map(|id| {
+                self.crtcs
+                    .get(&id)
+                    .ok_or_else(|| BackendError::Apply(format!("CRTC {id} has no CTM property")))
+            })
+            .collect()
+    }
+}
+
+fn has_active_ctm_crtc_id<I, F>(ids: I, is_active: F) -> bool
+where
+    I: IntoIterator<Item = u32>,
+    F: FnMut(u32) -> bool,
+{
+    ids.into_iter().any(is_active)
+}
+
+fn resolve_target_ids<I, F>(
+    output: &Output,
+    ids: I,
+    mut is_active: F,
+) -> Result<Vec<u32>, BackendError>
+where
+    I: IntoIterator<Item = u32>,
+    F: FnMut(u32) -> bool,
+{
+    let mut ids: Vec<u32> = ids.into_iter().collect();
+    ids.sort_unstable();
+    ids.dedup();
+
+    if output.id == "all" {
+        let active: Vec<u32> = ids.iter().copied().filter(|id| is_active(*id)).collect();
+        let targets = if active.is_empty() { ids } else { active };
+        if targets.is_empty() {
+            return Err(BackendError::Apply(
+                "no CTM-capable CRTC available on this device".into(),
+            ));
+        }
+        return Ok(targets);
+    }
+
+    let id: u32 = output
+        .id
+        .parse()
+        .map_err(|_| BackendError::Apply(format!("bad CRTC id '{}'", output.id)))?;
+    if ids.binary_search(&id).is_err() {
+        return Err(BackendError::Apply(format!(
+            "CRTC {id} has no CTM property"
+        )));
+    }
+    Ok(vec![id])
+}
+
+fn apply_to_targets<T, I, F>(
+    targets: I,
+    saturation: Saturation,
+    mut set_target_ctm: F,
+) -> Result<(), BackendError>
+where
+    I: IntoIterator<Item = T>,
+    F: FnMut(T, Saturation) -> Result<()>,
+{
+    let mut applied = 0usize;
+    let mut last_err = None;
+    for target in targets {
+        match set_target_ctm(target, saturation) {
+            Ok(()) => applied += 1,
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if applied == 0 {
+        return Err(BackendError::Apply(format!(
+            "no CRTC accepted the CTM{}",
+            last_err.map(|e| format!(": {e:#}")).unwrap_or_default()
+        )));
+    }
+    Ok(())
 }
 
 /// Walk every CRTC and keep the ones exposing a "CTM" property.
@@ -169,16 +286,10 @@ impl Backend for DrmCtmBackend {
     }
 
     fn apply(&mut self, output: &Output, saturation: Saturation) -> Result<(), BackendError> {
-        let id: u32 = output
-            .id
-            .parse()
-            .map_err(|_| BackendError::Apply(format!("bad CRTC id '{}'", output.id)))?;
-        let target = self
-            .crtcs
-            .get(&id)
-            .ok_or_else(|| BackendError::Apply(format!("CRTC {id} has no CTM property")))?;
-        self.set_crtc_ctm(target, saturation)
-            .map_err(|e| BackendError::Apply(format!("{e:#}")))
+        let targets = self.resolve_targets(output)?;
+        apply_to_targets(targets, saturation, |target, saturation| {
+            self.set_crtc_ctm(target, saturation)
+        })
     }
 
     fn reset(&mut self, output: &Output) -> Result<(), BackendError> {
@@ -217,4 +328,93 @@ pub fn probe_ctm() -> Result<Vec<String>> {
         bail!("no CTM-capable DRM CRTCs found on this system");
     }
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn output(id: &str) -> Output {
+        Output {
+            id: id.into(),
+            human_name: id.into(),
+        }
+    }
+
+    #[test]
+    fn has_active_ctm_crtc_id_reports_true_when_any_crtc_is_active() {
+        let ids = [31, 42, 73];
+
+        assert!(has_active_ctm_crtc_id(ids, |id| id == 42));
+        assert!(!has_active_ctm_crtc_id(ids, |_| false));
+    }
+
+    #[test]
+    fn resolve_targets_all_fans_out_to_active_crtcs_only() {
+        let targets = resolve_target_ids(&output("all"), [42, 31, 73], |id| id != 42).unwrap();
+
+        assert_eq!(targets, vec![31, 73]);
+    }
+
+    #[test]
+    fn resolve_targets_all_falls_back_to_every_ctm_crtc_when_none_report_active() {
+        let targets = resolve_target_ids(&output("all"), [42, 31, 73], |_| false).unwrap();
+
+        assert_eq!(targets, vec![31, 42, 73]);
+    }
+
+    #[test]
+    fn resolve_targets_all_errors_when_no_ctm_crtcs_exist() {
+        let err = resolve_target_ids(&output("all"), [], |_| false).unwrap_err();
+
+        assert!(err.to_string().contains("no CTM-capable CRTC available"));
+    }
+
+    #[test]
+    fn resolve_targets_numeric_output_selects_that_crtc() {
+        let targets = resolve_target_ids(&output("42"), [31, 42, 73], |_| false).unwrap();
+
+        assert_eq!(targets, vec![42]);
+    }
+
+    #[test]
+    fn resolve_targets_rejects_non_numeric_output_id() {
+        let err = resolve_target_ids(&output("DP-1"), [31, 42, 73], |_| false).unwrap_err();
+
+        assert!(err.to_string().contains("bad CRTC id 'DP-1'"));
+    }
+
+    #[test]
+    fn resolve_targets_rejects_crtc_without_ctm_property() {
+        let err = resolve_target_ids(&output("99"), [31, 42, 73], |_| false).unwrap_err();
+
+        assert!(err.to_string().contains("CRTC 99 has no CTM property"));
+    }
+
+    #[test]
+    fn apply_to_targets_succeeds_when_any_target_accepts_the_ctm() {
+        let mut attempted = Vec::new();
+
+        apply_to_targets([31, 42, 73], Saturation::new(1.5), |id, saturation| {
+            attempted.push((id, saturation.get()));
+            if id == 42 {
+                anyhow::bail!("simulated commit failure");
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(attempted, vec![(31, 1.5), (42, 1.5), (73, 1.5)]);
+    }
+
+    #[test]
+    fn apply_to_targets_errors_when_every_target_rejects_the_ctm() {
+        let err = apply_to_targets([31, 42], Saturation::new(1.5), |id, _| {
+            anyhow::bail!("simulated commit failure on {id}");
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("no CRTC accepted the CTM"));
+        assert!(err.to_string().contains("simulated commit failure on 42"));
+    }
 }

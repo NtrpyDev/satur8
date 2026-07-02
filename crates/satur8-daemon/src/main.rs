@@ -82,7 +82,10 @@ impl Daemon {
                     return;
                 }
                 let (name, sat) = (profile.name.clone(), profile.saturation());
-                eprintln!("satur8-daemon: '{class}' -> profile '{name}' ({:.2})", sat.get());
+                eprintln!(
+                    "satur8-daemon: '{class}' -> profile '{name}' ({:.2})",
+                    sat.get()
+                );
                 self.apply_saturation(sat);
                 self.current = Some(name);
             }

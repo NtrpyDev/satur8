@@ -54,13 +54,10 @@ impl GnomeBackend {
 
     fn call(&self, method: &str, sat: Option<Saturation>) -> Result<(), BackendError> {
         let res = match sat {
-            Some(s) => self.conn.call_method(
-                Some(SERVICE),
-                PATH,
-                Some(IFACE),
-                method,
-                &(s.get() as f64),
-            ),
+            Some(s) => {
+                self.conn
+                    .call_method(Some(SERVICE), PATH, Some(IFACE), method, &(s.get() as f64))
+            }
             None => self
                 .conn
                 .call_method(Some(SERVICE), PATH, Some(IFACE), method, &()),

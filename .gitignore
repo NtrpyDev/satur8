@@ -11,3 +11,4 @@ packaging/*-package.log
 packaging/*-namcap.log
 packaging/PKGBUILD-namcap.log
 __pycache__/
+HANDOFF.md

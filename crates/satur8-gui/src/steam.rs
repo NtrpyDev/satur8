@@ -2,7 +2,7 @@
 //! Steam already cached on this machine and display them locally - nothing is
 //! bundled or redistributed, so there's no asset-licensing problem for the repo.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A few common games, so profiles added without a detected AppID still get art.
 pub fn known_app_id(exe_or_name: &str) -> Option<u32> {
@@ -44,7 +44,7 @@ fn cache_dir(app_id: u32) -> Option<PathBuf> {
     None
 }
 
-fn first_existing(dir: &PathBuf, names: &[&str]) -> Option<PathBuf> {
+fn first_existing(dir: &Path, names: &[&str]) -> Option<PathBuf> {
     for n in names {
         let p = dir.join(n);
         if p.is_file() {

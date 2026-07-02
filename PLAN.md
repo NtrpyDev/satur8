@@ -4,14 +4,15 @@
 > boost, applied **outside** the game process so it cannot trip anti-cheat,
 > with as close to **zero CPU cost** as the hardware allows.
 
-Status: v0.2.2 is working. KDE Plasma Wayland is the verified target, with the
-GUI, CLI, daemon, KWin effect, KWin focus script, tray app, and profile config
-working together. NVIDIA X11 NV-CONTROL is also verified on real NVIDIA
-hardware. v0.2 widened distribution: a live Fedora package on COPR alongside
-the Arch package, and a tagged-release GitHub Actions workflow that builds the
-source and Linux tarballs with checksums so the packaging sources and the
-website download stay in sync. This file keeps the longer design notes and
-backend roadmap; the user-facing setup guide lives in `README.md`.
+Status: v0.3.2 is shipped and working. KDE Plasma Wayland, GNOME Wayland,
+Hyprland, NVIDIA X11 NV-CONTROL, and gamescope-native are verified; current
+v0.3.3 backend-sweep work has also verified the nested gamescope fallback. DRM
+CTM remains implemented with a passing read-only probe, while runtime apply/off
+verification is deferred. v0.2 widened distribution: a live Fedora package on
+COPR alongside the Arch package, and a tagged-release GitHub Actions workflow
+that builds the source and Linux tarballs with checksums so the packaging
+sources and the website download stay in sync. This file keeps the longer design
+notes and backend roadmap; the user-facing setup guide lives in `README.md`.
 
 ---
 
@@ -360,10 +361,24 @@ pub trait Backend {
   CRTCs on the amdgpu card. Setting it still requires DRM master, i.e. a TTY /
   bare-KMS session (on Wayland KWin owns master); the zero-cost path is real
   there.
-- gamescope reshade satur8 quality + measured latency on a 240Hz panel. (Open;
-  the fallback shader is implemented and loads, perf not yet measured.)
-- Confirm KWin effect cost is actually negligible at 1440p/240Hz in CS2. (Open;
-  needs an in-game measurement pass.)
+- gamescope reshade satur8 quality + measured latency on a 240Hz panel.
+  Quality is verified: `satur8 run --via gamescope` wrapped `glxgears` in
+  nested gamescope on KDE Wayland / AMD RX 9070 XT, and a `0.0` / `4.0`
+  screenshot pair changed mean HLS saturation from 0.086 to 0.797 after fixing
+  the shader install path. Latency/perf is still not measured.
+- Confirm KWin effect cost is actually negligible at 1440p/240Hz in CS2.
+  Measured on PC1 with CS2 FPS BENCHMARK DUST2 / `de_dust2`, DP-2 at
+  2560x1440 @ 239.998 Hz, KDE Plasma Wayland / KWin 6.7.0, AMD Radeon RX
+  9070 XT, and Satur8's KWin effect at 1.75. Dataset:
+  `benchmarks/cs2-kwin-20260626-144823/` (raw VProf logs, CSV/JSONL, summary,
+  and telemetry snapshots). Seven alternating scored pairs gave all-run medians
+  of OFF Avg/P1 = 393.0/162.1 FPS and ON Avg/P1 = 399.8/162.4 FPS, which is
+  +1.7% Avg and -0.043 ms/frame for ON. Because several runs had VProf excluded
+  frames, the clean-run sensitivity check (`frames_excluded == 0`) was OFF
+  409.4/166.0 FPS vs ON 402.4/165.0 FPS, or -1.7% Avg and +0.042 ms/frame.
+  Paired median delta was -1.5% Avg / +0.038 ms/frame. Conclusion: no large
+  measurable KWin cost on this setup; the observed effect is inside run-to-run
+  noise, so do not claim literal zero cost from this benchmark.
 
 ## 11. Anti-cheat note for the README (user-facing, must be accurate)
 State plainly: this tool only changes the **display color pipeline** (compositor

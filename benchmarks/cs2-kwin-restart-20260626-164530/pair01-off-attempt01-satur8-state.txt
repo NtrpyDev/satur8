@@ -1,0 +1,8 @@
+effect_loaded=false
+
+environment:
+  session:  Wayland
+  desktop:  KDE Plasma
+  gpu:      AMD
+  prefers:  kwin backend
+backend kwin: available, effect not loaded

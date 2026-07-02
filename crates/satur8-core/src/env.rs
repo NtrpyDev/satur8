@@ -143,11 +143,13 @@ fn detect_gpu() -> Gpu {
     };
 
     let driver_of = |path: &std::path::Path| -> Option<String> {
-        std::fs::read_link(path.join("device/driver")).ok().map(|t| {
-            t.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default()
-        })
+        std::fs::read_link(path.join("device/driver"))
+            .ok()
+            .map(|t| {
+                t.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            })
     };
     let classify = |driver: &str| -> Option<Gpu> {
         match driver {

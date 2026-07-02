@@ -17,7 +17,11 @@ use satur8_kwin::KwinBackend;
 use backend::{all_outputs, select_backend};
 
 #[derive(Parser)]
-#[command(name = "satur8", version, about = "Per-game digital vibrance for Linux")]
+#[command(
+    name = "satur8",
+    version,
+    about = "Per-game digital vibrance for Linux"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -124,7 +128,10 @@ fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> 
             .into_iter()
             .find(|o| &o.id == id)
             .with_context(|| {
-                format!("no output '{id}' on the {} backend (see `satur8 outputs`)", backend.name())
+                format!(
+                    "no output '{id}' on the {} backend (see `satur8 outputs`)",
+                    backend.name()
+                )
             })?,
         None => all_outputs(),
     };

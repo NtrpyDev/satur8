@@ -68,17 +68,17 @@ pub fn is_available() -> bool {
 }
 
 /// gamescope's per-user ReShade shader dir.
+///
+/// gamescope looks under `$HOME/.local/share/gamescope/reshade`, not
+/// `XDG_DATA_HOME`, so match that path exactly or a regenerated per-launch
+/// shader can be ignored in favor of an older/global copy.
 fn shader_dir() -> Result<PathBuf> {
-    let base = if let Ok(x) = std::env::var("XDG_DATA_HOME") {
-        if x.is_empty() {
-            PathBuf::from(std::env::var("HOME").context("HOME unset")?).join(".local/share")
-        } else {
-            PathBuf::from(x)
-        }
-    } else {
-        PathBuf::from(std::env::var("HOME").context("HOME unset")?).join(".local/share")
-    };
-    Ok(base.join("gamescope/reshade/Shaders"))
+    let home = std::env::var("HOME").context("HOME unset")?;
+    Ok(shader_dir_for_home(home))
+}
+
+fn shader_dir_for_home(home: impl Into<PathBuf>) -> PathBuf {
+    home.into().join(".local/share/gamescope/reshade/Shaders")
 }
 
 /// Write the saturation-baked ReShade effect and return its file name (which is
@@ -292,15 +292,7 @@ fn restore_property(
                 32 => bytes.len() / 4,
                 _ => bytes.len(),
             } as u32;
-            conn.change_property(
-                PropMode::REPLACE,
-                root,
-                atom,
-                type_,
-                format,
-                len,
-                &bytes,
-            )?;
+            conn.change_property(PropMode::REPLACE, root, atom, type_, format, len, &bytes)?;
         }
     }
     Ok(())
@@ -395,6 +387,16 @@ mod tests {
         assert!(argv.contains(&"--reshade-effect".to_string()));
         assert!(argv.contains(&"--".to_string()));
         assert_eq!(argv.last().unwrap(), "cs2");
+    }
+
+    #[test]
+    fn shader_dir_matches_gamescopes_hard_coded_local_share_path() {
+        let dir = shader_dir_for_home("/tmp/satur8-home");
+
+        assert_eq!(
+            dir,
+            PathBuf::from("/tmp/satur8-home/.local/share/gamescope/reshade/Shaders")
+        );
     }
 
     #[test]

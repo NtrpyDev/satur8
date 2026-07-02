@@ -7,15 +7,16 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.3.1 is shipped and working. Five of the seven backend paths are now verified:
-KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland, NVIDIA X11
-NV-CONTROL, and gamescope-native for a running full-screen gamescope compositor.
-The remaining implemented-but-unverified paths are DRM/KMS and the nested
-gamescope fallback for unsupported Wayland sessions. Distribution today is a
-Linux x86_64 tarball served from [satur8.app](https://satur8.app), a tested Arch
-package, and a live Fedora package on COPR built for Fedora 43 and 44. AUR
-publication is prepared but blocked while new AUR account registration is
-disabled upstream, unless an existing AUR maintainer publishes the package.
+v0.3.2 is shipped and working. In the current v0.3.3 backend-sweep work, six of
+the seven backend paths are verified: KDE Plasma Wayland/KWin, GNOME Wayland
+Shell extension, Hyprland, NVIDIA X11 NV-CONTROL, gamescope-native for a running
+full-screen gamescope compositor, and the nested gamescope fallback for
+unsupported Wayland sessions. The remaining implemented-but-unverified path is
+DRM/KMS. Distribution today is a Linux x86_64 tarball served from
+[satur8.app](https://satur8.app), a tested Arch package, and a live Fedora
+package on COPR built for Fedora 43 and 44. AUR publication is prepared but
+blocked while new AUR account registration is disabled upstream, unless an
+existing AUR maintainer publishes the package.
 
 The north star is **v1.0 = Satur8 running well on SteamOS and Bazzite**. Both run
 gamescope rather than KWin. The gamescope path has been proven in v0.3; the next
@@ -88,25 +89,39 @@ other backends.
       backend (drives the *running* compositor via its Xwayland color atoms,
       added in v0.3.0) was verified on a real full-screen gamescope session
       (NVIDIA, glxgears) where the saturation visibly changed across the range.
-      Note: a *nested* gamescope on a desktop sets the atoms but does not apply
-      the LUT to its nested output, so verification needs a full-screen
-      (Game-Mode-style) session. Real Steam Deck / Bazzite field-testing is the
-      separate v0.4 work below.
+      The nested ReShade fallback (`satur8 run --via gamescope`) was then
+      verified on KDE Wayland with AMD RX 9070 XT by wrapping `glxgears` in
+      nested gamescope; a `0.0` / `4.0` screenshot pair changed mean HLS
+      saturation from 0.086 to 0.797 after fixing the runtime shader install
+      path to match gamescope's `$HOME/.local/share/gamescope/reshade/Shaders`
+      search path. Real Steam Deck / Bazzite field-testing is the separate v0.4
+      work below.
 - [x] Verify the Hyprland backend. Done on PC1 (AMD RX 9070): satur8 selected
       the hyprland backend and set `decoration:screen_shader`; a headless
       Hyprland capture measured mean saturation dropping 0.975 -> 0.244 at
       satur8 0.2, confirming the screen-shader pass applies and changes output
       saturation.
-- [ ] Verify DRM-CTM on X11 / TTY for AMD and Intel (the read-only probe already
-      passes, see PLAN.md section 10). Also relevant to the Deck, an AMD APU.
+- [x] Finish the DRM-CTM implementation sweep without runtime verification:
+      multi-GPU active-card selection and all-active-output fan-out are
+      implemented and unit-tested; the read-only probe already passes (see
+      PLAN.md section 10), but real apply/off verification is deferred and the
+      backend remains honestly listed as Implemented.
 - [x] Verify the GNOME Wayland Shell-extension backend on real GNOME (GNOME
       50.2, NVIDIA Wayland). Required fixes: shell-version range and the
       Clutter.ShaderType enum removed in Mutter 18.
 - [x] Verify the NVIDIA X11 NV-CONTROL backend on real NVIDIA hardware.
-- [ ] Measure KWin effect in-game cost at 1440p / 240Hz in CS2 (PLAN.md open
-      item).
-- [ ] Update the backend status table in the README and on the website to match
-      reality.
+- [x] Measure KWin effect in-game cost at 1440p / 240Hz in CS2. Done on PC1
+      with CS2 FPS BENCHMARK DUST2 / `de_dust2`, DP-2 at 2560x1440 @ 239.998
+      Hz, KDE Plasma Wayland / KWin 6.7.0, AMD Radeon RX 9070 XT, and Satur8's
+      KWin effect at 1.75. Seven alternating scored pairs were saved under
+      `benchmarks/cs2-kwin-20260626-144823/`. All-run medians were OFF Avg/P1 =
+      393.0/162.1 FPS and ON Avg/P1 = 399.8/162.4 FPS; clean-run sensitivity
+      was OFF 409.4/166.0 FPS vs ON 402.4/165.0 FPS; paired median delta was
+      -1.5% Avg / +0.038 ms/frame. Treat the result as within run-to-run noise,
+      not a precise zero-cost claim.
+- [ ] Update the backend status table on the website when v0.3.3 ships. The
+      README table already reflects the current v0.3.3 backend-sweep state; the
+      live site remains on shipped v0.3.2 wording until release/deploy.
 
 ## v0.4: SteamOS / Bazzite support
 

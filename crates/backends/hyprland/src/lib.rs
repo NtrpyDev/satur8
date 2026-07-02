@@ -86,9 +86,7 @@ impl HyprlandBackend {
         if Environment::detect().desktop != Desktop::Hyprland {
             return None;
         }
-        if which("hyprctl").is_none() {
-            return None;
-        }
+        which("hyprctl")?;
         Some(HyprlandBackend {
             shader_path: shader_path()?,
             linear_light: false,

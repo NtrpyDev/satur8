@@ -17,9 +17,9 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use satur8_core::{Backend, MatchRule, Output, Profile, Profiles, Saturation};
 use serde::{Deserialize, Serialize};
 use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
-use satur8_core::{Backend, MatchRule, Output, Profile, Profiles, Saturation};
 
 slint::include_modules!();
 
@@ -89,24 +89,29 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Running apps (with Steam AppIDs)
     let apps = Rc::new(RefCell::new(proc::running_apps()));
-    let running = Rc::new(VecModel::<SharedString>::from(running_strings(&apps.borrow())));
+    let running = Rc::new(VecModel::<SharedString>::from(running_strings(
+        &apps.borrow(),
+    )));
     ui.set_running(ModelRc::from(running.clone()));
 
     // Output note (honest about what the backend can target).
-    ui.set_outputs_note(
-        match state.borrow().backend.as_ref().map(|b| b.name()) {
-            Some("kwin") | Some("gnome-shell") | Some("hyprland") => {
-                "On this compositor it affects all monitors.".into()
-            }
-            Some("drm-ctm") => "Targets the connected display(s).".into(),
-            _ => "".into(),
-        },
-    );
+    ui.set_outputs_note(match state.borrow().backend.as_ref().map(|b| b.name()) {
+        Some("kwin") | Some("gnome-shell") | Some("hyprland") => {
+            "On this compositor it affects all monitors.".into()
+        }
+        Some("drm-ctm") => "Targets the connected display(s).".into(),
+        _ => "".into(),
+    });
 
     // Activity
     let activity = Rc::new(VecModel::<LogRow>::default());
     log(&activity, true, "Started Satur8");
-    match state.borrow().backend.as_ref().map(|b| b.name().to_string()) {
+    match state
+        .borrow()
+        .backend
+        .as_ref()
+        .map(|b| b.name().to_string())
+    {
         Some(name) => log(&activity, false, &format!("{name} backend active")),
         None => log(&activity, false, "No supported backend in this session"),
     }
@@ -131,7 +136,8 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     }
     if let Ok(value) = std::env::var("SATUR8_GUI_DARK") {
-        ui.global::<Pal>().set_dark(matches!(value.as_str(), "1" | "true" | "yes" | "on"));
+        ui.global::<Pal>()
+            .set_dark(matches!(value.as_str(), "1" | "true" | "yes" | "on"));
     }
 
     // ---------------- callbacks ----------------
@@ -202,8 +208,17 @@ fn main() -> Result<(), slint::PlatformError> {
             // Editing a profile only saves config - it never touches the live
             // desktop. The profile applies during the game via the launch wrapper.
             let st = state.borrow();
-            let name = st.profiles.profiles.get(i as usize).map(|p| p.name.clone()).unwrap_or_default();
-            log(&activity, false, &format!("{} {}", name, if enabled { "enabled" } else { "disabled" }));
+            let name = st
+                .profiles
+                .profiles
+                .get(i as usize)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            log(
+                &activity,
+                false,
+                &format!("{} {}", name, if enabled { "enabled" } else { "disabled" }),
+            );
         }
     });
 
@@ -216,7 +231,12 @@ fn main() -> Result<(), slint::PlatformError> {
             {
                 let mut st = state.borrow_mut();
                 let i = i as usize;
-                name = st.profiles.profiles.get(i).map(|p| p.name.clone()).unwrap_or_default();
+                name = st
+                    .profiles
+                    .profiles
+                    .get(i)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default();
                 if i < st.profiles.profiles.len() {
                     st.profiles.profiles.remove(i);
                 }
@@ -233,7 +253,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let apps = apps.clone();
         let activity = activity.clone();
         move |i| {
-            let app = apps.borrow().get(i as usize).map(|a| (a.exe.clone(), a.app_id));
+            let app = apps
+                .borrow()
+                .get(i as usize)
+                .map(|a| (a.exe.clone(), a.app_id));
             let Some((exe, app_id)) = app else { return };
             {
                 let mut st = state.borrow_mut();
@@ -292,7 +315,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let sat = st.current_sat;
             if let Some(b) = st.backend.as_mut() {
                 match b.apply(&all_outputs(), Saturation::new(sat)) {
-                    Ok(()) => log(&activity, true, &format!("Applied {:+.0}%", (sat - 1.0) * 100.0)),
+                    Ok(()) => log(
+                        &activity,
+                        true,
+                        &format!("Applied {:+.0}%", (sat - 1.0) * 100.0),
+                    ),
                     Err(e) => log(&activity, false, &format!("Apply failed: {e}")),
                 }
             }
@@ -308,7 +335,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let sat = st.current_sat;
             if let Some(b) = st.backend.as_mut() {
                 let _ = b.apply(&all_outputs(), Saturation::new(sat));
-                log(&activity, false, &format!("Previewing {:+.0}% on desktop", (sat - 1.0) * 100.0));
+                log(
+                    &activity,
+                    false,
+                    &format!("Previewing {:+.0}% on desktop", (sat - 1.0) * 100.0),
+                );
             }
             st.previewing = true;
         }
@@ -349,7 +380,10 @@ fn main() -> Result<(), slint::PlatformError> {
 // ---------------- helpers ----------------
 
 fn all_outputs() -> Output {
-    Output { id: "all".into(), human_name: "All outputs".into() }
+    Output {
+        id: "all".into(),
+        human_name: "All outputs".into(),
+    }
 }
 fn apply_or_reset(backend: &mut dyn Backend, sat: f32) -> Result<(), satur8_core::BackendError> {
     if (sat - 1.0).abs() < 1e-3 {
@@ -384,14 +418,23 @@ fn rebuild_games(model: &VecModel<GameRow>, profiles: &Profiles) {
         .iter()
         .map(|p| {
             let exe = p.match_rule.exe.clone().unwrap_or_else(|| p.name.clone());
-            let icon = profile_app_id(p).and_then(steam::icon_path).and_then(|path| load_icon(&path));
+            let icon = profile_app_id(p)
+                .and_then(steam::icon_path)
+                .and_then(|path| load_icon(&path));
             GameRow {
                 name: p.name.clone().into(),
                 exe: exe.into(),
                 percent: sat_to_percent(p.saturation),
                 enabled: true,
                 accent: tile_color(&p.name),
-                initial: p.name.chars().next().unwrap_or('?').to_uppercase().to_string().into(),
+                initial: p
+                    .name
+                    .chars()
+                    .next()
+                    .unwrap_or('?')
+                    .to_uppercase()
+                    .to_string()
+                    .into(),
                 has_icon: icon.is_some(),
                 icon: icon.unwrap_or_default(),
             }
@@ -401,7 +444,12 @@ fn rebuild_games(model: &VecModel<GameRow>, profiles: &Profiles) {
 }
 
 /// Set the right-panel before/after: real Steam art if we have it, swatches else.
-fn set_preview(ui: &AppWindow, app_id: Option<u32>, sat: f32, after_swatch_model: &VecModel<Color>) {
+fn set_preview(
+    ui: &AppWindow,
+    app_id: Option<u32>,
+    sat: f32,
+    after_swatch_model: &VecModel<Color>,
+) {
     after_swatch_model.set_vec(after_swatches(sat));
     if let Some(path) = app_id.and_then(steam::preview_path) {
         if let Some((before, after)) = load_preview_pair(&path, sat) {
@@ -415,7 +463,8 @@ fn set_preview(ui: &AppWindow, app_id: Option<u32>, sat: f32, after_swatch_model
 }
 
 fn to_slint(img: &image::RgbaImage) -> Image {
-    let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(img.as_raw(), img.width(), img.height());
+    let buf =
+        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(img.as_raw(), img.width(), img.height());
     Image::from_rgba8(buf)
 }
 
@@ -424,7 +473,8 @@ fn load_icon(path: &Path) -> Option<Image> {
     let img = image::open(path).ok()?.into_rgba8();
     let (w, h) = (img.width(), img.height());
     let side = w.min(h);
-    let cropped = image::imageops::crop_imm(&img, (w - side) / 2, (h - side) / 2, side, side).to_image();
+    let cropped =
+        image::imageops::crop_imm(&img, (w - side) / 2, (h - side) / 2, side, side).to_image();
     let small = image::imageops::thumbnail(&cropped, 96, 96);
     Some(to_slint(&small))
 }
@@ -440,8 +490,14 @@ fn load_preview_pair(path: &Path, sat: f32) -> Option<(Image, Image)> {
     let m = Saturation::new(sat).matrix();
     let mut after = base.clone();
     for px in after.pixels_mut() {
-        let (r, g, b) = (px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0);
-        let o = |row: [f32; 3]| ((row[0] * r + row[1] * g + row[2] * b).clamp(0.0, 1.0) * 255.0).round() as u8;
+        let (r, g, b) = (
+            px[0] as f32 / 255.0,
+            px[1] as f32 / 255.0,
+            px[2] as f32 / 255.0,
+        );
+        let o = |row: [f32; 3]| {
+            ((row[0] * r + row[1] * g + row[2] * b).clamp(0.0, 1.0) * 255.0).round() as u8
+        };
         px[0] = o(m[0]);
         px[1] = o(m[1]);
         px[2] = o(m[2]);
@@ -450,7 +506,10 @@ fn load_preview_pair(path: &Path, sat: f32) -> Option<(Image, Image)> {
 }
 
 fn before_swatches() -> Vec<Color> {
-    SWATCHES.iter().map(|&(r, g, b)| Color::from_rgb_u8(r, g, b)).collect()
+    SWATCHES
+        .iter()
+        .map(|&(r, g, b)| Color::from_rgb_u8(r, g, b))
+        .collect()
 }
 fn after_swatches(sat: f32) -> Vec<Color> {
     let m = Saturation::new(sat).matrix();
@@ -458,25 +517,39 @@ fn after_swatches(sat: f32) -> Vec<Color> {
         .iter()
         .map(|&(r, g, b)| {
             let (rf, gf, bf) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
-            let o = |row: [f32; 3]| ((row[0] * rf + row[1] * gf + row[2] * bf).clamp(0.0, 1.0) * 255.0).round() as u8;
+            let o = |row: [f32; 3]| {
+                ((row[0] * rf + row[1] * gf + row[2] * bf).clamp(0.0, 1.0) * 255.0).round() as u8
+            };
             Color::from_rgb_u8(o(m[0]), o(m[1]), o(m[2]))
         })
         .collect()
 }
 
 fn tile_color(name: &str) -> Color {
-    let h = name.bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+    let h = name
+        .bytes()
+        .fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
     let (r, g, b) = TILE_COLORS[(h as usize) % TILE_COLORS.len()];
     Color::from_rgb_u8(r, g, b)
 }
 
 fn log(model: &VecModel<LogRow>, ok: bool, text: &str) {
-    model.insert(0, LogRow { ok, text: text.into(), time: now_hms().into() });
+    model.insert(
+        0,
+        LogRow {
+            ok,
+            text: text.into(),
+            time: now_hms().into(),
+        },
+    );
 }
 
 fn now_hms() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let day = secs % 86_400;
     format!("{:02}:{:02}:{:02}", day / 3600, (day % 3600) / 60, day % 60)
 }
@@ -486,7 +559,10 @@ fn running_strings(apps: &[proc::RunningApp]) -> Vec<SharedString> {
 }
 
 fn add_or_update(profiles: &mut Profiles, exe: &str, app_id: Option<u32>, saturation: f32) {
-    let name = exe.trim_end_matches(".exe").trim_end_matches(".x86_64").to_string();
+    let name = exe
+        .trim_end_matches(".exe")
+        .trim_end_matches(".x86_64")
+        .to_string();
     if let Some(p) = profiles
         .profiles
         .iter_mut()
@@ -542,7 +618,9 @@ fn config_dir() -> PathBuf {
             return PathBuf::from(x).join("satur8");
         }
     }
-    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config").join("satur8")
+    PathBuf::from(std::env::var("HOME").unwrap_or_default())
+        .join(".config")
+        .join("satur8")
 }
 fn load_profiles() -> Profiles {
     match std::fs::read_to_string(config_dir().join("profiles.toml")) {
