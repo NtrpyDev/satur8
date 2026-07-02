@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use satur8_backend::{all_outputs, install_signal_handler, select_backend, RestoreGuard};
+use satur8_backend::{apply_to_outputs, install_signal_handler, select_backend, RestoreGuard};
 use satur8_core::{BackendError, Profiles, Saturation};
 use zbus::interface;
 
@@ -24,6 +24,7 @@ enum FocusAction {
     Apply {
         profile: String,
         saturation: Saturation,
+        outputs: Vec<String>,
     },
     Restore,
     None,
@@ -39,6 +40,7 @@ fn decide_focus_action(
         Some(profile) => FocusAction::Apply {
             profile: profile.name.clone(),
             saturation: profile.saturation(),
+            outputs: profile.outputs.clone(),
         },
         None if current.is_some() => FocusAction::Restore,
         None => FocusAction::None,
@@ -92,6 +94,7 @@ impl BackendState {
     fn apply(
         &mut self,
         saturation: Saturation,
+        outputs: &[String],
         restore_to: Saturation,
     ) -> Result<(), BackendError> {
         self.try_detect(restore_to);
@@ -100,7 +103,7 @@ impl BackendState {
             .as_mut()
             .ok_or_else(|| BackendError::Unavailable("no backend is currently reachable".into()))?;
         guard.set_restore_to(restore_to);
-        let result = guard.backend_mut().apply(&all_outputs(), saturation);
+        let result = apply_to_outputs(guard.backend_mut(), outputs, saturation);
         if result.is_ok() {
             guard.arm();
         }
@@ -156,6 +159,7 @@ impl Daemon {
             FocusAction::Apply {
                 profile,
                 saturation,
+                outputs,
             } => {
                 eprintln!(
                     "satur8-daemon: '{class}' -> profile '{profile}' ({:.2})",
@@ -165,7 +169,7 @@ impl Daemon {
                     .backend
                     .lock()
                     .expect("backend state mutex poisoned")
-                    .apply(saturation, self.profiles.default_saturation());
+                    .apply(saturation, &outputs, self.profiles.default_saturation());
                 match result {
                     Ok(()) => self.current = Some(profile),
                     Err(error) => {
@@ -231,6 +235,7 @@ impl Daemon {
         };
 
         let saturation = profile.saturation();
+        let outputs = profile.outputs.clone();
         eprintln!(
             "satur8-daemon: reapplied active profile '{current}' ({:.2})",
             saturation.get()
@@ -239,7 +244,7 @@ impl Daemon {
             .backend
             .lock()
             .expect("backend state mutex poisoned")
-            .apply(saturation, self.profiles.default_saturation());
+            .apply(saturation, &outputs, self.profiles.default_saturation());
         if let Err(error) = result {
             self.current = None;
             eprintln!("satur8-daemon: apply failed: {error}");
@@ -354,11 +359,12 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicBool;
 
+    use satur8_backend::all_outputs;
     use satur8_core::{Backend, CostNote, MatchRule, Output, Profile};
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     enum Call {
-        Apply(f32),
+        Apply(&'static str, f32),
         Reset,
     }
 
@@ -380,11 +386,17 @@ mod tests {
             vec![all_outputs()]
         }
 
-        fn apply(&mut self, _output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+        fn apply(&mut self, output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+            let output = match output.id.as_str() {
+                "all" => "all",
+                "DP-1" => "DP-1",
+                "HDMI-A-1" => "HDMI-A-1",
+                other => panic!("unexpected output {other}"),
+            };
             self.calls
                 .lock()
                 .unwrap()
-                .push(Call::Apply(saturation.get()));
+                .push(Call::Apply(output, saturation.get()));
             if self.fail_apply.load(Ordering::Acquire) {
                 Err(BackendError::Apply("injected failure".into()))
             } else {
@@ -433,7 +445,7 @@ mod tests {
         let (mut daemon, calls, _) = setup();
         daemon.react("game.class");
         assert_eq!(daemon.current.as_deref(), Some("game"));
-        assert_eq!(*calls.lock().unwrap(), [Call::Apply(1.5)]);
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
     }
 
     #[test]
@@ -442,7 +454,10 @@ mod tests {
         daemon.react("game.class");
         daemon.react("desktop");
         assert_eq!(daemon.current, None);
-        assert_eq!(*calls.lock().unwrap(), [Call::Apply(1.5), Call::Reset]);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Reset]
+        );
     }
 
     #[test]
@@ -450,7 +465,7 @@ mod tests {
         let (mut daemon, calls, _) = setup();
         daemon.react("game.class");
         daemon.react("game.class");
-        assert_eq!(*calls.lock().unwrap(), [Call::Apply(1.5)]);
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
     }
 
     #[test]
@@ -462,7 +477,10 @@ mod tests {
         fail_apply.store(false, Ordering::Release);
         daemon.react("game.class");
         assert_eq!(daemon.current.as_deref(), Some("game"));
-        assert_eq!(*calls.lock().unwrap(), [Call::Apply(1.5), Call::Apply(1.5)]);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Apply("all", 1.5)]
+        );
     }
 
     #[test]
@@ -471,6 +489,22 @@ mod tests {
         daemon.react("game.class");
         daemon.invalidate_current();
         daemon.react("game.class");
-        assert_eq!(*calls.lock().unwrap(), [Call::Apply(1.5), Call::Apply(1.5)]);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Apply("all", 1.5)]
+        );
+    }
+
+    #[test]
+    fn applies_profile_to_each_configured_output() {
+        let (mut daemon, calls, _) = setup();
+        daemon.profiles.profiles[0].outputs = vec!["DP-1".into(), "HDMI-A-1".into()];
+
+        daemon.react("game.class");
+
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("DP-1", 1.5), Call::Apply("HDMI-A-1", 1.5)]
+        );
     }
 }

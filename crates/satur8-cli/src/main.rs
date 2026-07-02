@@ -30,6 +30,7 @@ enum Command {
     /// Set the saturation now (loads the backend if needed). 1.0 = unchanged,
     /// >1 = more vivid, 0 = greyscale. Range 0.0..=4.0.
     Set {
+        #[arg(value_parser = parse_saturation)]
         saturation: f32,
         /// Blend in linear light (more correct) instead of gamma sRGB.
         #[arg(long)]
@@ -40,7 +41,7 @@ enum Command {
     },
     /// Turn satur8 on using a saturation value (default 1.5).
     On {
-        #[arg(default_value_t = 1.5)]
+        #[arg(default_value_t = 1.5, value_parser = parse_saturation)]
         saturation: f32,
         /// Blend in linear light (more correct) instead of gamma sRGB.
         #[arg(long)]
@@ -57,7 +58,7 @@ enum Command {
         #[arg(long)]
         profile: Option<String>,
         /// Override saturation directly (wins over --profile).
-        #[arg(long)]
+        #[arg(long, value_parser = parse_saturation)]
         saturation: Option<f32>,
         /// Force a run strategy instead of the native backend. Supported:
         /// `gamescope` (nested fallback) and `gamescope-native` (running compositor).
@@ -80,6 +81,14 @@ enum Command {
     Status,
     /// Diagnose the environment and backend availability.
     Doctor,
+}
+
+fn parse_saturation(value: &str) -> Result<f32, String> {
+    let value = value
+        .parse::<f32>()
+        .map_err(|error| format!("invalid saturation '{value}': {error}"))?;
+    Saturation::try_new(value).map_err(|error| error.to_string())?;
+    Ok(value)
 }
 
 fn main() -> Result<()> {
@@ -116,7 +125,7 @@ fn main() -> Result<()> {
 }
 
 fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> {
-    let clamped = Saturation::new(saturation);
+    let clamped = Saturation::try_new(saturation)?;
     let mut backend = select_backend()?;
 
     // Pick the target output: a named one (validated against the backend) or all.

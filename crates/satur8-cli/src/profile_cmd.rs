@@ -16,6 +16,7 @@ pub enum ProfileCmd {
     Add {
         name: String,
         /// Target saturation (0.0..=4.0).
+        #[arg(value_parser = crate::parse_saturation)]
         saturation: f32,
         /// Match by executable basename, e.g. cs2.
         #[arg(long)]
@@ -119,6 +120,7 @@ fn build_profile(
     window_class: Option<String>,
     steam_app_id: Option<u32>,
 ) -> Result<Profile> {
+    satur8_core::Saturation::try_new(saturation)?;
     if exe.is_none() && window_class.is_none() && steam_app_id.is_none() {
         bail!("a profile needs at least one match rule (--exe, --window-class, or --steam-app-id)");
     }

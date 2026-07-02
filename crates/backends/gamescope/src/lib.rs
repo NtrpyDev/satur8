@@ -127,6 +127,7 @@ pub struct NativeSession {
     previous_3dlut: SavedProperty,
     previous_shaper: SavedProperty,
     previous_disable: SavedProperty,
+    active: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -136,6 +137,7 @@ struct NativeAtoms {
     color_management_disable: Atom,
 }
 
+#[derive(Clone)]
 enum SavedProperty {
     Missing,
     Present {
@@ -178,6 +180,7 @@ pub fn native_session() -> Result<NativeSession> {
         previous_3dlut,
         previous_shaper,
         previous_disable,
+        active: false,
     })
 }
 
@@ -186,7 +189,7 @@ impl NativeSession {
     /// shaper + 3D LUT override atoms. This is the SteamOS/Bazzite-shaped path:
     /// drive the existing compositor at runtime instead of launching a nested
     /// gamescope.
-    pub fn apply(&self, saturation: Saturation) -> Result<()> {
+    pub fn apply(&mut self, saturation: Saturation) -> Result<()> {
         if saturation.is_identity() {
             return Ok(());
         }
@@ -204,51 +207,101 @@ impl NativeSession {
 
         // gamescope interprets non-zero as disabled. Force color management on
         // while Satur8 owns these overrides, then restore the previous property.
-        self.conn.change_property32(
-            PropMode::REPLACE,
-            self.root,
-            self.atoms.color_management_disable,
-            AtomEnum::CARDINAL,
-            &[0],
-        )?;
-        self.set_string(self.atoms.shaperlut_override, &shaper_path)?;
-        self.set_string(self.atoms.lut3d_override, &lut3d_path)?;
-        self.conn.flush()?;
+        self.active = true;
+        let apply_result = (|| {
+            self.conn
+                .change_property32(
+                    PropMode::REPLACE,
+                    self.root,
+                    self.atoms.color_management_disable,
+                    AtomEnum::CARDINAL,
+                    &[0],
+                )?
+                .check()?;
+            self.set_string(self.atoms.shaperlut_override, &shaper_path)?;
+            self.set_string(self.atoms.lut3d_override, &lut3d_path)?;
+            self.conn.flush()?;
+            Ok(())
+        })();
+        if let Err(error) = apply_result {
+            if let Err(rollback_error) = self.restore_saved() {
+                return Err(error).context(format!(
+                    "rolling back gamescope properties also failed: {rollback_error:#}"
+                ));
+            }
+            self.active = false;
+            return Err(error);
+        }
         Ok(())
     }
 
-    pub fn restore(self) -> Result<()> {
-        restore_property(
-            &self.conn,
-            self.root,
-            self.atoms.lut3d_override,
-            self.previous_3dlut,
-        )?;
-        restore_property(
-            &self.conn,
-            self.root,
-            self.atoms.shaperlut_override,
-            self.previous_shaper,
-        )?;
-        restore_property(
-            &self.conn,
-            self.root,
-            self.atoms.color_management_disable,
-            self.previous_disable,
-        )?;
-        self.conn.flush()?;
-        Ok(())
+    pub fn restore(mut self) -> Result<()> {
+        if !self.active {
+            return Ok(());
+        }
+        let result = self.restore_saved();
+        if result.is_ok() {
+            self.active = false;
+        }
+        result
+    }
+
+    fn restore_saved(&self) -> Result<()> {
+        let properties = [
+            (
+                "3D LUT override",
+                self.atoms.lut3d_override,
+                &self.previous_3dlut,
+            ),
+            (
+                "shaper LUT override",
+                self.atoms.shaperlut_override,
+                &self.previous_shaper,
+            ),
+            (
+                "color-management disable",
+                self.atoms.color_management_disable,
+                &self.previous_disable,
+            ),
+        ];
+        let mut failures = Vec::new();
+        for (name, atom, saved) in properties {
+            if let Err(error) = restore_property(&self.conn, self.root, atom, saved) {
+                failures.push(format!("{name}: {error:#}"));
+            }
+        }
+        if let Err(error) = self.conn.flush() {
+            failures.push(format!("flush: {error:#}"));
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            bail!(
+                "failed to restore gamescope properties: {}",
+                failures.join("; ")
+            )
+        }
     }
 
     fn set_string(&self, atom: Atom, path: &std::path::Path) -> Result<()> {
-        self.conn.change_property8(
-            PropMode::REPLACE,
-            self.root,
-            atom,
-            AtomEnum::STRING,
-            path.to_string_lossy().as_bytes(),
-        )?;
+        self.conn
+            .change_property8(
+                PropMode::REPLACE,
+                self.root,
+                atom,
+                AtomEnum::STRING,
+                path.to_string_lossy().as_bytes(),
+            )?
+            .check()?;
         Ok(())
+    }
+}
+
+impl Drop for NativeSession {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = self.restore_saved();
+        }
     }
 }
 
@@ -275,11 +328,11 @@ fn restore_property(
     conn: &RustConnection,
     root: Window,
     atom: Atom,
-    saved: SavedProperty,
+    saved: &SavedProperty,
 ) -> Result<()> {
     match saved {
         SavedProperty::Missing => {
-            conn.delete_property(root, atom)?;
+            conn.delete_property(root, atom)?.check()?;
         }
         SavedProperty::Present {
             type_,
@@ -292,7 +345,8 @@ fn restore_property(
                 32 => bytes.len() / 4,
                 _ => bytes.len(),
             } as u32;
-            conn.change_property(PropMode::REPLACE, root, atom, type_, format, len, &bytes)?;
+            conn.change_property(PropMode::REPLACE, root, atom, *type_, *format, len, bytes)?
+                .check()?;
         }
     }
     Ok(())

@@ -11,7 +11,7 @@
 //! reset the backend once it has exited.
 
 use anyhow::{bail, Context, Result};
-use satur8_backend::{all_outputs, install_signal_handler, select_backend, RestoreGuard};
+use satur8_backend::{apply_to_outputs, install_signal_handler, select_backend, RestoreGuard};
 use satur8_core::{Profiles, Saturation};
 use std::path::Path;
 use std::process::Command;
@@ -30,6 +30,11 @@ pub struct RunArgs {
     pub command: Vec<String>,
 }
 
+struct ResolvedSaturation {
+    saturation: Saturation,
+    outputs: Vec<String>,
+}
+
 pub fn run(args: RunArgs) -> Result<i32> {
     if args.command.is_empty() {
         bail!("nothing to run. Usage: satur8 run [--profile NAME | --saturation S] -- <command>");
@@ -40,8 +45,11 @@ pub fn run(args: RunArgs) -> Result<i32> {
 
     // SteamOS/Bazzite path: drive the running gamescope compositor at runtime.
     if args.via.as_deref() == Some("gamescope-native") {
-        let sat = resolved.unwrap_or(Saturation::IDENTITY);
-        let session = satur8_gamescope::native_session()
+        let sat = resolved
+            .as_ref()
+            .map(|resolved| resolved.saturation)
+            .unwrap_or(Saturation::IDENTITY);
+        let mut session = satur8_gamescope::native_session()
             .context("connecting to the running gamescope compositor")?;
         session
             .apply(sat)
@@ -61,7 +69,10 @@ pub fn run(args: RunArgs) -> Result<i32> {
     // The gamescope fallback wraps the whole launch in a nested compositor and
     // exits with the game, so it bypasses the apply/restore backend entirely.
     if args.via.as_deref() == Some("gamescope") {
-        let sat = resolved.unwrap_or(Saturation::IDENTITY);
+        let sat = resolved
+            .as_ref()
+            .map(|resolved| resolved.saturation)
+            .unwrap_or(Saturation::IDENTITY);
         eprintln!(
             "satur8: {:.2} via gamescope (nested compositor: extra pass + latency), launching {}",
             sat.get(),
@@ -76,14 +87,16 @@ pub fn run(args: RunArgs) -> Result<i32> {
 
     // Apply before launch (if we have something to apply).
     let mut backend = RestoreGuard::new(select_backend()?, profiles.default_saturation());
-    if let Some(sat) = resolved {
-        backend
-            .backend_mut()
-            .apply(&all_outputs(), sat)
-            .context("applying saturation before launch")?;
+    if let Some(resolved) = resolved {
+        apply_to_outputs(
+            backend.backend_mut(),
+            &resolved.outputs,
+            resolved.saturation,
+        )
+        .context("applying saturation before launch")?;
         eprintln!(
             "satur8: {:.2} via {} backend, launching {}",
-            sat.get(),
+            resolved.saturation.get(),
             backend.backend().name(),
             args.command[0]
         );
@@ -171,21 +184,30 @@ where
 
 /// Decide the saturation to apply, in priority order:
 /// explicit `--saturation` > named `--profile` > match the command's exe.
-fn resolve_saturation(profiles: &Profiles, args: &RunArgs) -> Result<Option<Saturation>> {
+fn resolve_saturation(profiles: &Profiles, args: &RunArgs) -> Result<Option<ResolvedSaturation>> {
     if let Some(s) = args.saturation {
-        return Ok(Some(Saturation::new(s)));
+        return Ok(Some(ResolvedSaturation {
+            saturation: Saturation::try_new(s)?,
+            outputs: Vec::new(),
+        }));
     }
     if let Some(name) = &args.profile {
         let p = profiles
             .by_name(name)
             .with_context(|| format!("no profile named '{name}' (see `satur8 profile list`)"))?;
-        return Ok(Some(p.saturation()));
+        return Ok(Some(ResolvedSaturation {
+            saturation: p.saturation(),
+            outputs: p.outputs.clone(),
+        }));
     }
     // Try to auto-match by the launched executable's basename.
     let exe = exe_basename(&args.command[0]);
     if let Some(p) = profiles.match_exe(&exe) {
         eprintln!("satur8: matched profile '{}' by exe '{exe}'", p.name);
-        return Ok(Some(p.saturation()));
+        return Ok(Some(ResolvedSaturation {
+            saturation: p.saturation(),
+            outputs: p.outputs.clone(),
+        }));
     }
     Ok(None)
 }
@@ -200,7 +222,35 @@ fn exe_basename(cmd: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use satur8_core::{MatchRule, Profile};
+    use satur8_core::{Backend, BackendError, CostNote, MatchRule, Output, Profile};
+
+    #[derive(Default)]
+    struct FakeBackend {
+        applied_outputs: Vec<String>,
+    }
+
+    impl Backend for FakeBackend {
+        fn name(&self) -> &'static str {
+            "fake"
+        }
+
+        fn cost(&self) -> CostNote {
+            CostNote::ZeroCost
+        }
+
+        fn outputs(&self) -> Vec<Output> {
+            Vec::new()
+        }
+
+        fn apply(&mut self, output: &Output, _: Saturation) -> Result<(), BackendError> {
+            self.applied_outputs.push(output.id.clone());
+            Ok(())
+        }
+
+        fn reset(&mut self, _: &Output) -> Result<(), BackendError> {
+            Ok(())
+        }
+    }
 
     fn profiles() -> Profiles {
         Profiles {
@@ -214,7 +264,7 @@ mod tests {
                         window_class: None,
                         steam_app_id: None,
                     },
-                    outputs: vec![],
+                    outputs: vec!["DP-1".into(), "HDMI-A-1".into()],
                 },
                 Profile {
                     name: "auto".into(),
@@ -243,22 +293,24 @@ mod tests {
     #[test]
     fn resolve_saturation_prefers_explicit_saturation() {
         let args = args(Some("named"), Some(2.2), "/games/auto-game");
-        let sat = resolve_saturation(&profiles(), &args).unwrap().unwrap();
-        assert_eq!(sat.get(), 2.2);
+        let resolved = resolve_saturation(&profiles(), &args).unwrap().unwrap();
+        assert_eq!(resolved.saturation.get(), 2.2);
+        assert!(resolved.outputs.is_empty());
     }
 
     #[test]
     fn resolve_saturation_uses_named_profile_before_exe_match() {
         let args = args(Some("named"), None, "/games/auto-game");
-        let sat = resolve_saturation(&profiles(), &args).unwrap().unwrap();
-        assert_eq!(sat.get(), 1.4);
+        let resolved = resolve_saturation(&profiles(), &args).unwrap().unwrap();
+        assert_eq!(resolved.saturation.get(), 1.4);
+        assert_eq!(resolved.outputs, ["DP-1", "HDMI-A-1"]);
     }
 
     #[test]
     fn resolve_saturation_auto_matches_command_exe() {
         let args = args(None, None, "/games/auto-game");
-        let sat = resolve_saturation(&profiles(), &args).unwrap().unwrap();
-        assert_eq!(sat.get(), 1.8);
+        let resolved = resolve_saturation(&profiles(), &args).unwrap().unwrap();
+        assert_eq!(resolved.saturation.get(), 1.8);
     }
 
     #[test]
@@ -277,5 +329,15 @@ mod tests {
     fn exe_basename_strips_paths_and_keeps_plain_names() {
         assert_eq!(exe_basename("/home/noah/Games/cs2"), "cs2");
         assert_eq!(exe_basename("cs2"), "cs2");
+    }
+
+    #[test]
+    fn applies_profile_to_each_configured_output() {
+        let mut backend = FakeBackend::default();
+        let outputs = vec!["DP-1".into(), "HDMI-A-1".into()];
+
+        apply_to_outputs(&mut backend, &outputs, Saturation::new(1.5)).unwrap();
+
+        assert_eq!(backend.applied_outputs, outputs);
     }
 }

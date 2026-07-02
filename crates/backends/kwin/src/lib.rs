@@ -111,7 +111,8 @@ impl KwinBackend {
                 BackendError::Apply(format!("couldn't read saturation (effect loaded?): {e}"))
             })?;
         let v = reply.body().deserialize::<f64>().map_err(apply_err)?;
-        Ok(Saturation::new(v as f32))
+        Saturation::try_new(v as f32)
+            .map_err(|error| BackendError::Apply(format!("bad saturation value: {error}")))
     }
 
     /// Toggle linear-light blending in the effect (a no-op until the effect is

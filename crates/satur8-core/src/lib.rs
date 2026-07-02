@@ -28,9 +28,17 @@ impl Saturation {
     pub const MIN: f32 = 0.0;
     pub const MAX: f32 = 4.0;
 
-    /// Clamps into the supported range.
+    /// Clamps into the supported range. Non-finite values fall back to identity.
     pub fn new(value: f32) -> Saturation {
-        Saturation(value.clamp(Self::MIN, Self::MAX))
+        Self::try_new(value).unwrap_or(Self::IDENTITY)
+    }
+
+    /// Rejects non-finite values and clamps finite values into the supported range.
+    pub fn try_new(value: f32) -> Result<Saturation, SaturationError> {
+        if !value.is_finite() {
+            return Err(SaturationError(value));
+        }
+        Ok(Saturation(value.clamp(Self::MIN, Self::MAX)))
     }
 
     pub fn get(self) -> f32 {
@@ -66,6 +74,17 @@ impl Saturation {
         ]
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SaturationError(f32);
+
+impl std::fmt::Display for SaturationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "saturation must be finite, got {}", self.0)
+    }
+}
+
+impl std::error::Error for SaturationError {}
 
 /// A display output a backend can act on (CRTC / monitor / KWin screen).
 #[derive(Debug, Clone)]
@@ -171,6 +190,20 @@ mod tests {
     fn saturation_clamps_to_range() {
         assert_eq!(Saturation::new(-1.0).get(), Saturation::MIN);
         assert_eq!(Saturation::new(99.0).get(), Saturation::MAX);
+    }
+
+    #[test]
+    fn try_new_rejects_non_finite_values() {
+        assert!(Saturation::try_new(f32::NAN).is_err());
+        assert!(Saturation::try_new(f32::INFINITY).is_err());
+        assert!(Saturation::try_new(f32::NEG_INFINITY).is_err());
+    }
+
+    #[test]
+    fn new_sanitizes_non_finite_values_to_identity() {
+        assert_eq!(Saturation::new(f32::NAN), Saturation::IDENTITY);
+        assert_eq!(Saturation::new(f32::INFINITY), Saturation::IDENTITY);
+        assert_eq!(Saturation::new(f32::NEG_INFINITY), Saturation::IDENTITY);
     }
 
     #[test]

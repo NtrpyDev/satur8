@@ -5,7 +5,7 @@
 //! profile through [`Profiles::match_*`].
 
 use crate::Saturation;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// How a profile is matched to a running game. Any populated field that matches
 /// selects the profile; the first matching profile in file order wins.
@@ -27,6 +27,7 @@ pub struct MatchRule {
 pub struct Profile {
     pub name: String,
     /// Target saturation, mirrors `Saturation` (0.0..=4.0, 1.0 = unchanged).
+    #[serde(deserialize_with = "deserialize_saturation")]
     pub saturation: f32,
     #[serde(default, flatten)]
     pub match_rule: MatchRule,
@@ -45,7 +46,10 @@ impl Profile {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Profiles {
     /// Desktop default saturation (usually 1.0 = no change).
-    #[serde(default = "default_saturation")]
+    #[serde(
+        default = "default_saturation",
+        deserialize_with = "deserialize_saturation"
+    )]
     pub default_saturation: f32,
     #[serde(default, rename = "profile")]
     pub profiles: Vec<Profile>,
@@ -53,6 +57,15 @@ pub struct Profiles {
 
 fn default_saturation() -> f32 {
     1.0
+}
+
+fn deserialize_saturation<'de, D>(deserializer: D) -> Result<f32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = f32::deserialize(deserializer)?;
+    Saturation::try_new(value).map_err(serde::de::Error::custom)?;
+    Ok(value)
 }
 
 impl Default for Profiles {
@@ -96,7 +109,6 @@ impl Profiles {
                     .exe
                     .as_deref()
                     .is_some_and(|e| normalize_game_id(e) == class_norm)
-                || p.name.eq_ignore_ascii_case(class)
                 || steam_app_id.is_some_and(|app_id| p.match_rule.steam_app_id == Some(app_id))
         })
     }
@@ -247,6 +259,30 @@ mod tests {
         assert_eq!(p.match_window_class("cs2.x86_64").unwrap().name, "cs2");
         assert_eq!(p.match_window_class("steam_app_730").unwrap().name, "cs2");
         assert!(p.match_window_class("unknown").is_none());
+    }
+
+    #[test]
+    fn window_class_does_not_fall_back_to_profile_name() {
+        let p = Profiles {
+            default_saturation: 1.0,
+            profiles: vec![Profile {
+                name: "Steam".into(),
+                saturation: 1.5,
+                match_rule: MatchRule::default(),
+                outputs: vec![],
+            }],
+        };
+
+        assert!(p.match_window_class("Steam").is_none());
+    }
+
+    #[test]
+    fn toml_rejects_non_finite_saturation() {
+        assert!(Profiles::from_toml("default_saturation = nan").is_err());
+        assert!(
+            Profiles::from_toml("[[profile]]\nname = 'bad'\nsaturation = inf\nexe = 'bad'")
+                .is_err()
+        );
     }
 
     #[test]

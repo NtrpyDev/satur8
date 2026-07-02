@@ -12,12 +12,33 @@ use satur8_kwin::KwinBackend;
 use satur8_nv_control::NvControlBackend;
 use signal_hook::iterator::{Handle, Signals};
 
-/// The single output Satur8 acts on until per-output targeting is implemented.
+/// Sentinel used when an operation targets every output.
 pub fn all_outputs() -> Output {
     Output {
         id: "all".into(),
         human_name: "All outputs".into(),
     }
+}
+
+/// Apply saturation to configured output ids, or every output when none are set.
+pub fn apply_to_outputs(
+    backend: &mut dyn Backend,
+    outputs: &[String],
+    saturation: Saturation,
+) -> Result<(), BackendError> {
+    if outputs.is_empty() {
+        return backend.apply(&all_outputs(), saturation);
+    }
+    for id in outputs {
+        let output = Output {
+            id: id.clone(),
+            human_name: id.clone(),
+        };
+        backend.apply(&output, saturation).map_err(|error| {
+            BackendError::Apply(format!("backend rejected profile output '{id}': {error}"))
+        })?;
+    }
+    Ok(())
 }
 
 /// Resolve the best reachable apply/reset backend in canonical cost order.

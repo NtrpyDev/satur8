@@ -4144,6 +4144,7 @@ name = "satur8-gui"
 version = "0.3.3"
 dependencies = [
  "image",
+ "libc",
  "satur8-backend",
  "satur8-core",
  "serde",

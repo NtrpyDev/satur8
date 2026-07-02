@@ -164,7 +164,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let state = state.clone();
         let w = ui.as_weak();
         move |percent| {
-            let sat = percent_to_sat(percent);
+            let Some(sat) = percent_to_sat(percent) else {
+                eprintln!("satur8-gui: ignored non-finite default saturation input");
+                return;
+            };
             {
                 let mut st = state.borrow_mut();
                 st.profiles.default_saturation = sat;
@@ -190,7 +193,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let after = after.clone();
         let w = ui.as_weak();
         move |i, percent| {
-            let sat = percent_to_sat(percent);
+            let Some(sat) = percent_to_sat(percent) else {
+                eprintln!("satur8-gui: ignored non-finite profile saturation input");
+                return;
+            };
             let app_id;
             let name;
             {
@@ -398,7 +404,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 restore_desktop_default(&mut st);
                 st.previewing = false;
             }
-            slint::CloseRequestResponse::HideWindow
+            if satur8_tray_is_running() {
+                slint::CloseRequestResponse::HideWindow
+            } else {
+                let _ = slint::quit_event_loop();
+                slint::CloseRequestResponse::HideWindow
+            }
         }
     });
 
@@ -423,8 +434,10 @@ fn restore_desktop_default(st: &mut State) {
         }
     }
 }
-fn percent_to_sat(percent: f32) -> f32 {
-    (1.0 + percent / 100.0).clamp(0.0, 4.0)
+fn percent_to_sat(percent: f32) -> Option<f32> {
+    Saturation::try_new(1.0 + percent / 100.0)
+        .ok()
+        .map(Saturation::get)
 }
 fn sat_to_percent(sat: f32) -> i32 {
     ((sat - 1.0) * 100.0).round() as i32
@@ -571,12 +584,37 @@ fn log(model: &VecModel<LogRow>, ok: bool, text: &str) {
 
 fn now_hms() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
+    let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|duration| duration.as_secs() as libc::time_t)
         .unwrap_or(0);
-    let day = secs % 86_400;
-    format!("{:02}:{:02}:{:02}", day / 3600, (day % 3600) / 60, day % 60)
+    let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
+    // SAFETY: both pointers are valid for this call and localtime_r initializes
+    // `local` before returning a non-null pointer.
+    let result = unsafe { libc::localtime_r(&timestamp, local.as_mut_ptr()) };
+    if result.is_null() {
+        return "--:--:--".into();
+    }
+    // SAFETY: localtime_r returned non-null, so `local` was initialized.
+    let local = unsafe { local.assume_init() };
+    format!(
+        "{:02}:{:02}:{:02}",
+        local.tm_hour, local.tm_min, local.tm_sec
+    )
+}
+
+fn satur8_tray_is_running() -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.bytes().all(|byte| byte.is_ascii_digit()))
+            && std::fs::read_to_string(entry.path().join("comm"))
+                .is_ok_and(|comm| comm.trim() == "satur8-tray")
+    })
 }
 
 fn running_strings(apps: &[proc::RunningApp]) -> Vec<SharedString> {

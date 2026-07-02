@@ -129,12 +129,14 @@ impl DrmCtmBackend {
             .card
             .create_property_blob(&bytes[..])
             .context("creating CTM property blob")?;
+        let blob_id = u64::from(blob);
         let mut req = AtomicModeReq::new();
         req.add_property(target.crtc, target.ctm_prop, blob);
         // A CTM change does not require a modeset.
-        self.card
-            .atomic_commit(AtomicCommitFlags::empty(), req)
-            .context("atomic commit of CTM (needs DRM master - run from a TTY)")?;
+        let commit = self.card.atomic_commit(AtomicCommitFlags::empty(), req);
+        let destroy = self.card.destroy_property_blob(blob_id);
+        commit.context("atomic commit of CTM (needs DRM master - run from a TTY)")?;
+        destroy.context("destroying CTM property blob")?;
         Ok(())
     }
 
@@ -212,27 +214,28 @@ where
     Ok(vec![id])
 }
 
-fn apply_to_targets<T, I, F>(
+fn apply_to_targets<T, I, G, F>(
     targets: I,
     saturation: Saturation,
+    mut target_id: G,
     mut set_target_ctm: F,
 ) -> Result<(), BackendError>
 where
     I: IntoIterator<Item = T>,
+    G: FnMut(&T) -> u32,
     F: FnMut(T, Saturation) -> Result<()>,
 {
-    let mut applied = 0usize;
-    let mut last_err = None;
+    let mut failures = Vec::new();
     for target in targets {
-        match set_target_ctm(target, saturation) {
-            Ok(()) => applied += 1,
-            Err(e) => last_err = Some(e),
+        let id = target_id(&target);
+        if let Err(error) = set_target_ctm(target, saturation) {
+            failures.push(format!("CRTC {id}: {error:#}"));
         }
     }
-    if applied == 0 {
+    if !failures.is_empty() {
         return Err(BackendError::Apply(format!(
-            "no CRTC accepted the CTM{}",
-            last_err.map(|e| format!(": {e:#}")).unwrap_or_default()
+            "CTM commit failed for {}",
+            failures.join("; ")
         )));
     }
     Ok(())
@@ -287,9 +290,12 @@ impl Backend for DrmCtmBackend {
 
     fn apply(&mut self, output: &Output, saturation: Saturation) -> Result<(), BackendError> {
         let targets = self.resolve_targets(output)?;
-        apply_to_targets(targets, saturation, |target, saturation| {
-            self.set_crtc_ctm(target, saturation)
-        })
+        apply_to_targets(
+            targets,
+            saturation,
+            |target| target.crtc.into(),
+            |target, saturation| self.set_crtc_ctm(target, saturation),
+        )
     }
 
     fn reset(&mut self, output: &Output) -> Result<(), BackendError> {
@@ -392,29 +398,41 @@ mod tests {
     }
 
     #[test]
-    fn apply_to_targets_succeeds_when_any_target_accepts_the_ctm() {
+    fn apply_to_targets_errors_when_any_target_rejects_the_ctm() {
         let mut attempted = Vec::new();
 
-        apply_to_targets([31, 42, 73], Saturation::new(1.5), |id, saturation| {
-            attempted.push((id, saturation.get()));
-            if id == 42 {
-                anyhow::bail!("simulated commit failure");
-            }
-            Ok(())
-        })
-        .unwrap();
+        let err = apply_to_targets(
+            [31, 42, 73],
+            Saturation::new(1.5),
+            |id| *id,
+            |id, saturation| {
+                attempted.push((id, saturation.get()));
+                if id == 42 {
+                    anyhow::bail!("simulated commit failure");
+                }
+                Ok(())
+            },
+        )
+        .unwrap_err();
 
         assert_eq!(attempted, vec![(31, 1.5), (42, 1.5), (73, 1.5)]);
+        assert!(err.to_string().contains("CRTC 42"));
+        assert!(err.to_string().contains("simulated commit failure"));
     }
 
     #[test]
     fn apply_to_targets_errors_when_every_target_rejects_the_ctm() {
-        let err = apply_to_targets([31, 42], Saturation::new(1.5), |id, _| {
-            anyhow::bail!("simulated commit failure on {id}");
-        })
+        let err = apply_to_targets(
+            [31, 42],
+            Saturation::new(1.5),
+            |id| *id,
+            |id, _| anyhow::bail!("simulated commit failure on {id}"),
+        )
         .unwrap_err();
 
-        assert!(err.to_string().contains("no CRTC accepted the CTM"));
+        assert!(err.to_string().contains("CRTC 31"));
+        assert!(err.to_string().contains("CRTC 42"));
+        assert!(err.to_string().contains("simulated commit failure on 31"));
         assert!(err.to_string().contains("simulated commit failure on 42"));
     }
 }

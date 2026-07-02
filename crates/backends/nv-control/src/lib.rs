@@ -37,7 +37,9 @@ pub fn saturation_to_digital_vibrance(saturation: Saturation) -> i32 {
     (dv.round() as i32).clamp(DV_MIN, DV_MAX)
 }
 
-pub struct NvControlBackend;
+pub struct NvControlBackend {
+    original_vibrance: i32,
+}
 
 impl NvControlBackend {
     pub fn detect() -> Option<NvControlBackend> {
@@ -45,7 +47,24 @@ impl NvControlBackend {
         if env.session != SessionType::X11 || env.gpu != Gpu::Nvidia {
             return None;
         }
-        which("nvidia-settings").map(|_| NvControlBackend)
+        which("nvidia-settings")?;
+        Self::query_vibrance()
+            .ok()
+            .map(|original_vibrance| NvControlBackend { original_vibrance })
+    }
+
+    fn query_vibrance() -> Result<i32, BackendError> {
+        let out = Command::new("nvidia-settings")
+            .args(["-q", "[gpu:0]/DigitalVibrance", "-t"])
+            .output()
+            .map_err(|e| BackendError::Apply(format!("running nvidia-settings: {e}")))?;
+        if !out.status.success() {
+            return Err(BackendError::Apply(format!(
+                "nvidia-settings failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        parse_vibrance(&String::from_utf8_lossy(&out.stdout))
     }
 
     fn set_vibrance(&self, dv: i32) -> Result<(), BackendError> {
@@ -87,8 +106,23 @@ impl Backend for NvControlBackend {
     }
 
     fn reset(&mut self, _output: &Output) -> Result<(), BackendError> {
-        self.set_vibrance(0)
+        self.set_vibrance(self.original_vibrance)
     }
+}
+
+fn parse_vibrance(output: &str) -> Result<i32, BackendError> {
+    let value = output.trim().parse::<i32>().map_err(|error| {
+        BackendError::Apply(format!(
+            "invalid DigitalVibrance value '{}': {error}",
+            output.trim()
+        ))
+    })?;
+    if !(DV_MIN..=DV_MAX).contains(&value) {
+        return Err(BackendError::Apply(format!(
+            "DigitalVibrance value {value} is outside {DV_MIN}..={DV_MAX}"
+        )));
+    }
+    Ok(value)
 }
 
 fn which(bin: &str) -> Option<PathBuf> {
@@ -123,5 +157,12 @@ mod tests {
             let dv = saturation_to_digital_vibrance(Saturation::new(s));
             assert!((DV_MIN..=DV_MAX).contains(&dv));
         }
+    }
+
+    #[test]
+    fn parses_saved_vibrance() {
+        assert_eq!(parse_vibrance("384\n").unwrap(), 384);
+        assert!(parse_vibrance("not a number").is_err());
+        assert!(parse_vibrance("2048").is_err());
     }
 }

@@ -49,7 +49,8 @@ impl GnomeBackend {
         let body = reply.body();
         let v: zbus::zvariant::Value = body.deserialize().map_err(err)?;
         let s = f64::try_from(v).map_err(|_| BackendError::Apply("bad Saturation value".into()))?;
-        Ok(Saturation::new(s as f32))
+        Saturation::try_new(s as f32)
+            .map_err(|error| BackendError::Apply(format!("bad Saturation value: {error}")))
     }
 
     fn call(&self, method: &str, sat: Option<Saturation>) -> Result<(), BackendError> {

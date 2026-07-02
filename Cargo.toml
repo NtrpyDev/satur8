@@ -36,6 +36,7 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 x11rb = "0.13.2"
+libc = "0.2"
 
 [profile.release]
 # small, fast binary; this runs as a long-lived daemon next to a CPU-bound game
