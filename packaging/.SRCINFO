@@ -21,6 +21,6 @@ pkgbase = satur8
 	optdepends = gamescope: universal fallback backend for niche compositors
 	optdepends = nvidia-settings: NVIDIA X11 Digital Vibrance backend
 	source = satur8-v0.3.3-source.tar.gz::https://github.com/NtrpyDev/satur8/releases/download/v0.3.3/satur8-v0.3.3-source.tar.gz
-	sha256sums = 06227aff66dd50d707dbffbfff6d7a3135c7ba33abd460f8ba4e924b12467f07
+	sha256sums = 9edc70b28e6a02e8c46790a56068745e10b624752ea818003f8a91f5c206f797
 
 pkgname = satur8
