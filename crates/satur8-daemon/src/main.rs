@@ -1,134 +1,262 @@
-//! `satur8-daemon` - the always-on, event-driven trigger (PLAN.md M4/section 6).
+//! `satur8-daemon` - event-driven saturation changes on window focus.
 //!
-//! KWin doesn't broadcast the active window to third parties, so the companion
-//! KWin script (`assets/kwin-script/`) forwards each activation to us by calling
-//! our `WindowActivated` D-Bus method. We react *only* on those calls - there is
-//! no polling and the daemon idles at effectively 0% CPU.
-//!
-//! On each activation we match the focused window's class against the profiles
-//! file: a match applies that profile's saturation; focusing anything else
-//! restores the desktop default. This complements the launch wrapper (M2) for
-//! people who want satur8 to follow focus rather than wrap a launch command.
+//! The companion KWin script forwards activations over D-Bus. Other callers
+//! can use the same interface, and backend selection is shared with every
+//! Satur8 frontend.
 
-use std::time::Duration;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use satur8_core::{Backend, Output, Profiles, Saturation};
-use satur8_kwin::KwinBackend;
+use satur8_backend::{all_outputs, install_signal_handler, select_backend, RestoreGuard};
+use satur8_core::{BackendError, Profiles, Saturation};
 use zbus::interface;
 
 const SERVICE: &str = "org.satur8.Daemon";
 const PATH: &str = "/org/satur8/Daemon";
+const INITIAL_RETRY: Duration = Duration::from_millis(250);
+const MAX_RETRY: Duration = Duration::from_secs(8);
 
-fn all_outputs() -> Output {
-    Output {
-        id: "all".into(),
-        human_name: "All outputs".into(),
+#[derive(Debug, PartialEq)]
+enum FocusAction {
+    Apply {
+        profile: String,
+        saturation: Saturation,
+    },
+    Restore,
+    None,
+}
+
+fn decide_focus_action(
+    current: Option<&str>,
+    window_class: &str,
+    profiles: &Profiles,
+) -> FocusAction {
+    match profiles.match_window_class(window_class) {
+        Some(profile) if current == Some(profile.name.as_str()) => FocusAction::None,
+        Some(profile) => FocusAction::Apply {
+            profile: profile.name.clone(),
+            saturation: profile.saturation(),
+        },
+        None if current.is_some() => FocusAction::Restore,
+        None => FocusAction::None,
+    }
+}
+
+struct BackendState {
+    guard: Option<RestoreGuard>,
+    retry_delay: Duration,
+    next_retry: Instant,
+}
+
+impl BackendState {
+    fn detect(restore_to: Saturation) -> Self {
+        let mut state = Self {
+            guard: None,
+            retry_delay: INITIAL_RETRY,
+            next_retry: Instant::now(),
+        };
+        state.try_detect(restore_to);
+        state
+    }
+
+    #[cfg(test)]
+    fn with_backend(backend: Box<dyn satur8_core::Backend>, restore_to: Saturation) -> Self {
+        Self {
+            guard: Some(RestoreGuard::new(backend, restore_to)),
+            retry_delay: INITIAL_RETRY,
+            next_retry: Instant::now(),
+        }
+    }
+
+    fn try_detect(&mut self, restore_to: Saturation) {
+        if self.guard.is_some() || Instant::now() < self.next_retry {
+            return;
+        }
+        match select_backend() {
+            Ok(backend) => {
+                eprintln!("satur8-daemon: {} backend active", backend.name());
+                self.guard = Some(RestoreGuard::new(backend, restore_to));
+                self.retry_delay = INITIAL_RETRY;
+            }
+            Err(error) => {
+                eprintln!("satur8-daemon: backend unavailable; will retry on focus: {error}");
+                self.next_retry = Instant::now() + self.retry_delay;
+                self.retry_delay = (self.retry_delay * 2).min(MAX_RETRY);
+            }
+        }
+    }
+
+    fn apply(
+        &mut self,
+        saturation: Saturation,
+        restore_to: Saturation,
+    ) -> Result<(), BackendError> {
+        self.try_detect(restore_to);
+        let guard = self
+            .guard
+            .as_mut()
+            .ok_or_else(|| BackendError::Unavailable("no backend is currently reachable".into()))?;
+        guard.set_restore_to(restore_to);
+        let result = guard.backend_mut().apply(&all_outputs(), saturation);
+        if result.is_ok() {
+            guard.arm();
+        }
+        result
+    }
+
+    fn restore(&mut self, restore_to: Saturation) -> Result<(), BackendError> {
+        self.try_detect(restore_to);
+        let guard = self
+            .guard
+            .as_mut()
+            .ok_or_else(|| BackendError::Unavailable("no backend is currently reachable".into()))?;
+        guard.set_restore_to(restore_to);
+        guard.restore_now()
     }
 }
 
 struct Daemon {
     profiles: Profiles,
-    backend: Option<KwinBackend>,
-    /// Name of the profile currently applied, if any.
+    backend: Arc<Mutex<BackendState>>,
     current: Option<String>,
 }
 
 impl Daemon {
-    fn new() -> Daemon {
-        let profiles = load_profiles();
-        let backend = KwinBackend::detect();
-        if backend.is_none() {
-            eprintln!("satur8-daemon: warning - no KWin backend; will track focus but can't apply");
-        }
+    fn new(profiles: Profiles, backend: Arc<Mutex<BackendState>>) -> Self {
         eprintln!(
             "satur8-daemon: ready, {} profile(s) loaded",
             profiles.profiles.len()
         );
-        Daemon {
+        Self {
             profiles,
             backend,
             current: None,
         }
     }
 
-    fn apply_saturation(&mut self, sat: Saturation) {
-        if let Some(b) = self.backend.as_mut() {
-            if let Err(e) = b.apply(&all_outputs(), sat) {
-                eprintln!("satur8-daemon: apply failed: {e}");
-            }
-        }
-    }
-
-    fn restore_default(&mut self) {
-        let def = self.profiles.default_saturation();
-        if let Some(b) = self.backend.as_mut() {
-            let result = if def.is_identity() {
-                b.reset(&all_outputs())
-            } else {
-                b.apply(&all_outputs(), def)
-            };
-            if let Err(e) = result {
-                eprintln!("satur8-daemon: restore failed: {e}");
-            }
+    #[cfg(test)]
+    fn with_profiles(profiles: Profiles, backend: Box<dyn satur8_core::Backend>) -> Self {
+        let restore_to = profiles.default_saturation();
+        Self {
+            profiles,
+            backend: Arc::new(Mutex::new(BackendState::with_backend(backend, restore_to))),
+            current: None,
         }
     }
 
     fn react(&mut self, class: &str) {
-        match self.profiles.match_window_class(class) {
-            Some(profile) => {
-                // Avoid redundant re-applies when focus stays on the same game.
-                if self.current.as_deref() == Some(profile.name.as_str()) {
-                    return;
-                }
-                let (name, sat) = (profile.name.clone(), profile.saturation());
+        self.backend
+            .lock()
+            .expect("backend state mutex poisoned")
+            .try_detect(self.profiles.default_saturation());
+        match decide_focus_action(self.current.as_deref(), class, &self.profiles) {
+            FocusAction::Apply {
+                profile,
+                saturation,
+            } => {
                 eprintln!(
-                    "satur8-daemon: '{class}' -> profile '{name}' ({:.2})",
-                    sat.get()
+                    "satur8-daemon: '{class}' -> profile '{profile}' ({:.2})",
+                    saturation.get()
                 );
-                self.apply_saturation(sat);
-                self.current = Some(name);
-            }
-            None => {
-                if self.current.take().is_some() {
-                    eprintln!("satur8-daemon: '{class}' has no profile -> restoring default");
-                    self.restore_default();
+                let result = self
+                    .backend
+                    .lock()
+                    .expect("backend state mutex poisoned")
+                    .apply(saturation, self.profiles.default_saturation());
+                match result {
+                    Ok(()) => self.current = Some(profile),
+                    Err(error) => {
+                        self.current = None;
+                        eprintln!("satur8-daemon: apply failed: {error}");
+                    }
                 }
             }
+            FocusAction::Restore => {
+                eprintln!("satur8-daemon: '{class}' has no profile -> restoring default");
+                let result = self
+                    .backend
+                    .lock()
+                    .expect("backend state mutex poisoned")
+                    .restore(self.profiles.default_saturation());
+                self.current = None;
+                if let Err(error) = result {
+                    eprintln!("satur8-daemon: restore failed: {error}");
+                }
+            }
+            FocusAction::None => {}
+        }
+    }
+
+    #[cfg(test)]
+    fn invalidate_current(&mut self) {
+        self.current = None;
+    }
+
+    fn reload_profiles(&mut self) {
+        self.profiles = load_profiles(&self.profiles);
+        if let Some(guard) = self
+            .backend
+            .lock()
+            .expect("backend state mutex poisoned")
+            .guard
+            .as_mut()
+        {
+            guard.set_restore_to(self.profiles.default_saturation());
+        }
+        eprintln!(
+            "satur8-daemon: reloaded, {} profile(s)",
+            self.profiles.profiles.len()
+        );
+
+        let Some(current) = self.current.clone() else {
+            return;
+        };
+        let Some(profile) = self.profiles.by_name(&current) else {
+            eprintln!(
+                "satur8-daemon: active profile '{current}' no longer exists -> restoring default"
+            );
+            let result = self
+                .backend
+                .lock()
+                .expect("backend state mutex poisoned")
+                .restore(self.profiles.default_saturation());
+            self.current = None;
+            if let Err(error) = result {
+                eprintln!("satur8-daemon: restore failed: {error}");
+            }
+            return;
+        };
+
+        let saturation = profile.saturation();
+        eprintln!(
+            "satur8-daemon: reapplied active profile '{current}' ({:.2})",
+            saturation.get()
+        );
+        let result = self
+            .backend
+            .lock()
+            .expect("backend state mutex poisoned")
+            .apply(saturation, self.profiles.default_saturation());
+        if let Err(error) = result {
+            self.current = None;
+            eprintln!("satur8-daemon: apply failed: {error}");
         }
     }
 }
 
 #[interface(name = "org.satur8.Daemon")]
 impl Daemon {
-    /// Called by the KWin script on every window activation.
+    /// Called on every window activation.
     fn window_activated(&mut self, class: String, _caption: String) {
         self.react(&class);
     }
 
-    /// Re-read the profiles file from disk (after editing profiles).
+    /// Re-read the profiles file from disk.
     fn reload(&mut self) {
-        self.profiles = load_profiles();
-        eprintln!(
-            "satur8-daemon: reloaded, {} profile(s)",
-            self.profiles.profiles.len()
-        );
-        if let Some(current) = self.current.clone() {
-            if let Some(profile) = self.profiles.by_name(&current) {
-                let sat = profile.saturation();
-                eprintln!(
-                    "satur8-daemon: reapplied active profile '{current}' ({:.2})",
-                    sat.get()
-                );
-                self.apply_saturation(sat);
-            } else {
-                eprintln!(
-                    "satur8-daemon: active profile '{current}' no longer exists -> restoring default"
-                );
-                self.current = None;
-                self.restore_default();
-            }
-        }
+        self.reload_profiles();
     }
 
     /// The profile currently applied (empty string if none).
@@ -138,31 +266,53 @@ impl Daemon {
     }
 }
 
-/// Load profiles from the same file the CLI uses.
-fn load_profiles() -> Profiles {
-    let path = profiles_path();
-    match path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()) {
-        Some(s) => Profiles::from_toml(&s).unwrap_or_default(),
-        None => Profiles::default(),
+fn load_profiles(previous: &Profiles) -> Profiles {
+    let Some(path) = profiles_path() else {
+        return previous.clone();
+    };
+    let source = match std::fs::read_to_string(&path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return previous.clone(),
+        Err(error) => {
+            eprintln!(
+                "satur8-daemon: failed to read {}; keeping last-known-good profiles: {error}",
+                path.display()
+            );
+            return previous.clone();
+        }
+    };
+    match Profiles::from_toml(&source) {
+        Ok(profiles) => profiles,
+        Err(error) => {
+            eprintln!(
+                "satur8-daemon: failed to parse {}; keeping last-known-good profiles: {error}",
+                path.display()
+            );
+            previous.clone()
+        }
     }
 }
 
-fn profiles_path() -> Option<std::path::PathBuf> {
+fn profiles_path() -> Option<PathBuf> {
     let dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         if xdg.is_empty() {
-            std::path::PathBuf::from(std::env::var("HOME").ok()?).join(".config")
+            PathBuf::from(std::env::var("HOME").ok()?).join(".config")
         } else {
-            std::path::PathBuf::from(xdg)
+            PathBuf::from(xdg)
         }
     } else {
-        std::path::PathBuf::from(std::env::var("HOME").ok()?).join(".config")
+        PathBuf::from(std::env::var("HOME").ok()?).join(".config")
     };
     Some(dir.join("satur8").join("profiles.toml"))
 }
 
 fn main() -> Result<()> {
-    let daemon = Daemon::new();
-    let _conn = zbus::blocking::connection::Builder::session()
+    let profiles = load_profiles(&Profiles::default());
+    let backend = Arc::new(Mutex::new(BackendState::detect(
+        profiles.default_saturation(),
+    )));
+    let daemon = Daemon::new(profiles, backend.clone());
+    let connection = zbus::blocking::connection::Builder::session()
         .context("connecting to the session bus")?
         .name(SERVICE)
         .context("claiming the org.satur8.Daemon bus name (already running?)")?
@@ -171,9 +321,156 @@ fn main() -> Result<()> {
         .build()
         .context("starting the daemon service")?;
 
+    let running = Arc::new(AtomicBool::new(true));
+    let signal_running = running.clone();
+    let signal_handler = install_signal_handler(move |_| {
+        signal_running.store(false, Ordering::Release);
+    })
+    .context("installing shutdown signal handlers")?;
+
     eprintln!("satur8-daemon: listening on {SERVICE} {PATH}");
-    // Event-driven: nothing to do but stay alive for incoming activations.
-    loop {
-        std::thread::sleep(Duration::from_secs(3600));
+    while running.load(Ordering::Acquire) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    eprintln!("satur8-daemon: shutting down; restoring desktop colors");
+    if let Some(guard) = backend
+        .lock()
+        .expect("backend state mutex poisoned")
+        .guard
+        .as_mut()
+    {
+        if let Err(error) = guard.restore_now() {
+            eprintln!("satur8-daemon: restore failed during shutdown: {error}");
+        }
+    }
+    drop(connection);
+    drop(signal_handler);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    use satur8_core::{Backend, CostNote, MatchRule, Output, Profile};
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum Call {
+        Apply(f32),
+        Reset,
+    }
+
+    struct FakeBackend {
+        calls: Arc<Mutex<Vec<Call>>>,
+        fail_apply: Arc<AtomicBool>,
+    }
+
+    impl Backend for FakeBackend {
+        fn name(&self) -> &'static str {
+            "fake"
+        }
+
+        fn cost(&self) -> CostNote {
+            CostNote::ZeroCost
+        }
+
+        fn outputs(&self) -> Vec<Output> {
+            vec![all_outputs()]
+        }
+
+        fn apply(&mut self, _output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(Call::Apply(saturation.get()));
+            if self.fail_apply.load(Ordering::Acquire) {
+                Err(BackendError::Apply("injected failure".into()))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn reset(&mut self, _output: &Output) -> Result<(), BackendError> {
+            self.calls.lock().unwrap().push(Call::Reset);
+            Ok(())
+        }
+    }
+
+    fn profiles() -> Profiles {
+        Profiles {
+            default_saturation: 1.0,
+            profiles: vec![Profile {
+                name: "game".into(),
+                saturation: 1.5,
+                match_rule: MatchRule {
+                    exe: None,
+                    window_class: Some("game.class".into()),
+                    steam_app_id: None,
+                },
+                outputs: vec![],
+            }],
+        }
+    }
+
+    fn setup() -> (Daemon, Arc<Mutex<Vec<Call>>>, Arc<AtomicBool>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let fail_apply = Arc::new(AtomicBool::new(false));
+        let backend = FakeBackend {
+            calls: calls.clone(),
+            fail_apply: fail_apply.clone(),
+        };
+        (
+            Daemon::with_profiles(profiles(), Box::new(backend)),
+            calls,
+            fail_apply,
+        )
+    }
+
+    #[test]
+    fn applies_on_focus_match() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("game.class");
+        assert_eq!(daemon.current.as_deref(), Some("game"));
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply(1.5)]);
+    }
+
+    #[test]
+    fn restores_on_focus_loss() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("game.class");
+        daemon.react("desktop");
+        assert_eq!(daemon.current, None);
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply(1.5), Call::Reset]);
+    }
+
+    #[test]
+    fn same_profile_is_a_no_op_while_healthy() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("game.class");
+        daemon.react("game.class");
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply(1.5)]);
+    }
+
+    #[test]
+    fn failed_apply_is_retried_on_next_focus() {
+        let (mut daemon, calls, fail_apply) = setup();
+        fail_apply.store(true, Ordering::Release);
+        daemon.react("game.class");
+        assert_eq!(daemon.current, None);
+        fail_apply.store(false, Ordering::Release);
+        daemon.react("game.class");
+        assert_eq!(daemon.current.as_deref(), Some("game"));
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply(1.5), Call::Apply(1.5)]);
+    }
+
+    #[test]
+    fn invalidation_reapplies_the_same_profile() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("game.class");
+        daemon.invalidate_current();
+        daemon.react("game.class");
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply(1.5), Call::Apply(1.5)]);
     }
 }

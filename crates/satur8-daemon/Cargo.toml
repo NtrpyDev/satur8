@@ -12,6 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 satur8-core = { workspace = true }
-satur8-kwin = { workspace = true }
+satur8-backend = { workspace = true }
 zbus = { workspace = true }
 anyhow = { workspace = true }

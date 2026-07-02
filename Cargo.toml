@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/satur8-core",
+    "crates/satur8-backend",
     "crates/satur8-cli",
     "crates/backends/kwin",
     "crates/backends/drm-ctm",
@@ -15,13 +16,14 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/NtrpyDev/satur8"
 
 [workspace.dependencies]
 satur8-core = { path = "crates/satur8-core" }
+satur8-backend = { path = "crates/satur8-backend" }
 satur8-kwin = { path = "crates/backends/kwin" }
 satur8-drm-ctm = { path = "crates/backends/drm-ctm" }
 satur8-hyprland = { path = "crates/backends/hyprland" }

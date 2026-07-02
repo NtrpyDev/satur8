@@ -12,10 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 satur8-core = { workspace = true }
-satur8-kwin = { workspace = true }
-satur8-drm-ctm = { workspace = true }
-satur8-hyprland = { workspace = true }
-satur8-nv-control = { workspace = true }
-satur8-gnome = { workspace = true }
+satur8-backend = { workspace = true }
 anyhow = { workspace = true }
 ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }

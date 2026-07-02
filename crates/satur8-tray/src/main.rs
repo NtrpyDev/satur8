@@ -13,7 +13,8 @@ use std::thread;
 use ksni::menu::{MenuItem, StandardItem};
 use ksni::Tray;
 
-use satur8_core::{Backend, Output, Saturation};
+use satur8_backend::{all_outputs, select_backend};
+use satur8_core::Saturation;
 
 /// Work items handed from menu callbacks to the apply thread, so the menu never
 /// blocks on D-Bus.
@@ -22,49 +23,16 @@ enum Action {
     Off,
 }
 
-fn all_outputs() -> Output {
-    Output {
-        id: "all".into(),
-        human_name: "All outputs".into(),
-    }
-}
-
-/// Minimal backend selector (mirrors the CLI's order) so the tray is standalone.
-fn select_backend() -> Option<Box<dyn Backend>> {
-    use satur8_drm_ctm::DrmCtmBackend;
-    use satur8_gnome::GnomeBackend;
-    use satur8_hyprland::HyprlandBackend;
-    use satur8_kwin::KwinBackend;
-    use satur8_nv_control::NvControlBackend;
-
-    if let Some(b) = KwinBackend::detect() {
-        return Some(Box::new(b));
-    }
-    if let Some(b) = GnomeBackend::detect() {
-        return Some(Box::new(b));
-    }
-    if let Some(b) = HyprlandBackend::detect() {
-        return Some(Box::new(b));
-    }
-    if let Some(b) = NvControlBackend::detect() {
-        return Some(Box::new(b));
-    }
-    if let Some(b) = DrmCtmBackend::detect() {
-        return Some(Box::new(b));
-    }
-    None
-}
-
 /// Run the apply loop on its own thread, holding the backend.
 fn spawn_apply_thread() -> Sender<Action> {
     let (tx, rx) = mpsc::channel::<Action>();
     thread::spawn(move || {
-        let mut backend = select_backend();
-        if backend.is_none() {
-            eprintln!("satur8-tray: no usable backend in this session");
-        }
+        let mut backend = select_backend().map_err(|error| {
+            eprintln!("satur8-tray: {error}");
+            error
+        });
         for action in rx {
-            let Some(b) = backend.as_mut() else { continue };
+            let Ok(b) = backend.as_mut() else { continue };
             let result = match action {
                 Action::Set(s) => b.apply(&all_outputs(), Saturation::new(s)),
                 Action::Off => b.reset(&all_outputs()),

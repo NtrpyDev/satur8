@@ -4,17 +4,15 @@
 //! saturation from the command line - directly (`set`/`on`/`off`), as a launch
 //! wrapper (`run`), or via per-game profiles (`profile`).
 
-mod backend;
 mod config;
 mod profile_cmd;
 mod run;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use satur8_backend::{all_outputs, select_backend};
 use satur8_core::{CostNote, Environment, Saturation};
 use satur8_kwin::KwinBackend;
-
-use backend::{all_outputs, select_backend};
 
 #[derive(Parser)]
 #[command(

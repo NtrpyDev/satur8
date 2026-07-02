@@ -11,12 +11,13 @@
 //! reset the backend once it has exited.
 
 use anyhow::{bail, Context, Result};
+use satur8_backend::{all_outputs, install_signal_handler, select_backend, RestoreGuard};
 use satur8_core::{Profiles, Saturation};
 use std::path::Path;
 use std::process::Command;
-use std::thread;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-use crate::backend::{all_outputs, select_backend};
 use crate::config;
 
 pub struct RunArgs {
@@ -74,15 +75,16 @@ pub fn run(args: RunArgs) -> Result<i32> {
     }
 
     // Apply before launch (if we have something to apply).
-    let mut backend = select_backend()?;
+    let mut backend = RestoreGuard::new(select_backend()?, profiles.default_saturation());
     if let Some(sat) = resolved {
         backend
+            .backend_mut()
             .apply(&all_outputs(), sat)
             .context("applying saturation before launch")?;
         eprintln!(
             "satur8: {:.2} via {} backend, launching {}",
             sat.get(),
-            backend.name(),
+            backend.backend().name(),
             args.command[0]
         );
     } else {
@@ -92,55 +94,38 @@ pub fn run(args: RunArgs) -> Result<i32> {
         );
     }
 
-    let restore = |b: &mut Box<dyn satur8_core::Backend>| {
-        let restore_to = profiles.default_saturation();
-        let result = if restore_to.is_identity() {
-            b.reset(&all_outputs())
-        } else {
-            b.apply(&all_outputs(), restore_to)
-        };
-        if let Err(e) = result {
-            eprintln!("satur8: warning, failed to restore saturation: {e}");
-        }
-    };
-
     // Launch the game as a child. It shares our process group, so an interactive
-    // Ctrl-C reaches it directly; we additionally forward SIGTERM/SIGINT that
-    // arrive at the wrapper (e.g. Steam stopping the game) on to the child.
+    // Ctrl-C reaches it directly; we additionally forward INT, TERM, and HUP
+    // signals that arrive at the wrapper on to the child.
     let mut child = match Command::new(&args.command[0])
         .args(&args.command[1..])
         .spawn()
     {
         Ok(c) => c,
-        Err(e) => {
-            restore(&mut backend);
-            return Err(e).with_context(|| format!("launching {}", args.command[0]));
-        }
+        Err(e) => return Err(e).with_context(|| format!("launching {}", args.command[0])),
     };
     let pid = child.id() as libc::pid_t;
-
-    let mut signals = signal_hook::iterator::Signals::new([
-        signal_hook::consts::SIGINT,
-        signal_hook::consts::SIGTERM,
-    ])
-    .context("installing signal handlers")?;
-    let handle = signals.handle();
-    let forwarder = thread::spawn(move || {
-        for sig in signals.forever() {
+    let child_running = Arc::new(AtomicBool::new(true));
+    let signal_running = child_running.clone();
+    let signal_handler = install_signal_handler(move |signal| {
+        if signal_running.load(Ordering::Acquire) {
             // Forward to the game; when it exits, child.wait() below returns and
             // we restore. SAFETY: kill() with a known pid and signal number.
             unsafe {
-                libc::kill(pid, sig);
+                libc::kill(pid, signal);
             }
         }
-    });
+    })
+    .context("installing signal handlers")?;
 
     let status = child.wait().context("waiting for game to exit");
+    child_running.store(false, Ordering::Release);
 
-    // Stop the forwarder thread and always restore, whatever happened.
-    handle.close();
-    let _ = forwarder.join();
-    restore(&mut backend);
+    // Stop forwarding before restoring, whatever ended the child.
+    drop(signal_handler);
+    if let Err(error) = backend.restore_now() {
+        eprintln!("satur8: warning, failed to restore saturation: {error}");
+    }
 
     let code = status?.code().unwrap_or(1);
     Ok(code)
@@ -162,24 +147,21 @@ where
     };
     let pid = child.id() as libc::pid_t;
 
-    let mut signals = signal_hook::iterator::Signals::new([
-        signal_hook::consts::SIGINT,
-        signal_hook::consts::SIGTERM,
-    ])
-    .context("installing signal handlers")?;
-    let handle = signals.handle();
-    let forwarder = thread::spawn(move || {
-        for sig in signals.forever() {
+    let child_running = Arc::new(AtomicBool::new(true));
+    let signal_running = child_running.clone();
+    let signal_handler = install_signal_handler(move |signal| {
+        if signal_running.load(Ordering::Acquire) {
             unsafe {
-                libc::kill(pid, sig);
+                libc::kill(pid, signal);
             }
         }
-    });
+    })
+    .context("installing signal handlers")?;
 
     let status = child.wait().context("waiting for game to exit");
+    child_running.store(false, Ordering::Release);
 
-    handle.close();
-    let _ = forwarder.join();
+    drop(signal_handler);
     if let Some(restore) = restore.take() {
         restore();
     }

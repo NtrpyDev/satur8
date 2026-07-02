@@ -13,11 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 satur8-core = { workspace = true }
-satur8-kwin = { workspace = true }
-satur8-drm-ctm = { workspace = true }
-satur8-hyprland = { workspace = true }
-satur8-nv-control = { workspace = true }
-satur8-gnome = { workspace = true }
+satur8-backend = { workspace = true }
 slint = "1.16"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 zbus = { workspace = true }

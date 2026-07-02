@@ -17,7 +17,8 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use satur8_core::{Backend, MatchRule, Output, Profile, Profiles, Saturation};
+use satur8_backend::{all_outputs, select_backend, RestoreGuard};
+use satur8_core::{Backend, MatchRule, Profile, Profiles, Saturation};
 use serde::{Deserialize, Serialize};
 use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
@@ -44,7 +45,7 @@ const TILE_COLORS: [(u8, u8, u8); 8] = [
 ];
 
 struct State {
-    backend: Option<Box<dyn Backend>>,
+    backend: Option<RestoreGuard>,
     profiles: Profiles,
     current_sat: f32,
     /// True while a live desktop preview is applied, so we can restore it.
@@ -62,17 +63,26 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_version_text(format!("v{}", env!("CARGO_PKG_VERSION")).into());
     ui.global::<Pal>().set_dark(load_gui_config().dark_mode);
 
-    let backend = select_backend();
+    let profiles = load_profiles(Profiles::default());
+    let backend = match select_backend() {
+        Ok(backend) => Some(RestoreGuard::inactive(
+            backend,
+            profiles.default_saturation(),
+        )),
+        Err(error) => {
+            eprintln!("satur8-gui: {error}");
+            None
+        }
+    };
     ui.set_backend_ok(backend.is_some());
     ui.set_backend_name(
         backend
             .as_ref()
-            .map(|b| b.name().to_string())
+            .map(|b| b.backend().name().to_string())
             .unwrap_or_else(|| "no".into())
             .into(),
     );
 
-    let profiles = load_profiles();
     let first = profiles.profiles.first().cloned();
     let first_sat = first.as_ref().map(|p| p.saturation).unwrap_or(1.0);
     let state = Rc::new(RefCell::new(State {
@@ -95,13 +105,15 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_running(ModelRc::from(running.clone()));
 
     // Output note (honest about what the backend can target).
-    ui.set_outputs_note(match state.borrow().backend.as_ref().map(|b| b.name()) {
-        Some("kwin") | Some("gnome-shell") | Some("hyprland") => {
-            "On this compositor it affects all monitors.".into()
-        }
-        Some("drm-ctm") => "Targets the connected display(s).".into(),
-        _ => "".into(),
-    });
+    ui.set_outputs_note(
+        match state.borrow().backend.as_ref().map(|b| b.backend().name()) {
+            Some("kwin") | Some("gnome-shell") | Some("hyprland") => {
+                "On this compositor it affects all monitors.".into()
+            }
+            Some("drm-ctm") => "Targets the connected display(s).".into(),
+            _ => "".into(),
+        },
+    );
 
     // Activity
     let activity = Rc::new(VecModel::<LogRow>::default());
@@ -110,7 +122,7 @@ fn main() -> Result<(), slint::PlatformError> {
         .borrow()
         .backend
         .as_ref()
-        .map(|b| b.name().to_string())
+        .map(|b| b.backend().name().to_string())
     {
         Some(name) => log(&activity, false, &format!("{name} backend active")),
         None => log(&activity, false, "No supported backend in this session"),
@@ -158,7 +170,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.profiles.default_saturation = sat;
                 save(&st.profiles);
                 if let Some(b) = st.backend.as_mut() {
-                    let _ = apply_or_reset(b.as_mut(), sat);
+                    b.set_restore_to(Saturation::new(sat));
+                    if apply_or_reset(b.backend_mut(), sat).is_ok() {
+                        b.disarm();
+                    }
                 }
                 // This is an explicit desktop setting, not a temporary preview.
                 st.previewing = false;
@@ -294,9 +309,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 let mut st = state.borrow_mut();
                 st.current_sat = sat;
                 if let Some(b) = st.backend.as_mut() {
-                    let _ = b.apply(&all_outputs(), Saturation::new(sat));
+                    if b.backend_mut()
+                        .apply(&all_outputs(), Saturation::new(sat))
+                        .is_ok()
+                    {
+                        b.arm();
+                        st.previewing = true;
+                    }
                 }
-                st.previewing = true;
             }
             if let Some(ui) = w.upgrade() {
                 ui.set_current_profile_name(name.clone().into());
@@ -314,16 +334,19 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut st = state.borrow_mut();
             let sat = st.current_sat;
             if let Some(b) = st.backend.as_mut() {
-                match b.apply(&all_outputs(), Saturation::new(sat)) {
-                    Ok(()) => log(
-                        &activity,
-                        true,
-                        &format!("Applied {:+.0}%", (sat - 1.0) * 100.0),
-                    ),
+                match b.backend_mut().apply(&all_outputs(), Saturation::new(sat)) {
+                    Ok(()) => {
+                        b.arm();
+                        st.previewing = true;
+                        log(
+                            &activity,
+                            true,
+                            &format!("Applied {:+.0}%", (sat - 1.0) * 100.0),
+                        );
+                    }
                     Err(e) => log(&activity, false, &format!("Apply failed: {e}")),
                 }
             }
-            st.previewing = true;
         }
     });
 
@@ -334,14 +357,19 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut st = state.borrow_mut();
             let sat = st.current_sat;
             if let Some(b) = st.backend.as_mut() {
-                let _ = b.apply(&all_outputs(), Saturation::new(sat));
-                log(
-                    &activity,
-                    false,
-                    &format!("Previewing {:+.0}% on desktop", (sat - 1.0) * 100.0),
-                );
+                if b.backend_mut()
+                    .apply(&all_outputs(), Saturation::new(sat))
+                    .is_ok()
+                {
+                    b.arm();
+                    st.previewing = true;
+                    log(
+                        &activity,
+                        false,
+                        &format!("Previewing {:+.0}% on desktop", (sat - 1.0) * 100.0),
+                    );
+                }
             }
-            st.previewing = true;
         }
     });
 
@@ -379,12 +407,6 @@ fn main() -> Result<(), slint::PlatformError> {
 
 // ---------------- helpers ----------------
 
-fn all_outputs() -> Output {
-    Output {
-        id: "all".into(),
-        human_name: "All outputs".into(),
-    }
-}
 fn apply_or_reset(backend: &mut dyn Backend, sat: f32) -> Result<(), satur8_core::BackendError> {
     if (sat - 1.0).abs() < 1e-3 {
         backend.reset(&all_outputs())
@@ -395,7 +417,10 @@ fn apply_or_reset(backend: &mut dyn Backend, sat: f32) -> Result<(), satur8_core
 fn restore_desktop_default(st: &mut State) {
     let sat = st.profiles.default_saturation;
     if let Some(b) = st.backend.as_mut() {
-        let _ = apply_or_reset(b.as_mut(), sat);
+        b.set_restore_to(Saturation::new(sat));
+        if let Err(error) = b.restore_now() {
+            eprintln!("satur8-gui: failed to restore desktop colors: {error}");
+        }
     }
 }
 fn percent_to_sat(percent: f32) -> f32 {
@@ -587,31 +612,6 @@ fn add_or_update(profiles: &mut Profiles, exe: &str, app_id: Option<u32>, satura
     });
 }
 
-fn select_backend() -> Option<Box<dyn Backend>> {
-    use satur8_drm_ctm::DrmCtmBackend;
-    use satur8_gnome::GnomeBackend;
-    use satur8_hyprland::HyprlandBackend;
-    use satur8_kwin::KwinBackend;
-    use satur8_nv_control::NvControlBackend;
-
-    if let Some(b) = KwinBackend::detect() {
-        return Some(Box::new(b));
-    }
-    if let Some(b) = GnomeBackend::detect() {
-        return Some(Box::new(b));
-    }
-    if let Some(b) = HyprlandBackend::detect() {
-        return Some(Box::new(b));
-    }
-    if let Some(b) = NvControlBackend::detect() {
-        return Some(Box::new(b));
-    }
-    if let Some(b) = DrmCtmBackend::detect() {
-        return Some(Box::new(b));
-    }
-    None
-}
-
 fn config_dir() -> PathBuf {
     if let Ok(x) = std::env::var("XDG_CONFIG_HOME") {
         if !x.is_empty() {
@@ -622,10 +622,18 @@ fn config_dir() -> PathBuf {
         .join(".config")
         .join("satur8")
 }
-fn load_profiles() -> Profiles {
+fn load_profiles(previous: Profiles) -> Profiles {
     match std::fs::read_to_string(config_dir().join("profiles.toml")) {
-        Ok(s) => Profiles::from_toml(&s).unwrap_or_default(),
-        Err(_) => Profiles::default(),
+        Ok(source) => match Profiles::from_toml(&source) {
+            Ok(profiles) => profiles,
+            Err(error) => {
+                eprintln!(
+                    "satur8-gui: failed to parse profiles.toml; keeping last-known-good profiles: {error}"
+                );
+                previous
+            }
+        },
+        Err(_) => previous,
     }
 }
 fn load_gui_config() -> GuiConfig {

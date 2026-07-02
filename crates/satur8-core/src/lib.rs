@@ -88,7 +88,7 @@ pub enum CostNote {
 
 /// What every backend implements. `detect` answers "is this usable in the
 /// current session?"; the daemon picks the lowest-cost available backend.
-pub trait Backend {
+pub trait Backend: Send {
     fn name(&self) -> &'static str;
     fn cost(&self) -> CostNote;
     fn outputs(&self) -> Vec<Output>;
