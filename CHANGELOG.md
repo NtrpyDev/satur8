@@ -5,8 +5,29 @@ GitHub release notes for that tag.
 
 ## v0.3.3 - 2026-06-26
 
-Backend-sweep release prep.
+Backend sweep plus a full code audit of the stateful paths.
 
+- The daemon now follows focus on every backend, not just KWin, and restores
+  your desktop colors when it is stopped or restarted. A failed apply or a
+  compositor hiccup no longer leaves it convinced a profile is active when it
+  isn't, and if no backend is ready at startup it keeps retrying instead of
+  staying dead for the session.
+- A broken `profiles.toml` no longer silently wipes your profiles: the daemon
+  and GUI log the parse error and keep the last good set.
+- On NVIDIA, leaving a game restores the Digital Vibrance you actually had
+  (say, from nvidia-settings autostart) instead of resetting it to zero.
+- Per-profile `outputs` now work: a profile listing specific monitors applies
+  only to those. Applying to several monitors reports exactly which ones
+  failed instead of claiming success if any single one worked.
+- Closing the GUI window exits the app unless the tray is running to bring it
+  back, instead of leaving an invisible process behind. Activity-log
+  timestamps are local time now, not UTC.
+- Profiles no longer match windows by profile name, so a profile called
+  "Steam" can't recolor the Steam client itself.
+- Plumbing with no user-visible surface: one shared backend selector across
+  CLI/GUI/tray/daemon, a restore-on-drop guard on every apply path, a fixed
+  DRM kernel-blob leak, gamescope property rollback on partial failure, and
+  NaN-proof saturation parsing everywhere input comes in.
 - Fix the nested gamescope fallback so its per-launch ReShade shader is written
   to the directory gamescope actually searches,
   `$HOME/.local/share/gamescope/reshade/Shaders`, instead of following
