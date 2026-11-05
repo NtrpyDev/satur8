@@ -166,6 +166,12 @@ impl Backend for KwinBackend {
     }
 
     fn apply(&mut self, _output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+        // Identity means "no change". Loading the effect at identity would
+        // leave an unnecessary compositor pass running, so unload instead.
+        if saturation.is_identity() {
+            let _ = self.unload();
+            return Ok(());
+        }
         self.load()?;
         self.set_saturation(saturation)
     }
