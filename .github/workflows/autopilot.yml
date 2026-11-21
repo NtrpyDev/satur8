@@ -89,7 +89,7 @@ jobs:
           import json, re, sys
           issue = json.load(open(sys.argv[1]))
           body = issue.get("body") or ""
-          body = re.sub(r"<!--.*?-->", "", body, flags=re.S)   # hidden comments
+          body = re.sub(r"<!--.*?(?:-->|\Z)", "", body, flags=re.S)   # hidden comments, closed or not
           body = re.sub(r"[​-‏⁠-⁤﻿]", "", body)  # invisible characters
           print(f"ISSUE NUMBER: {issue['number']}")
           print(f"OPENED BY: {issue['user']['login']} ({issue.get('author_association', 'NONE')})")
