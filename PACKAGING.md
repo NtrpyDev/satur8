@@ -25,16 +25,29 @@ platform cannot support part of it:
 
 - `satur8`, `satur8-daemon`, `satur8-tray`, and `satur8-gui` binaries.
 - KWin effect plugin, built against the target distro's KWin/Qt ABI.
+- KWin effect source (`CMakeLists.txt`, `metadata.json`, `satur8_effect.cpp`,
+  `satur8_effect.h`) in `/usr/share/satur8/kwin-effect/`, so `satur8 repair`
+  can rebuild the effect after a KWin update.
+- `packaging/60-satur8.conf` in `/usr/lib/environment.d/`, which puts the
+  per-user Qt plugin directory on KWin's plugin search path.
 - KWin focus-forwarder script from `assets/kwin-script/`.
 - GNOME Shell extension from `assets/gnome-extension/`.
 - gamescope ReShade fallback shader from `assets/gamescope/Satur8.fx`.
-- systemd user unit from `packaging/satur8-daemon.service`, rewritten to point
-  at the packaged binary path.
+- systemd user unit from `packaging/satur8-daemon.service`, with both
+  `%h/.local/bin/` paths rewritten to the packaged binary directory.
 - desktop launcher from `packaging/satur8.desktop`.
 - GPL license text.
 
 The KWin effect ABI is not stable. Do not reuse a KWin `.so` built on another
 distro or another incompatible KWin/Qt version; build it in the package build.
+
+The packaged `.so` goes stale the moment the distro updates KWin. The daemon's
+unit runs `satur8 repair` at session start, which asks the running KWin whether
+it accepts the effect and, when it does not, rebuilds it from the installed
+source into `~/.local/lib/qt6/plugins`. A package should therefore pull in the
+effect's build toolchain at runtime as well: a hard dependency where the distro
+has no weak ones (Arch), `Recommends` where it does (Fedora). The end-to-end
+check for this path is `assets/kwin-effect/sandbox-repair-test.sh`.
 
 ## Release Artifacts
 
