@@ -226,7 +226,7 @@ jobs:
             --permission-mode acceptEdits
             --max-turns 80
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(/opt/autopilot/check.sh:*),Bash(cargo fmt:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*)"
-            --json-schema '{"type":"object","properties":{"fixed":{"type":"boolean"},"summary":{"type":"string"},"changelog":{"type":"string"},"tests":{"type":"string"},"concern":{"type":"string"}},"required":["fixed","summary","changelog","tests"]}'
+            --json-schema '{"type":"object","properties":{"fixed":{"type":"boolean"},"summary":{"type":"string"},"changelog":{"type":"string"},"tests":{"type":"string"},"needs_human":{"type":"boolean"},"note":{"type":"string"}},"required":["fixed","summary","changelog","tests","needs_human"]}'
 
       - name: Commit the fix and open the pull request
         if: always()
@@ -285,7 +285,7 @@ jobs:
             --permission-mode acceptEdits
             --max-turns 80
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash(/opt/autopilot/check.sh:*),Bash(cargo fmt:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*)"
-            --json-schema '{"type":"object","properties":{"fixed":{"type":"boolean"},"summary":{"type":"string"},"changelog":{"type":"string"},"tests":{"type":"string"},"concern":{"type":"string"}},"required":["fixed","summary","changelog","tests"]}'
+            --json-schema '{"type":"object","properties":{"fixed":{"type":"boolean"},"summary":{"type":"string"},"changelog":{"type":"string"},"tests":{"type":"string"},"needs_human":{"type":"boolean"},"note":{"type":"string"}},"required":["fixed","summary","changelog","tests","needs_human"]}'
 
       - name: Commit the correction and test it again
         if: always()

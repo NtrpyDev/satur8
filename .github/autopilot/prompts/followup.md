@@ -30,7 +30,10 @@ Do not commit; leave your edits in the working tree.
 - `summary`: one plain sentence on what you corrected.
 - `changelog`: the one-line release note for the whole fix, updated if needed.
 - `tests`: one sentence on what proves it.
-- `concern`: empty, or one sentence on anything that should stop this from
-  merging automatically.
+- `needs_human`: true only if this must not merge without a person looking at
+  it first: the fix is a judgment call, it changes behavior beyond the report,
+  or you are not confident it is right. A detail of the report being
+  inaccurate is not a reason; say so in `note` and fix what is actually wrong.
+- `note`: empty, or one sentence of context for the maintainer.
 
 Write plain American English. No em dashes.

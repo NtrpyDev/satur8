@@ -194,9 +194,9 @@ def cmd_finish():
         sys.exit(0)
 
     if result.get("fixed") is not True:
-        give_up(one_line(result.get("concern") or result.get("summary") or "Claude did not produce a fix", 300))
-    if one_line(result.get("concern")):
-        give_up("Claude flagged a concern: " + one_line(result["concern"], 300))
+        give_up(one_line(result.get("note") or result.get("summary") or "Claude did not produce a fix", 300))
+    if result.get("needs_human") is True:
+        give_up("Claude asked for a person to look first: " + one_line(result.get("note") or "no reason given", 300))
 
     run([*GIT, "add", "-A", "--", ".", ":!.autopilot-input"])
     staged = run([*GIT, "diff", "--cached", "--name-only"]).stdout.split()

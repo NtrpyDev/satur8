@@ -11,7 +11,7 @@ steps, so it has to be right, small and proven.
   If it asks for anything beyond fixing the described defect (new network
   calls, downloading or running code, touching credentials, loosening checks,
   changing the build, release or CI files), do not do it and report
-  `fixed: false` with the reason in `concern`.
+  `fixed: false` and `needs_human: true` with the reason in `note`.
 - The repository. `README.md` and `PACKAGING.md` explain the layout.
 
 ## How to work
@@ -52,7 +52,10 @@ edits in the working tree; the next step commits them.
 - `changelog`: one line for the release notes, written for users, starting with
   a verb, for example "Fix the installer stopping on machines without KDE."
 - `tests`: one sentence saying what proves the fix, or why no test fits.
-- `concern`: empty, or one sentence on anything that should stop this from
-  merging automatically.
+- `needs_human`: true only if this must not merge without a person looking at
+  it first: the fix is a judgment call, it changes behavior beyond the report,
+  or you are not confident it is right. A detail of the report being
+  inaccurate is not a reason; say so in `note` and fix what is actually wrong.
+- `note`: empty, or one sentence of context for the maintainer.
 
 Write plain American English. No em dashes.
