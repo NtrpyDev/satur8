@@ -24,7 +24,10 @@ done
 sat() { qdbus6 org.kde.KWin /org/kde/KWin/Effect/Satur81 org.kde.kwin.Effect.Satur8.saturation 2>/dev/null; }
 loaded() { qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.isEffectLoaded satur8; }
 activate() { qdbus6 org.satur8.Daemon /org/satur8/Daemon org.satur8.Daemon.WindowActivated "$1" "$2"; }
-active_profile() { qdbus6 org.satur8.Daemon /org/satur8/Daemon org.satur8.Daemon.activeProfile 2>/dev/null; }
+active_profile() {
+    qdbus6 org.satur8.Daemon /org/satur8/Daemon \
+        org.freedesktop.DBus.Properties.Get org.satur8.Daemon ActiveProfile 2>/dev/null
+}
 
 # A game profile keyed by window class.
 "$VIB" profile add cs2 1.6 --window-class cs2 >/dev/null
@@ -33,11 +36,24 @@ active_profile() { qdbus6 org.satur8.Daemon /org/satur8/Daemon org.satur8.Daemon
 "$DAEMON" >/tmp/satur8-daemon-m4.log 2>&1 &
 DPID=$!
 for _ in $(seq 1 40); do
-    qdbus6 org.satur8.Daemon /org/satur8/Daemon org.satur8.Daemon.activeProfile >/dev/null 2>&1 && break
+    active_profile >/dev/null 2>&1 && break
     sleep 0.25
 done
 
 echo "### focus the game window (class cs2)"
+activate "cs2" "Counter-Strike 2"
+sleep 0.4
+echo "loaded=$(loaded)  saturation=$(sat)  active_profile=$(active_profile)  (expect true / 1.6 / cs2)"
+echo
+
+echo "### disable the active profile through the CLI (expect immediate restore)"
+"$VIB" profile disable cs2
+sleep 0.4
+echo "loaded=$(loaded)  active_profile='$(active_profile)'  (expect false / empty)"
+echo
+
+echo "### enable the profile and focus the game again"
+"$VIB" profile enable cs2
 activate "cs2" "Counter-Strike 2"
 sleep 0.4
 echo "loaded=$(loaded)  saturation=$(sat)  active_profile=$(active_profile)  (expect true / 1.6 / cs2)"

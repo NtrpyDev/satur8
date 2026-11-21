@@ -24,6 +24,13 @@ class GLShader;
 class EffectWindow;
 }
 
+// KWin 6.8 changed Effect::drawWindow from void to bool.
+#if SATUR8_KWIN_MAJOR > 6 || (SATUR8_KWIN_MAJOR == 6 && SATUR8_KWIN_MINOR >= 8)
+using Satur8DrawResult = bool;
+#else
+using Satur8DrawResult = void;
+#endif
+
 class Satur8Effect : public KWin::OffscreenEffect
 {
     Q_OBJECT
@@ -43,7 +50,7 @@ public:
     bool isActive() const override;
 
 protected:
-    void drawWindow(const KWin::RenderTarget &renderTarget,
+    Satur8DrawResult drawWindow(const KWin::RenderTarget &renderTarget,
                     const KWin::RenderViewport &viewport,
                     KWin::EffectWindow *w,
                     int mask,

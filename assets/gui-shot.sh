@@ -8,6 +8,9 @@ set -uo pipefail
 OUT="${1:-/tmp/gui_shot.png}"
 NAV="${2:-0}"
 DISP=":97"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+GUI_BIN="${SATUR8_GUI_BIN:-$REPO/target/debug/satur8-gui}"
+CFG="$(mktemp -d /tmp/satur8-gui-shot.XXXXXX)"
 
 # CRITICAL: unset WAYLAND_DISPLAY so winit cannot fall back to the real Wayland
 # session. With only DISPLAY set + the X11 backend forced, the GUI can ONLY
@@ -20,8 +23,9 @@ sleep 2
 
 # Software renderer = no GL needed on the virtual display. VIBRANCE_GUI_NAV lets
 # us screenshot a specific page.
+XDG_CONFIG_HOME="$CFG" XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=KDE \
 WINIT_UNIX_BACKEND=x11 SLINT_BACKEND=winit-software VIBRANCE_GUI_NAV="$NAV" \
-    "$HOME/satur8/target/debug/satur8-gui" >/tmp/gui-x.log 2>&1 &
+    dbus-run-session -- "$GUI_BIN" >/tmp/gui-x.log 2>&1 &
 GPID=$!
 sleep 5
 
