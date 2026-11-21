@@ -10,9 +10,20 @@ on:
   push:
     tags:
       - "v*"
+  # The autopilot starts releases this way: a tag pushed by a workflow does not
+  # trigger other workflows, so it names the tag here instead.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish, for example v0.3.6"
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   source-archive:
@@ -21,6 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.TAG }}
           fetch-depth: 0
 
       - name: Build source archive and checksum
@@ -29,14 +41,15 @@ jobs:
       - name: Extract release notes from CHANGELOG
         run: |
           mkdir -p target/dist
-          packaging/release-notes.sh "${GITHUB_REF_NAME}" > target/dist/release-notes.md
+          packaging/release-notes.sh "${TAG}" > target/dist/release-notes.md
           echo "--- release notes ---"
           cat target/dist/release-notes.md
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
-          name: Satur8 ${{ github.ref_name }}
+          tag_name: ${{ env.TAG }}
+          name: Satur8 ${{ env.TAG }}
           body_path: target/dist/release-notes.md
           files: |
             target/dist/satur8-v*-source.tar.gz
@@ -50,6 +63,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Build release tarball and checksum
         run: |
@@ -66,9 +81,36 @@ jobs:
               chown -R "$HOST_UID:$HOST_GID" target
             '
 
+      # A copy under a name with no version in it, so the website's download
+      # button can point at "the latest release" and never needs redeploying.
+      - name: Add version-less copies for the website
+        run: |
+          cd target/dist
+          cp satur8-v*-linux-x86_64.tar.gz satur8-linux-x86_64.tar.gz
+          sha256sum satur8-linux-x86_64.tar.gz > satur8-linux-x86_64.tar.gz.sha256
+
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
           files: |
             target/dist/satur8-v*-linux-x86_64.tar.gz
             target/dist/satur8-v*-linux-x86_64.tar.gz.sha256
+            target/dist/satur8-linux-x86_64.tar.gz
+            target/dist/satur8-linux-x86_64.tar.gz.sha256
+
+  fedora-copr:
+    name: Fedora COPR build
+    # After the source archive exists on the release, since the spec downloads it.
+    needs: source-archive
+    runs-on: ubuntu-latest
+    env:
+      COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+    steps:
+      - name: Queue the COPR build
+        if: env.COPR_CONFIG != ''
+        run: |
+          pipx install copr-cli >/dev/null
+          mkdir -p ~/.config && printf '%s\n' "$COPR_CONFIG" > ~/.config/copr && chmod 600 ~/.config/copr
+          copr-cli buildscm --clone-url "https://github.com/${GITHUB_REPOSITORY}.git" \
+            --commit "$TAG" --method make_srpm --nowait ntrpydev/satur8

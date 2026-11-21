@@ -90,32 +90,48 @@ def ci_state(sha):
 def codex_state(number, sha, head_pushed_at):
     """What the Codex review bot said about the current head commit.
 
-    'approved'  thumbs-up reaction and no findings on this commit
-    'findings'  it left review comments on this commit
-    'waiting'   no verdict yet and still inside the wait window
-    'absent'    no verdict and the wait window has passed
+    'approved'  it reviewed this commit and has no open findings
+    'findings'  it reviewed this commit and left findings
+    'waiting'   no verdict on this commit yet, still inside the wait window
+    'absent'    no verdict on this commit and the wait window has passed
+
+    Codex keeps a machine-readable state in its summary comment on the pull
+    request, naming the commit it reviewed. It reviews when a pull request is
+    opened and when asked with an "@codex review" comment, not on every push,
+    so a verdict about an older commit says nothing about this one.
     """
-    comments = api_all(f"pulls/{number}/comments")
+    for comment in api_all(f"issues/{number}/comments"):
+        if comment["user"]["login"] != CODEX_BOT:
+            continue
+        match = re.search(r"codex-review-state:v1 (\{.*?\})\s*-->", comment.get("body") or "", re.S)
+        if not match:
+            continue
+        try:
+            review = json.loads(match.group(1)).get("code_review") or {}
+        except ValueError:
+            continue
+        if review.get("commit_sha") == sha:
+            if review.get("status") != "completed":
+                return "waiting" if minutes_since(head_pushed_at) < CODEX_WAIT_MINUTES else "absent"
+            return "findings" if review.get("has_unresolved_findings") else "approved"
+
     findings = [
         comment
-        for comment in comments
+        for comment in api_all(f"pulls/{number}/comments")
         if comment["user"]["login"] == CODEX_BOT and comment.get("commit_id") == sha
     ]
     if findings:
         return "findings"
-    reactions = api_all(f"issues/{number}/reactions")
     thumbs = [
         reaction
-        for reaction in reactions
+        for reaction in api_all(f"issues/{number}/reactions")
         if reaction["user"]["login"] == CODEX_BOT
         and reaction["content"] == "+1"
         and reaction["created_at"] >= head_pushed_at
     ]
     if thumbs:
         return "approved"
-    if minutes_since(head_pushed_at) < CODEX_WAIT_MINUTES:
-        return "waiting"
-    return "absent"
+    return "waiting" if minutes_since(head_pushed_at) < CODEX_WAIT_MINUTES else "absent"
 
 
 def main():
