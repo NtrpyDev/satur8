@@ -7,12 +7,13 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.3.2 is shipped and working. In the current v0.3.3 backend-sweep work, six of
-the seven backend paths are verified: KDE Plasma Wayland/KWin, GNOME Wayland
-Shell extension, Hyprland, NVIDIA X11 NV-CONTROL, gamescope-native for a running
-full-screen gamescope compositor, and the nested gamescope fallback for
-unsupported Wayland sessions. The remaining implemented-but-unverified path is
-DRM/KMS. Distribution today is a Linux x86_64 tarball served from
+v0.3.5 is the current release. Six of the seven backend paths are verified on
+real hardware: KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland,
+NVIDIA X11 NV-CONTROL, gamescope-native for a running full-screen gamescope
+compositor, and the nested gamescope fallback for unsupported Wayland sessions.
+The remaining implemented-but-unverified path is DRM/KMS. The KWin effect is
+built against KWin 6.8, and since v0.3.4 `satur8 repair` rebuilds it at login
+when a KWin update rejects the installed copy. Distribution today is a Linux x86_64 tarball served from
 [satur8.app](https://satur8.app), a tested Arch package, and a live Fedora
 package on COPR built for Fedora 43 and 44. AUR publication is prepared but
 blocked while new AUR account registration is disabled upstream, unless an
