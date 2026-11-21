@@ -13,11 +13,11 @@ NVIDIA X11 NV-CONTROL, gamescope-native for a running full-screen gamescope
 compositor, and the nested gamescope fallback for unsupported Wayland sessions.
 The remaining implemented-but-unverified path is DRM/KMS. The KWin effect is
 built against KWin 6.8, and since v0.3.4 `satur8 repair` rebuilds it at login
-when a KWin update rejects the installed copy. Distribution today is a Linux x86_64 tarball served from
-[satur8.app](https://satur8.app), a tested Arch package, and a live Fedora
-package on COPR built for Fedora 43 and 44. AUR publication is prepared but
-blocked while new AUR account registration is disabled upstream, unless an
-existing AUR maintainer publishes the package.
+when a KWin update rejects the installed copy. Distribution today is a Linux
+x86_64 tarball served from [satur8.app](https://satur8.app), a tested Arch
+package, and a live Fedora package on COPR built for Fedora 43 and 44. AUR
+publication is prepared but blocked while new AUR account registration is
+disabled upstream, unless an existing AUR maintainer publishes the package.
 
 The north star is **v1.0 = Satur8 running well on SteamOS and Bazzite**. Both run
 gamescope rather than KWin. The gamescope path has been proven in v0.3; the next
