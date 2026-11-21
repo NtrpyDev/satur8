@@ -52,6 +52,20 @@ def api(path, params=""):
         return None
 
 
+def api_all(path, params=""):
+    """Every page of a list endpoint, 100 items at a time."""
+    items = []
+    joiner = "&" if params else "?"
+    for page in range(1, 51):
+        batch = api(path, f"{params}{joiner}per_page=100&page={page}")
+        if not batch:
+            break
+        items.extend(batch)
+        if len(batch) < 100:
+            break
+    return items
+
+
 def labels_of(item):
     return {label["name"] for label in item.get("labels", [])}
 
@@ -81,7 +95,7 @@ def codex_state(number, sha, head_pushed_at):
     'waiting'   no verdict yet and still inside the wait window
     'absent'    no verdict and the wait window has passed
     """
-    comments = api(f"pulls/{number}/comments", "?per_page=100") or []
+    comments = api_all(f"pulls/{number}/comments")
     findings = [
         comment
         for comment in comments
@@ -89,7 +103,7 @@ def codex_state(number, sha, head_pushed_at):
     ]
     if findings:
         return "findings"
-    reactions = api(f"issues/{number}/reactions", "?per_page=100") or []
+    reactions = api_all(f"issues/{number}/reactions")
     thumbs = [
         reaction
         for reaction in reactions
@@ -107,9 +121,10 @@ def codex_state(number, sha, head_pushed_at):
 def main():
     work = {"triage": [], "fix": [], "followup": [], "land": []}
 
-    items = api("issues", "?state=open&per_page=100") or []
+    # Oldest first, so nothing waits forever behind newer reports.
+    items = api_all("issues", "?state=open&sort=created&direction=asc")
     issues = [item for item in items if "pull_request" not in item]
-    pulls = api("pulls", "?state=open&per_page=100") or []
+    pulls = api_all("pulls", "?state=open&sort=created&direction=asc")
 
     open_fix_branches = {pull["head"]["ref"] for pull in pulls}
 
