@@ -13,6 +13,7 @@
         "Name": "Satur8 Focus Forwarder",
         "Version": "0.1"
     },
+    "KPackageStructure": "KWin/Script",
     "X-Plasma-API": "javascript",
     "X-Plasma-MainScript": "code/main.js"
 }
