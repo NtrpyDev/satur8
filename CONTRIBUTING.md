@@ -48,9 +48,9 @@ Please make sure:
 
 ## Project layout
 
-See the repo layout section in the [README](README.md). Design and backend
-rationale live in [PLAN.md](PLAN.md); what ships next and in what order lives in
-[ROADMAP.md](ROADMAP.md).
+GitHub's file list shows a one-line description beside every file and folder.
+Design and backend rationale live in [PLAN.md](PLAN.md); what ships next and in
+what order lives in [ROADMAP.md](ROADMAP.md).
 
 ## Backends
 
