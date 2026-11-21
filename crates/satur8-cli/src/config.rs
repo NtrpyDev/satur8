@@ -46,8 +46,29 @@ pub fn save_profiles(profiles: &Profiles) -> Result<()> {
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let path = profiles_path()?;
     let toml = profiles.to_toml().context("serializing profiles")?;
-    std::fs::write(&path, toml).with_context(|| format!("writing {}", path.display()))?;
+    let temporary = dir.join(format!(".profiles.toml.{}.tmp", std::process::id()));
+    std::fs::write(&temporary, toml).with_context(|| format!("writing {}", temporary.display()))?;
+    if let Err(error) = std::fs::rename(&temporary, &path) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error).with_context(|| format!("replacing {}", path.display()));
+    }
+    reload_daemon_profiles();
     Ok(())
+}
+
+fn reload_daemon_profiles() {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return;
+    };
+    let Ok(proxy) = zbus::blocking::Proxy::new(
+        &conn,
+        "org.satur8.Daemon",
+        "/org/satur8/Daemon",
+        "org.satur8.Daemon",
+    ) else {
+        return;
+    };
+    let _: Result<(), _> = proxy.call("Reload", &());
 }
 
 #[cfg(test)]
@@ -95,6 +116,7 @@ mod tests {
             default_saturation: 1.1,
             profiles: vec![Profile {
                 name: "Portal".into(),
+                enabled: true,
                 saturation: 1.6,
                 match_rule: MatchRule {
                     exe: Some("portal2_linux".into()),

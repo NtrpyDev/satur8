@@ -26,6 +26,9 @@ pub struct MatchRule {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Profile {
     pub name: String,
+    /// Disabled profiles remain editable but never match a running game.
+    #[serde(default = "profile_enabled")]
+    pub enabled: bool,
     /// Target saturation, mirrors `Saturation` (0.0..=4.0, 1.0 = unchanged).
     #[serde(deserialize_with = "deserialize_saturation")]
     pub saturation: f32,
@@ -34,6 +37,10 @@ pub struct Profile {
     /// Output ids to affect; empty = all outputs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<String>,
+}
+
+fn profile_enabled() -> bool {
+    true
 }
 
 impl Profile {
@@ -82,13 +89,17 @@ impl Profiles {
         Saturation::new(self.default_saturation)
     }
 
-    /// Find a profile by executable basename (case-insensitive).
+    /// Find a profile by executable basename. Case-insensitive, and `.exe` /
+    /// `.x86_64` suffixes are ignored so a profile added as `EscapeFromTarkov.exe`
+    /// still matches a process resolved as `EscapeFromTarkov`.
     pub fn match_exe(&self, exe: &str) -> Option<&Profile> {
+        let exe_norm = normalize_game_id(exe);
         self.profiles.iter().find(|p| {
-            p.match_rule
-                .exe
-                .as_deref()
-                .is_some_and(|e| e.eq_ignore_ascii_case(exe))
+            p.enabled
+                && p.match_rule
+                    .exe
+                    .as_deref()
+                    .is_some_and(|e| normalize_game_id(e) == exe_norm)
         })
     }
 
@@ -101,15 +112,17 @@ impl Profiles {
             .and_then(|id| id.parse::<u32>().ok());
 
         self.profiles.iter().find(|p| {
-            p.match_rule
-                .window_class
-                .as_deref()
-                .is_some_and(|c| normalize_game_id(c) == class_norm)
-                || p.match_rule
-                    .exe
+            p.enabled
+                && (p
+                    .match_rule
+                    .window_class
                     .as_deref()
-                    .is_some_and(|e| normalize_game_id(e) == class_norm)
-                || steam_app_id.is_some_and(|app_id| p.match_rule.steam_app_id == Some(app_id))
+                    .is_some_and(|c| normalize_game_id(c) == class_norm)
+                    || p.match_rule
+                        .exe
+                        .as_deref()
+                        .is_some_and(|e| normalize_game_id(e) == class_norm)
+                    || steam_app_id.is_some_and(|app_id| p.match_rule.steam_app_id == Some(app_id)))
         })
     }
 
@@ -117,7 +130,7 @@ impl Profiles {
     pub fn match_steam_app_id(&self, app_id: u32) -> Option<&Profile> {
         self.profiles
             .iter()
-            .find(|p| p.match_rule.steam_app_id == Some(app_id))
+            .find(|p| p.enabled && p.match_rule.steam_app_id == Some(app_id))
     }
 
     /// Look a profile up by its name (case-insensitive).
@@ -153,6 +166,7 @@ mod tests {
             profiles: vec![
                 Profile {
                     name: "cs2".into(),
+                    enabled: true,
                     saturation: 1.6,
                     match_rule: MatchRule {
                         exe: Some("cs2".into()),
@@ -163,6 +177,7 @@ mod tests {
                 },
                 Profile {
                     name: "Dota 2".into(),
+                    enabled: true,
                     saturation: 1.4,
                     match_rule: MatchRule {
                         exe: Some("dota2".into()),
@@ -173,6 +188,7 @@ mod tests {
                 },
                 Profile {
                     name: "Window Only".into(),
+                    enabled: true,
                     saturation: 1.2,
                     match_rule: MatchRule {
                         exe: None,
@@ -218,6 +234,7 @@ mod tests {
             profiles: vec![
                 Profile {
                     name: "first".into(),
+                    enabled: true,
                     saturation: 1.2,
                     match_rule: MatchRule {
                         exe: Some("same-game".into()),
@@ -228,6 +245,7 @@ mod tests {
                 },
                 Profile {
                     name: "second".into(),
+                    enabled: true,
                     saturation: 1.8,
                     match_rule: MatchRule {
                         exe: Some("same-game".into()),
@@ -267,6 +285,7 @@ mod tests {
             default_saturation: 1.0,
             profiles: vec![Profile {
                 name: "Steam".into(),
+                enabled: true,
                 saturation: 1.5,
                 match_rule: MatchRule::default(),
                 outputs: vec![],
@@ -274,6 +293,30 @@ mod tests {
         };
 
         assert!(p.match_window_class("Steam").is_none());
+    }
+
+    #[test]
+    fn disabled_profile_never_matches() {
+        let profiles = Profiles::from_toml(
+            "[[profile]]\nname = 'CS2'\nsaturation = 1.6\nenabled = false\nexe = 'cs2'\nsteam_app_id = 730",
+        )
+        .unwrap();
+
+        assert!(profiles.match_exe("cs2").is_none());
+        assert!(profiles.match_window_class("cs2").is_none());
+        assert!(profiles.match_window_class("steam_app_730").is_none());
+        assert!(profiles.match_steam_app_id(730).is_none());
+    }
+
+    #[test]
+    fn profiles_without_enabled_field_remain_enabled() {
+        let profiles = Profiles::from_toml(
+            "[[profile]]\nname = 'Legacy'\nsaturation = 1.5\nexe = 'legacy-game'",
+        )
+        .unwrap();
+
+        assert!(profiles.profiles[0].enabled);
+        assert_eq!(profiles.match_exe("legacy-game").unwrap().name, "Legacy");
     }
 
     #[test]

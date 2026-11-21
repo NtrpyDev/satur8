@@ -13,32 +13,56 @@ use std::thread;
 use ksni::menu::{MenuItem, StandardItem};
 use ksni::Tray;
 
-use satur8_backend::{all_outputs, select_backend};
-use satur8_core::Saturation;
+use satur8_backend::{all_outputs, install_signal_handler, select_backend, RestoreGuard};
+use satur8_core::{BackendError, Saturation};
 
 /// Work items handed from menu callbacks to the apply thread, so the menu never
 /// blocks on D-Bus.
 enum Action {
     Set(f32),
     Off,
+    Quit,
+}
+
+fn handle_action(guard: &mut RestoreGuard, action: Action) -> Result<bool, BackendError> {
+    match action {
+        Action::Set(saturation) => {
+            guard
+                .backend_mut()
+                .apply(&all_outputs(), Saturation::new(saturation))?;
+            guard.arm();
+            Ok(false)
+        }
+        Action::Off => {
+            guard.restore_now()?;
+            Ok(false)
+        }
+        Action::Quit => {
+            guard.restore_now()?;
+            Ok(true)
+        }
+    }
 }
 
 /// Run the apply loop on its own thread, holding the backend.
 fn spawn_apply_thread() -> Sender<Action> {
     let (tx, rx) = mpsc::channel::<Action>();
     thread::spawn(move || {
-        let mut backend = select_backend().map_err(|error| {
-            eprintln!("satur8-tray: {error}");
-            error
-        });
+        let mut guard = select_backend()
+            .map(|backend| RestoreGuard::inactive(backend, Saturation::IDENTITY))
+            .map_err(|error| {
+                eprintln!("satur8-tray: {error}");
+                error
+            });
         for action in rx {
-            let Ok(b) = backend.as_mut() else { continue };
-            let result = match action {
-                Action::Set(s) => b.apply(&all_outputs(), Saturation::new(s)),
-                Action::Off => b.reset(&all_outputs()),
-            };
-            if let Err(e) = result {
-                eprintln!("satur8-tray: {e}");
+            if matches!(action, Action::Quit) && guard.is_err() {
+                std::process::exit(0);
+            }
+            let Ok(guard) = guard.as_mut() else { continue };
+            match handle_action(guard, action) {
+                Ok(true) => std::process::exit(0),
+                Ok(false) => {}
+                Err(error) => eprintln!("satur8-tray: {error}"),
             }
         }
     });
@@ -120,7 +144,9 @@ impl Tray for Satur8Tray {
             .into(),
             StandardItem {
                 label: "Quit".into(),
-                activate: Box::new(|_| std::process::exit(0)),
+                activate: Box::new(|t: &mut Satur8Tray| {
+                    let _ = t.tx.send(Action::Quit);
+                }),
                 ..Default::default()
             }
             .into(),
@@ -132,6 +158,10 @@ fn main() -> anyhow::Result<()> {
     use ksni::blocking::TrayMethods;
 
     let tx = spawn_apply_thread();
+    let signal_tx = tx.clone();
+    let _signal_handler = install_signal_handler(move |_| {
+        let _ = signal_tx.send(Action::Quit);
+    })?;
     let tray = Satur8Tray {
         on: false,
         saturation: 1.5,
@@ -145,5 +175,46 @@ fn main() -> anyhow::Result<()> {
     // Keep the process alive; the tray service runs in the background.
     loop {
         thread::park();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    use satur8_core::{Backend, BackendError, CostNote, Output};
+
+    struct FakeBackend(Arc<Mutex<Vec<&'static str>>>);
+
+    impl Backend for FakeBackend {
+        fn name(&self) -> &'static str {
+            "fake"
+        }
+        fn cost(&self) -> CostNote {
+            CostNote::ZeroCost
+        }
+        fn outputs(&self) -> Vec<Output> {
+            vec![all_outputs()]
+        }
+        fn apply(&mut self, _: &Output, _: Saturation) -> Result<(), BackendError> {
+            self.0.lock().unwrap().push("apply");
+            Ok(())
+        }
+        fn reset(&mut self, _: &Output) -> Result<(), BackendError> {
+            self.0.lock().unwrap().push("reset");
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn quit_restores_saturation_before_exiting() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let backend = Box::new(FakeBackend(calls.clone()));
+        let mut guard = satur8_backend::RestoreGuard::inactive(backend, Saturation::IDENTITY);
+
+        assert!(!handle_action(&mut guard, Action::Set(1.5)).unwrap());
+        assert!(handle_action(&mut guard, Action::Quit).unwrap());
+        assert_eq!(*calls.lock().unwrap(), ["apply", "reset"]);
     }
 }

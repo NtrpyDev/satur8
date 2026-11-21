@@ -61,6 +61,16 @@ pub fn select_backend() -> Result<Box<dyn Backend>> {
         return Ok(Box::new(backend));
     }
 
+    // KWin is running but rejects our effect: that is the exact-version plugin
+    // mismatch after a KWin update, not a missing backend. Say so, instead of
+    // pointing a KDE user at the gamescope fallback.
+    if KwinBackend::connect().is_some() {
+        bail!(
+            "the Satur8 KWin effect is missing or was built for a different KWin \
+             version than the one running. Run `satur8 repair` to rebuild it."
+        );
+    }
+
     let environment = Environment::detect();
     bail!(
         "no usable apply/reset backend for this session ({}, {}, {}).\n\

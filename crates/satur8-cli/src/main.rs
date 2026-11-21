@@ -81,6 +81,9 @@ enum Command {
     Status,
     /// Diagnose the environment and backend availability.
     Doctor,
+    /// Rebuild the KWin effect if the running KWin rejects it (this happens
+    /// after every KWin update). Runs automatically when the daemon starts.
+    Repair,
 }
 
 fn parse_saturation(value: &str) -> Result<f32, String> {
@@ -93,6 +96,19 @@ fn parse_saturation(value: &str) -> Result<f32, String> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    // The read-only report commands should end quietly when their output is
+    // piped into something that stops reading (`satur8 doctor | head`), not
+    // panic on the broken pipe. Commands that change the display keep Rust's
+    // default so they always reach their restore path.
+    if matches!(
+        cli.command,
+        Command::Status | Command::Doctor | Command::Outputs
+    ) {
+        // SAFETY: called once at startup, before any other thread exists.
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
     match cli.command {
         Command::Set {
             saturation,
@@ -121,6 +137,7 @@ fn main() -> Result<()> {
         Command::Profile { cmd } => profile_cmd::run(cmd),
         Command::Status => cmd_status(),
         Command::Doctor => cmd_doctor(),
+        Command::Repair => cmd_repair(),
     }
 }
 
@@ -214,12 +231,24 @@ fn cmd_status() -> Result<()> {
     println!("  gpu:      {}", envr.gpu);
     println!("  prefers:  {} backend", envr.preferred_backend());
 
-    match KwinBackend::detect() {
+    match KwinBackend::connect() {
         Some(kwin) => {
+            let supported = kwin.is_supported().unwrap_or(false);
             let loaded = kwin.is_loaded().unwrap_or(false);
             print!(
-                "backend kwin: available, effect {}",
-                if loaded { "loaded" } else { "not loaded" }
+                "backend kwin: {}, effect {}",
+                if supported {
+                    "available"
+                } else {
+                    "unavailable"
+                },
+                if loaded {
+                    "loaded"
+                } else if supported {
+                    "not loaded"
+                } else {
+                    "missing or ABI-incompatible"
+                }
             );
             if loaded {
                 if let Ok(sat) = kwin.current_saturation() {
@@ -233,6 +262,16 @@ fn cmd_status() -> Result<()> {
     Ok(())
 }
 
+fn cmd_repair() -> Result<()> {
+    match satur8_kwin::repair::repair() {
+        Ok(outcome) => {
+            println!("satur8: {}", outcome.describe());
+            Ok(())
+        }
+        Err(message) => anyhow::bail!(message),
+    }
+}
+
 fn cmd_doctor() -> Result<()> {
     let envr = Environment::detect();
     println!("satur8 doctor");
@@ -242,9 +281,35 @@ fn cmd_doctor() -> Result<()> {
     println!("  preferred    : {}", envr.preferred_backend());
     println!();
 
-    match KwinBackend::detect() {
+    match KwinBackend::connect() {
         Some(kwin) => {
             println!("  [ok] KWin reachable over D-Bus");
+            match kwin.is_supported() {
+                Ok(true) => println!("  [ok] satur8 effect matches the running KWin ABI"),
+                Ok(false) => {
+                    let state = satur8_kwin::repair::inspect(false);
+                    let built_for = |abi: &Option<String>| match abi {
+                        Some(version) => format!("built for KWin {version}"),
+                        None => "not installed".to_string(),
+                    };
+                    println!("  [!!] the running KWin rejects the satur8 effect.");
+                    println!("       system effect  : {}", built_for(&state.system));
+                    println!("       per-user effect: {}", built_for(&state.user));
+                    println!(
+                        "       installed KWin : {}",
+                        state
+                            .headers
+                            .as_deref()
+                            .unwrap_or("unknown (no KWin headers)")
+                    );
+                    println!("       Run `satur8 repair` to rebuild it for this KWin version.");
+                    return Ok(());
+                }
+                Err(error) => {
+                    println!("  [!!] couldn't query effect compatibility: {error}");
+                    return Ok(());
+                }
+            }
             match kwin.is_loaded() {
                 Ok(true) => println!("  [ok] satur8 effect is loaded"),
                 Ok(false) => {

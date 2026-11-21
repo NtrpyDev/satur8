@@ -30,6 +30,10 @@ pub enum ProfileCmd {
     },
     /// Remove a profile by name.
     Remove { name: String },
+    /// Enable a profile so it can match running games.
+    Enable { name: String },
+    /// Disable a profile without deleting it.
+    Disable { name: String },
     /// Print the profiles file path.
     Path,
 }
@@ -46,6 +50,8 @@ pub fn run(cmd: ProfileCmd) -> Result<()> {
             steam_app_id,
         } => add(name, saturation, exe, window_class, steam_app_id),
         ProfileCmd::Remove { name } => remove(&name),
+        ProfileCmd::Enable { name } => set_enabled(&name, true),
+        ProfileCmd::Disable { name } => set_enabled(&name, false),
         ProfileCmd::Path => {
             println!("{}", config::profiles_path()?.display());
             Ok(())
@@ -62,8 +68,9 @@ fn list() -> Result<()> {
     }
     for p in &profiles.profiles {
         println!(
-            "  {:<16} sat {:.2}  {}",
+            "  {:<16} {:<8} sat {:.2}  {}",
             p.name,
+            if p.enabled { "enabled" } else { "disabled" },
             p.saturation,
             describe_match(&p.match_rule)
         );
@@ -76,6 +83,7 @@ fn show(name: &str) -> Result<()> {
     match profiles.by_name(name) {
         Some(p) => {
             println!("name:        {}", p.name);
+            println!("enabled:     {}", p.enabled);
             println!("saturation:  {:.2}", p.saturation);
             println!("match:       {}", describe_match(&p.match_rule));
             if !p.outputs.is_empty() {
@@ -113,6 +121,17 @@ fn remove(name: &str) -> Result<()> {
     Ok(())
 }
 
+fn set_enabled(name: &str, enabled: bool) -> Result<()> {
+    let mut profiles = config::load_profiles()?;
+    set_profile_enabled(&mut profiles, name, enabled)?;
+    config::save_profiles(&profiles)?;
+    println!(
+        "{} profile '{name}'",
+        if enabled { "enabled" } else { "disabled" }
+    );
+    Ok(())
+}
+
 fn build_profile(
     name: String,
     saturation: f32,
@@ -126,6 +145,7 @@ fn build_profile(
     }
     Ok(Profile {
         name,
+        enabled: true,
         saturation,
         match_rule: MatchRule {
             exe,
@@ -161,6 +181,16 @@ fn remove_profile_by_name(profiles: &mut Profiles, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn set_profile_enabled(profiles: &mut Profiles, name: &str, enabled: bool) -> Result<()> {
+    let profile = profiles
+        .profiles
+        .iter_mut()
+        .find(|profile| profile.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| anyhow::anyhow!("no profile named '{name}'"))?;
+    profile.enabled = enabled;
+    Ok(())
+}
+
 fn describe_match(m: &MatchRule) -> String {
     let mut parts = Vec::new();
     if let Some(e) = &m.exe {
@@ -186,6 +216,7 @@ mod tests {
     fn profile(name: &str, saturation: f32) -> Profile {
         Profile {
             name: name.into(),
+            enabled: true,
             saturation,
             match_rule: MatchRule {
                 exe: Some(name.to_ascii_lowercase()),
@@ -251,5 +282,19 @@ mod tests {
 
         assert!(remove_profile_by_name(&mut profiles, "missing").is_err());
         assert_eq!(profiles.profiles.len(), 1);
+    }
+
+    #[test]
+    fn profile_enabled_state_can_be_changed_by_name() {
+        let mut profiles = Profiles {
+            default_saturation: 1.0,
+            profiles: vec![profile("CS2", 1.6)],
+        };
+
+        set_profile_enabled(&mut profiles, "cs2", false).unwrap();
+        assert!(!profiles.profiles[0].enabled);
+        set_profile_enabled(&mut profiles, "CS2", true).unwrap();
+        assert!(profiles.profiles[0].enabled);
+        assert!(set_profile_enabled(&mut profiles, "missing", false).is_err());
     }
 }
