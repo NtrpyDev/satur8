@@ -8,7 +8,7 @@
 Boost saturation when your game is focused. Restore your desktop when you leave.  
 No game injection. No Vulkan layer. No overlay. Built for modern Linux display stacks.
 
-[Website](https://satur8.app) · [Releases](https://github.com/NtrpyDev/satur8/releases) · [Roadmap](ROADMAP.md) · [Packaging](PACKAGING.md) · [Issues](https://github.com/NtrpyDev/satur8/issues) · [Buy Me a Coffee](https://buymeacoffee.com/ntrpydev)
+[Website](https://satur8.app) · [Releases](https://github.com/NtrpyDev/satur8/releases) · [Roadmap](ROADMAP.md) · [Packaging](PACKAGING.md) · [Issues](https://github.com/NtrpyDev/satur8/issues)
 
 ![License](https://img.shields.io/github/license/NtrpyDev/satur8?color=ff3d8a)
 ![Release](https://img.shields.io/github/v/release/NtrpyDev/satur8?color=ffc24b)
@@ -330,10 +330,6 @@ See [ROADMAP.md](ROADMAP.md) for what ships next, including gamescope backend ve
 Issues and pull requests are welcome.
 
 Before opening a pull request, please make sure the workspace builds (`cargo build`), the checks pass (`cargo check` and `cargo test --workspace --locked`), and any README commands you touched are still accurate.
-
-## Support
-
-Satur8 is free and open source. If it makes your games look better, you can support development at [Buy Me a Coffee](https://buymeacoffee.com/ntrpydev).
 
 ## License
 
