@@ -118,7 +118,7 @@ void Satur8Effect::drawWindow(const KWin::RenderTarget &renderTarget,
                                 const KWin::Region &deviceRegion,
                                 KWin::WindowPaintData &data)
 {
-    if (m_shader && m_saturation != 1.0) {
+    if (m_shader) {
         // We're inside a frame here, so the GL context is current and it is safe
         // to bind the shader and push uniforms. Custom-named uniforms survive the
         // standard uniform setup OffscreenEffect does for the redirected draw.
