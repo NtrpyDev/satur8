@@ -14,14 +14,31 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui DBus)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui DBus Qml)  # Qml: KWin 6.8 headers include qqmlregistration.h
 
 # --- KWin (headers + libkwin) -------------------------------------------------
 set(KWIN_INCLUDE_DIR "/usr/include/kwin" CACHE PATH "KWin effect headers")
 find_library(KWIN_LIBRARY NAMES kwin PATHS /usr/lib /usr/lib64 REQUIRED)
 
+# The effect API changes between KWin minor versions (6.8 made drawWindow return
+# bool), so the source branches on the version of the headers it is built with.
+file(STRINGS "${KWIN_INCLUDE_DIR}/config-kwin.h" KWIN_VERSION_LINE
+     REGEX "#define KWIN_PLUGIN_VERSION_STRING")
+if(NOT KWIN_VERSION_LINE MATCHES "\"([0-9]+)\\.([0-9]+)")
+    message(FATAL_ERROR "cannot read KWIN_PLUGIN_VERSION_STRING from ${KWIN_INCLUDE_DIR}/config-kwin.h")
+endif()
+set(SATUR8_KWIN_MAJOR ${CMAKE_MATCH_1})
+set(SATUR8_KWIN_MINOR ${CMAKE_MATCH_2})
+message(STATUS "Building against KWin ${SATUR8_KWIN_MAJOR}.${SATUR8_KWIN_MINOR}")
+
 # --- KF6 headers we include transitively (KPluginFactory, KSharedConfig, ...) -
-file(GLOB KF6_INCLUDE_DIRS "/usr/include/KF6/*")
+file(GLOB KF6_INCLUDE_CANDIDATES LIST_DIRECTORIES true "/usr/include/KF6/*")
+set(KF6_INCLUDE_DIRS)
+foreach(candidate IN LISTS KF6_INCLUDE_CANDIDATES)
+    if(IS_DIRECTORY "${candidate}")
+        list(APPEND KF6_INCLUDE_DIRS "${candidate}")
+    endif()
+endforeach()
 find_library(KF6_COREADDONS_LIBRARY NAMES KF6CoreAddons PATHS /usr/lib /usr/lib64 REQUIRED)
 find_library(KF6_CONFIGCORE_LIBRARY NAMES KF6ConfigCore PATHS /usr/lib /usr/lib64 REQUIRED)
 
@@ -42,10 +59,16 @@ target_include_directories(satur8_effect PRIVATE
     ${KF6_INCLUDE_DIRS}
 )
 
+target_compile_definitions(satur8_effect PRIVATE
+    SATUR8_KWIN_MAJOR=${SATUR8_KWIN_MAJOR}
+    SATUR8_KWIN_MINOR=${SATUR8_KWIN_MINOR}
+)
+
 target_link_libraries(satur8_effect
     Qt6::Core
     Qt6::Gui
     Qt6::DBus
+    Qt6::Qml
     ${KWIN_LIBRARY}
     ${KF6_COREADDONS_LIBRARY}
     ${KF6_CONFIGCORE_LIBRARY}

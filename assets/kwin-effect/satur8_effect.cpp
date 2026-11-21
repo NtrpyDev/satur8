@@ -69,10 +69,6 @@ Satur8Effect::Satur8Effect()
 
     connect(KWin::effects, &KWin::EffectsHandler::windowAdded,
             this, &Satur8Effect::redirectWindow);
-    const auto windows = KWin::effects->stackingOrder();
-    for (KWin::EffectWindow *w : windows) {
-        redirectWindow(w);
-    }
 }
 
 Satur8Effect::~Satur8Effect()
@@ -104,14 +100,14 @@ bool Satur8Effect::ensureShader()
 
 void Satur8Effect::redirectWindow(KWin::EffectWindow *w)
 {
-    if (!w || !ensureShader()) {
+    if (!w || m_saturation == 1.0 || !ensureShader()) {
         return;
     }
     redirect(w);
     setShader(w, m_shader.get());
 }
 
-void Satur8Effect::drawWindow(const KWin::RenderTarget &renderTarget,
+Satur8DrawResult Satur8Effect::drawWindow(const KWin::RenderTarget &renderTarget,
                                 const KWin::RenderViewport &viewport,
                                 KWin::EffectWindow *w,
                                 int mask,
@@ -129,7 +125,8 @@ void Satur8Effect::drawWindow(const KWin::RenderTarget &renderTarget,
         m_shader->setUniform("linearize", m_linear ? 1 : 0);
         manager->popShader();
     }
-    KWin::OffscreenEffect::drawWindow(renderTarget, viewport, w, mask, deviceRegion, data);
+    // Pass KWin's result through unchanged (bool on 6.8+, void before).
+    return KWin::OffscreenEffect::drawWindow(renderTarget, viewport, w, mask, deviceRegion, data);
 }
 
 void Satur8Effect::reconfigure(ReconfigureFlags)
@@ -138,7 +135,7 @@ void Satur8Effect::reconfigure(ReconfigureFlags)
 
 bool Satur8Effect::isActive() const
 {
-    return m_shader != nullptr;
+    return m_shader != nullptr && m_saturation != 1.0;
 }
 
 void Satur8Effect::setSaturation(double saturation)
@@ -147,7 +144,23 @@ void Satur8Effect::setSaturation(double saturation)
     if (m_saturation == saturation) {
         return;
     }
+
+    const bool wasActive = m_saturation != 1.0;
     m_saturation = saturation;
+    const bool isActive = m_saturation != 1.0;
+
+    if (!wasActive && isActive) {
+        const auto windows = KWin::effects->stackingOrder();
+        for (KWin::EffectWindow *w : windows) {
+            redirectWindow(w);
+        }
+    } else if (wasActive && !isActive) {
+        const auto windows = KWin::effects->stackingOrder();
+        for (KWin::EffectWindow *w : windows) {
+            unredirect(w);
+        }
+    }
+
     KWin::effects->addRepaintFull();
 }
 

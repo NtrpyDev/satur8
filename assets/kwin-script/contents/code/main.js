@@ -8,18 +8,27 @@
 //
 // Zero polling: we react only to KWin's own windowActivated signal.
 
+// The pid goes over as a string: callDBus offers no control over the numeric
+// type it marshals, and a signature mismatch fails silently.
+function report(cls, cap, pid) {
+    callDBus("org.satur8.Daemon", "/org/satur8/Daemon",
+             "org.satur8.Daemon", "WindowActivatedPid", cls, cap, pid);
+}
+
 function reportActive(window) {
     if (!window) {
         // Focus left to the desktop/null - report an empty class so the daemon
         // restores the default.
-        callDBus("org.satur8.Daemon", "/org/satur8/Daemon",
-                 "org.satur8.Daemon", "WindowActivated", "", "");
+        report("", "", "0");
         return;
     }
     var cls = window.resourceClass ? "" + window.resourceClass : "";
     var cap = window.caption ? "" + window.caption : "";
-    callDBus("org.satur8.Daemon", "/org/satur8/Daemon",
-             "org.satur8.Daemon", "WindowActivated", cls, cap);
+    // The pid is what identifies a Proton game. Every non-Steam title launched
+    // through umu carries the same window class, so the class alone cannot tell
+    // one from another; the daemon resolves this pid to the real executable.
+    var pid = window.pid ? "" + window.pid : "0";
+    report(cls, cap, pid);
 }
 
 // KWin 6 scripting API: workspace.windowActivated(window).
