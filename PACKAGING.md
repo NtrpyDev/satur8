@@ -49,6 +49,12 @@ effect's build toolchain at runtime as well: a hard dependency where the distro
 has no weak ones (Arch), `Recommends` where it does (Fedora). The end-to-end
 check for this path is `assets/kwin-effect/sandbox-repair-test.sh`.
 
+The KWin effect is optional at install time. `packaging/install.sh` must finish
+on a machine with no KWin at all (GNOME, Hyprland, NVIDIA X11, a gamescope
+session) and simply leave the effect out. Before tagging a release, run
+`packaging/install-nokwin-test.sh` on the release tarball: it runs the
+installer in a clean container with no KWin, no cmake and no network.
+
 ## Release Artifacts
 
 There are two tarballs, and they serve different jobs:
