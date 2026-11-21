@@ -1,0 +1,20 @@
+{
+  ".copr": "Fedora COPR build entry point that builds the RPM from this repository",
+  ".github": "GitHub Actions workflows for tests, releases, Claude and the autopilot, plus issue and PR templates",
+  ".gitignore": "Files Git should ignore: build output and packaging scratch",
+  "AGENTS.md": "Working guidelines for AI and code agents contributing to Satur8",
+  "CHANGELOG.md": "Release notes for every Satur8 version, newest first",
+  "CONTRIBUTING.md": "How to contribute: build, test, and PR guidelines",
+  "Cargo.lock": "Exact pinned versions of every dependency for reproducible builds",
+  "Cargo.toml": "Rust workspace manifest listing the crates and shared dependencies",
+  "LICENSE": "The GPL-3.0-or-later license that covers all of Satur8",
+  "PACKAGING.md": "Maintainer guide for release and packaging work",
+  "PLAN.md": "Design notes on how Satur8 is built and why each backend exists",
+  "README.md": "Project overview, install guide, and usage for Satur8",
+  "ROADMAP.md": "What ships next for Satur8, in order",
+  "assets": "KWin effect and focus script, GNOME extension, gamescope shader, and README images",
+  "benchmarks": "Recorded CS2 frame-rate benchmark runs with Satur8 on and off",
+  "crates": "Rust source code: core saturation math, CLI, GUI, daemon, tray, and display backends",
+  "packaging": "Installer plus Arch, Fedora, and release-tarball packaging scripts",
+  "scripts": "Maintainer scripts for benchmarks, README images, and releases"
+}
