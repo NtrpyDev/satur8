@@ -3,6 +3,19 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## v0.3.5 - 2026-11-21
+
+Installer fix for machines without KDE.
+
+- Fix the release installer quitting on GNOME, Hyprland, NVIDIA X11 and
+  gamescope-only machines. The v0.3.4 installer tried to rebuild the KWin
+  effect even where KWin is not installed, and stopped before installing
+  anything when it could not. The KWin effect is now optional: with no KWin it
+  is skipped, and on KDE Plasma without build tools the rest of Satur8 still
+  installs and `satur8 repair` builds the effect once the tools are there.
+- Add an installer test that runs the release tarball in a clean container
+  with no KWin, so this cannot ship broken again.
+
 ## v0.3.4 - 2026-11-21
 
 Full reliability repair for the KDE app and its shared profile workflows.
