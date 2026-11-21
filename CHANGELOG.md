@@ -3,6 +3,62 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## v0.3.4 - 2026-11-21
+
+Full reliability repair for the KDE app and its shared profile workflows.
+
+- Satur8 no longer breaks on every KWin update. KWin only loads an effect built
+  for its exact version, so each update left the installed effect rejected
+  until a manual reinstall. The focus daemon now runs the new `satur8 repair`
+  at every login: when the running KWin rejects the effect, it is rebuilt from
+  the installed source in a few seconds, with no root. Packages and the
+  installer now ship the effect source and an `environment.d` file that lets
+  KWin find the per-user rebuild.
+- The per-user installer works without the manual `QT_PLUGIN_PATH` step it used
+  to print; log out and back in once after the first install.
+- Fix per-game switching never starting on Plasma 6. The KWin focus script's
+  metadata lacked `KPackageStructure`, so KWin skipped it at login even when it
+  was enabled (#11, #13).
+- Fix Proton and Wine games in the GUI's running-game list. They all showed up
+  as `wine64-preloader`; the list now shows the real game executable, and the
+  daemon matches the focused window by that same executable, so non-Steam
+  games launched through umu, which all share one window class, each get their
+  own profile (#12, #14).
+- A profile added as `Game.exe` now also matches a process reported as `Game`.
+- Build the KWin effect against KWin 6.8.
+- When KWin rejects the effect, `satur8 doctor` and the daemon log now say so
+  and show which KWin version each installed copy was built for, instead of
+  suggesting the gamescope fallback.
+- `satur8 doctor`, `status` and `outputs` no longer panic when piped into a
+  command that stops reading early.
+
+- Fix the KWin effect's black-screen failure. Identity saturation previously
+  redirected every window through a shader whose custom uniforms were still
+  zero, producing fully black outputs. The effect now initializes every draw
+  and remains inactive until a non-identity value is requested. Setting
+  saturation to exactly normal now switches the effect off instead of leaving
+  it loaded (#10, #15).
+- Add an isolated virtual-KWin render test that checks identity output,
+  grayscale, boosted saturation, restoration, and zero-cost inactive state
+  without touching the user's real desktop.
+- Detect exact KWin effect ABI compatibility at runtime and during install.
+  Release archives now include the effect source and rebuild it locally when
+  their bundled plugin does not match the installed KWin version.
+- Make installer upgrades unload Satur8 before replacing compositor code and
+  remove stale per-user plugins that could shadow the system copy.
+- Make profile enable/disable real and persistent across the GUI, CLI, core
+  matcher, and daemon. Disabling an active profile restores the desktop
+  immediately; CLI profile edits notify the running daemon.
+- Write profile configuration atomically so an interrupted save cannot leave a
+  truncated file.
+- Restore display state before the tray exits, including SIGTERM and SIGHUP,
+  instead of terminating with saturation still applied.
+- Repair the isolated GUI and KWin integration harnesses and exercise CLI,
+  launch-wrapper, daemon focus, profile toggling, and GUI rendering paths.
+
+Thanks to @NasirA1991 for the fixes in #13, #14 and #15, and to @Ferziellee for
+the black-screen report.
+
 ## v0.3.3 - 2026-06-26
 
 Backend sweep plus a full code audit of the stateful paths.
