@@ -7,9 +7,11 @@
 
 pub mod ctm;
 pub mod env;
+pub mod proc;
 pub mod profile;
 
 pub use env::{Desktop, Environment, Gpu, SessionType};
+pub use proc::{resolve_exe, running_apps, RunningApp};
 pub use profile::{MatchRule, Profile, Profiles};
 
 /// Rec.709 luma weights. Saturation is defined as a blend toward this luma.

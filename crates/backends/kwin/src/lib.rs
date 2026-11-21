@@ -12,6 +12,8 @@ use satur8_core::{
 };
 use zbus::blocking::Connection;
 
+pub mod repair;
+
 /// KWin derives an effect's id from the installed plugin's filename. We install
 /// the effect as `satur8.so`, so the id KWin uses is `satur8`.
 const EFFECT_ID: &str = "satur8";
@@ -30,7 +32,7 @@ impl KwinBackend {
     /// Connect to the session bus and confirm KWin is actually reachable.
     /// Returns `None` when this isn't a KDE Wayland session with KWin live, so
     /// the selector can fall through to another backend.
-    pub fn detect() -> Option<KwinBackend> {
+    pub fn connect() -> Option<KwinBackend> {
         let envr = Environment::detect();
         if envr.session != SessionType::Wayland || envr.desktop != Desktop::Kde {
             return None;
@@ -39,6 +41,14 @@ impl KwinBackend {
         let backend = KwinBackend { conn };
         // Liveness probe: only succeeds if org.kde.KWin/Effects answers.
         backend.is_loaded().ok()?;
+        Some(backend)
+    }
+
+    /// Detect a KWin session only when the installed effect is loadable by the
+    /// current compositor ABI.
+    pub fn detect() -> Option<KwinBackend> {
+        let backend = Self::connect()?;
+        backend.is_supported().ok().filter(|supported| *supported)?;
         Some(backend)
     }
 
@@ -57,10 +67,31 @@ impl KwinBackend {
         reply.body().deserialize::<bool>().map_err(apply_err)
     }
 
+    /// Whether KWin can load the installed effect. False covers a missing
+    /// plugin as well as the common exact-ABI mismatch after a KWin upgrade.
+    pub fn is_supported(&self) -> Result<bool, BackendError> {
+        let reply = self
+            .conn
+            .call_method(
+                Some(KWIN_SERVICE),
+                EFFECTS_PATH,
+                Some(EFFECTS_IFACE),
+                "isEffectSupported",
+                &EFFECT_ID,
+            )
+            .map_err(apply_err)?;
+        reply.body().deserialize::<bool>().map_err(apply_err)
+    }
+
     /// Load the effect (turns the GPU pass on). Idempotent.
     pub fn load(&self) -> Result<(), BackendError> {
         if self.is_loaded()? {
             return Ok(());
+        }
+        if !self.is_supported()? {
+            return Err(BackendError::Unavailable(
+                "the Satur8 KWin effect is missing or was built for a different KWin version; run `satur8 repair` to rebuild it for the running compositor".into(),
+            ));
         }
         let reply = self
             .conn

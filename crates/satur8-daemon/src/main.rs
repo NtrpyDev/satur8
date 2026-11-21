@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use satur8_backend::{apply_to_outputs, install_signal_handler, select_backend, RestoreGuard};
-use satur8_core::{BackendError, Profiles, Saturation};
+use satur8_core::{BackendError, Profile, Profiles, Saturation};
 use zbus::interface;
 
 const SERVICE: &str = "org.satur8.Daemon";
@@ -30,12 +30,27 @@ enum FocusAction {
     None,
 }
 
+/// The focused window's profile, if any. The pid's real executable is tried
+/// first because it is the only thing that identifies a Proton game: every
+/// non-Steam title launched through umu shares the window class `steam_app_0`,
+/// so class alone cannot tell Tarkov from anything else launched the same way.
+/// The class remains the fallback for windows we cannot resolve a pid for.
+fn match_focused<'a>(
+    profiles: &'a Profiles,
+    window_class: &str,
+    exe: Option<&str>,
+) -> Option<&'a Profile> {
+    exe.and_then(|exe| profiles.match_exe(exe))
+        .or_else(|| profiles.match_window_class(window_class))
+}
+
 fn decide_focus_action(
     current: Option<&str>,
     window_class: &str,
+    exe: Option<&str>,
     profiles: &Profiles,
 ) -> FocusAction {
-    match profiles.match_window_class(window_class) {
+    match match_focused(profiles, window_class, exe) {
         Some(profile) if current == Some(profile.name.as_str()) => FocusAction::None,
         Some(profile) => FocusAction::Apply {
             profile: profile.name.clone(),
@@ -150,19 +165,26 @@ impl Daemon {
         }
     }
 
-    fn react(&mut self, class: &str) {
+    fn react(&mut self, class: &str, pid: u32) {
         self.backend
             .lock()
             .expect("backend state mutex poisoned")
             .try_detect(self.profiles.default_saturation());
-        match decide_focus_action(self.current.as_deref(), class, &self.profiles) {
+        let exe = (pid != 0).then(|| satur8_core::resolve_exe(pid)).flatten();
+        match decide_focus_action(
+            self.current.as_deref(),
+            class,
+            exe.as_deref(),
+            &self.profiles,
+        ) {
             FocusAction::Apply {
                 profile,
                 saturation,
                 outputs,
             } => {
                 eprintln!(
-                    "satur8-daemon: '{class}' -> profile '{profile}' ({:.2})",
+                    "satur8-daemon: '{}' -> profile '{profile}' ({:.2})",
+                    exe.as_deref().unwrap_or(class),
                     saturation.get()
                 );
                 let result = self
@@ -200,7 +222,12 @@ impl Daemon {
     }
 
     fn reload_profiles(&mut self) {
-        self.profiles = load_profiles(&self.profiles);
+        let profiles = load_profiles(&self.profiles);
+        self.replace_profiles(profiles);
+    }
+
+    fn replace_profiles(&mut self, profiles: Profiles) {
+        self.profiles = profiles;
         if let Some(guard) = self
             .backend
             .lock()
@@ -218,9 +245,13 @@ impl Daemon {
         let Some(current) = self.current.clone() else {
             return;
         };
-        let Some(profile) = self.profiles.by_name(&current) else {
+        let Some(profile) = self
+            .profiles
+            .by_name(&current)
+            .filter(|profile| profile.enabled)
+        else {
             eprintln!(
-                "satur8-daemon: active profile '{current}' no longer exists -> restoring default"
+                "satur8-daemon: active profile '{current}' is disabled or missing -> restoring default"
             );
             let result = self
                 .backend
@@ -254,9 +285,17 @@ impl Daemon {
 
 #[interface(name = "org.satur8.Daemon")]
 impl Daemon {
-    /// Called on every window activation.
+    /// Called on every window activation. Kept for older focus scripts that
+    /// cannot report a pid; matching then falls back to the window class.
     fn window_activated(&mut self, class: String, _caption: String) {
-        self.react(&class);
+        self.react(&class, 0);
+    }
+
+    /// Window activation including the window's process id. The pid arrives as
+    /// a string because KWin's `callDBus` gives no control over the numeric
+    /// type it marshals, and a mismatched signature is a silent no-op.
+    fn window_activated_pid(&mut self, class: String, _caption: String, pid: String) {
+        self.react(&class, pid.trim().parse::<u32>().unwrap_or(0));
     }
 
     /// Re-read the profiles file from disk.
@@ -415,6 +454,7 @@ mod tests {
             default_saturation: 1.0,
             profiles: vec![Profile {
                 name: "game".into(),
+                enabled: true,
                 saturation: 1.5,
                 match_rule: MatchRule {
                     exe: None,
@@ -443,7 +483,7 @@ mod tests {
     #[test]
     fn applies_on_focus_match() {
         let (mut daemon, calls, _) = setup();
-        daemon.react("game.class");
+        daemon.react("game.class", 0);
         assert_eq!(daemon.current.as_deref(), Some("game"));
         assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
     }
@@ -451,8 +491,8 @@ mod tests {
     #[test]
     fn restores_on_focus_loss() {
         let (mut daemon, calls, _) = setup();
-        daemon.react("game.class");
-        daemon.react("desktop");
+        daemon.react("game.class", 0);
+        daemon.react("desktop", 0);
         assert_eq!(daemon.current, None);
         assert_eq!(
             *calls.lock().unwrap(),
@@ -463,8 +503,8 @@ mod tests {
     #[test]
     fn same_profile_is_a_no_op_while_healthy() {
         let (mut daemon, calls, _) = setup();
-        daemon.react("game.class");
-        daemon.react("game.class");
+        daemon.react("game.class", 0);
+        daemon.react("game.class", 0);
         assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
     }
 
@@ -472,10 +512,10 @@ mod tests {
     fn failed_apply_is_retried_on_next_focus() {
         let (mut daemon, calls, fail_apply) = setup();
         fail_apply.store(true, Ordering::Release);
-        daemon.react("game.class");
+        daemon.react("game.class", 0);
         assert_eq!(daemon.current, None);
         fail_apply.store(false, Ordering::Release);
-        daemon.react("game.class");
+        daemon.react("game.class", 0);
         assert_eq!(daemon.current.as_deref(), Some("game"));
         assert_eq!(
             *calls.lock().unwrap(),
@@ -486,9 +526,9 @@ mod tests {
     #[test]
     fn invalidation_reapplies_the_same_profile() {
         let (mut daemon, calls, _) = setup();
-        daemon.react("game.class");
+        daemon.react("game.class", 0);
         daemon.invalidate_current();
-        daemon.react("game.class");
+        daemon.react("game.class", 0);
         assert_eq!(
             *calls.lock().unwrap(),
             [Call::Apply("all", 1.5), Call::Apply("all", 1.5)]
@@ -500,11 +540,27 @@ mod tests {
         let (mut daemon, calls, _) = setup();
         daemon.profiles.profiles[0].outputs = vec!["DP-1".into(), "HDMI-A-1".into()];
 
-        daemon.react("game.class");
+        daemon.react("game.class", 0);
 
         assert_eq!(
             *calls.lock().unwrap(),
             [Call::Apply("DP-1", 1.5), Call::Apply("HDMI-A-1", 1.5)]
+        );
+    }
+
+    #[test]
+    fn disabling_the_active_profile_restores_the_desktop() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("game.class", 0);
+
+        let mut updated = daemon.profiles.clone();
+        updated.profiles[0].enabled = false;
+        daemon.replace_profiles(updated);
+
+        assert_eq!(daemon.current, None);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Reset]
         );
     }
 }

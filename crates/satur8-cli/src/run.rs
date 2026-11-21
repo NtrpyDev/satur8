@@ -258,6 +258,7 @@ mod tests {
             profiles: vec![
                 Profile {
                     name: "named".into(),
+                    enabled: true,
                     saturation: 1.4,
                     match_rule: MatchRule {
                         exe: Some("named-exe".into()),
@@ -268,6 +269,7 @@ mod tests {
                 },
                 Profile {
                     name: "auto".into(),
+                    enabled: true,
                     saturation: 1.8,
                     match_rule: MatchRule {
                         exe: Some("auto-game".into()),

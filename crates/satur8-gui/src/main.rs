@@ -10,7 +10,6 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod proc;
 mod steam;
 
 use std::cell::RefCell;
@@ -18,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use satur8_backend::{all_outputs, select_backend, RestoreGuard};
+use satur8_core::proc;
 use satur8_core::{Backend, MatchRule, Profile, Profiles, Saturation};
 use serde::{Deserialize, Serialize};
 use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
@@ -226,15 +226,16 @@ fn main() -> Result<(), slint::PlatformError> {
         let state = state.clone();
         let activity = activity.clone();
         move |i, enabled| {
-            // Editing a profile only saves config - it never touches the live
-            // desktop. The profile applies during the game via the launch wrapper.
-            let st = state.borrow();
-            let name = st
-                .profiles
-                .profiles
-                .get(i as usize)
-                .map(|p| p.name.clone())
-                .unwrap_or_default();
+            let name = {
+                let mut st = state.borrow_mut();
+                let Some(profile) = st.profiles.profiles.get_mut(i as usize) else {
+                    return;
+                };
+                profile.enabled = enabled;
+                let name = profile.name.clone();
+                save(&st.profiles);
+                name
+            };
             log(
                 &activity,
                 false,
@@ -463,7 +464,7 @@ fn rebuild_games(model: &VecModel<GameRow>, profiles: &Profiles) {
                 name: p.name.clone().into(),
                 exe: exe.into(),
                 percent: sat_to_percent(p.saturation),
-                enabled: true,
+                enabled: p.enabled,
                 accent: tile_color(&p.name),
                 initial: p
                     .name
@@ -640,6 +641,7 @@ fn add_or_update(profiles: &mut Profiles, exe: &str, app_id: Option<u32>, satura
     }
     profiles.profiles.push(Profile {
         name,
+        enabled: true,
         saturation,
         match_rule: MatchRule {
             exe: Some(exe.to_string()),
@@ -682,12 +684,29 @@ fn load_gui_config() -> GuiConfig {
 }
 fn save(profiles: &Profiles) {
     let dir = config_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    if let Ok(toml) = profiles.to_toml() {
-        if std::fs::write(dir.join("profiles.toml"), toml).is_ok() {
-            reload_daemon_profiles();
-        }
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        eprintln!("satur8-gui: failed to create {}: {error}", dir.display());
+        return;
     }
+    let Ok(toml) = profiles.to_toml() else {
+        eprintln!("satur8-gui: failed to serialize profiles");
+        return;
+    };
+    let path = dir.join("profiles.toml");
+    let temporary = dir.join(format!(".profiles.toml.{}.tmp", std::process::id()));
+    if let Err(error) = std::fs::write(&temporary, toml) {
+        eprintln!(
+            "satur8-gui: failed to write {}: {error}",
+            temporary.display()
+        );
+        return;
+    }
+    if let Err(error) = std::fs::rename(&temporary, &path) {
+        let _ = std::fs::remove_file(&temporary);
+        eprintln!("satur8-gui: failed to replace {}: {error}", path.display());
+        return;
+    }
+    reload_daemon_profiles();
 }
 fn save_gui_config(config: &GuiConfig) {
     let dir = config_dir();

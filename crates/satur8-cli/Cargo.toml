@@ -19,3 +19,4 @@ satur8-gamescope = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 libc = { workspace = true }
+zbus = { workspace = true }
