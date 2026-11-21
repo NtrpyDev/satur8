@@ -4,7 +4,6 @@
 Outputs, all written under assets/readme/:
   hero.png            1200x630 project hero with wordmark and a before/after panel
   before-after.png    1200x600 split scene, normal vs Satur8-boosted saturation
-  demo.gif            60fps loop showing detect -> apply -> restore
   architecture.svg    focus -> match -> backend -> output -> restore diagram
 
 The scene is synthetic so no copyrighted game art is used. Saturation changes
@@ -14,15 +13,11 @@ what the tool does.
 
 The wordmark uses Clash Display (bundled in scripts/fonts/, converted from the
 website font) with the spectrum-gradient "8" from the site brand, so the README
-matches satur8.app. The demo GIF is encoded with ffmpeg. No network access is
-required.
+matches satur8.app. No network access is required.
 """
 
 import math
 import os
-import shutil
-import subprocess
-import tempfile
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
@@ -352,146 +347,81 @@ def make_before_after():
 # ---------------------------------------------------------------------------
 # hero.png
 # ---------------------------------------------------------------------------
+def rich_lines(draw, runs, max_w):
+    """Wrap (text, font, fill) runs into lines of (word, font, fill) no wider than max_w."""
+    lines, line, width = [], [], 0
+    for text, fnt, fill in runs:
+        for word in text.split():
+            w = draw.textlength(word + " ", font=fnt)
+            if line and width + draw.textlength(word, font=fnt) > max_w:
+                lines.append(line)
+                line, width = [], 0
+            line.append((word, fnt, fill))
+            width += w
+    if line:
+        lines.append(line)
+    return lines
+
+
 def make_hero():
+    """The satur8.app hero as a banner: wordmark and lead on the left, a glass
+    panel with the before/after scene and its slider on the right."""
     W, H = 1200, 630
     img = site_background(W, H)
+
+    pad = 64
+    draw_wordmark(img, pad, 118, 148)
     d = ImageDraw.Draw(img, "RGBA")
 
-    pad = 72
-    draw_wordmark(img, pad, 92, 116)
-    d = ImageDraw.Draw(img, "RGBA")
+    # Lead, worded as on the site: soft text with one bright phrase.
+    soft = (196, 204, 217)
+    runs = [
+        ("Per-game color that", F_REG(25), soft),
+        ("turns up the moment a game grabs focus,", F_BOLD(25), TEXT),
+        ("then hands your desktop back the second you tab out.", F_REG(25), soft),
+    ]
+    y = 318
+    for line in rich_lines(d, runs, 520):
+        x = pad + 4
+        for word, fnt, fill in line:
+            d.text((x, y), word, font=fnt, fill=fill)
+            x += d.textlength(word + " ", font=fnt)
+        y += 38
 
-    d.text((pad + 4, 244), "Per-game digital vibrance for Linux",
-           font=F_MED(30), fill=CYAN_2)
-    d.text((pad + 4, 304), "Boost saturation when your game is focused.",
-           font=F_REG(23), fill=TEXT)
-    d.text((pad + 4, 338), "Restore your desktop when you leave.",
-           font=F_REG(23), fill=MUTED)
-
-    d.text((pad + 4, 410), "SATURATION", font=F_MONO_B(15), fill=MUTED)
-    slider(d, pad + 4, 450, 300, 0.78, "1.75x")
-
-    cx, cy, ch = pad + 4, 512, 40
+    cx, cy, ch = pad + 4, y + 30, 40
     for c in ["No injection", "No overlay", "No Vulkan layer"]:
         w = pill(d, cx, cy, ch, c, F_MED(17))
-        cx += w + 16
+        cx += w + 14
 
-    # Right-side before/after scene panel.
-    pw, ph = 470, 360
-    px, py = W - pw - 64, (H - ph) // 2 - 6
-    scene = base_scene(pw, ph)
-    left = satur(scene, 1.0).crop((0, 0, pw // 2, ph))
-    right = satur(scene, 1.75).crop((pw // 2, 0, pw, ph))
-    panel = Image.new("RGB", (pw, ph), INK)
-    panel.paste(left, (0, 0))
-    panel.paste(right, (pw // 2, 0))
-    pdv = ImageDraw.Draw(panel, "RGBA")
-    pdv.rectangle([pw // 2 - 1, 0, pw // 2 + 1, ph], fill=CYAN + (255,))
-    label_box(pdv, "Default", 16, ph - 28, "l", F_BOLD(18), TEXT)
-    label_box(pdv, "Satur8", pw - 16, ph - 28, "r", F_BOLD(18), CYAN_2)
-    panel = rounded(panel, 16)
-    border = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
-    ImageDraw.Draw(border).rounded_rectangle(
-        [0, 0, pw - 1, ph - 1], radius=16, outline=(60, 68, 82), width=2)
-    panel = Image.alpha_composite(panel, border)
-    img.alpha_composite(panel, (px, py))
+    # Right: the site's glass panel, a thin spectrum line across its top.
+    pw, ph = 500, 442
+    px, py = W - pw - 56, (H - ph) // 2
+    card = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+    cd = ImageDraw.Draw(card, "RGBA")
+    cd.rounded_rectangle([0, 0, pw - 1, ph - 1], radius=26, fill=(16, 19, 26, 235),
+                         outline=(233, 240, 255, 36), width=1)
+    line = gradient_fill(pw - 52, 3, SPECTRUM, 90).convert("RGBA")
+    card.alpha_composite(line, (26, 0))
+
+    inset = 22
+    sw, sh = pw - inset * 2, 300
+    scene = base_scene(sw, sh)
+    split = Image.new("RGB", (sw, sh), INK)
+    split.paste(satur(scene, 1.0).crop((0, 0, sw // 2, sh)), (0, 0))
+    split.paste(satur(scene, 1.75).crop((sw // 2, 0, sw, sh)), (sw // 2, 0))
+    sd = ImageDraw.Draw(split, "RGBA")
+    sd.rectangle([sw // 2 - 1, 0, sw // 2 + 1, sh], fill=CYAN + (255,))
+    label_box(sd, "Default", 14, sh - 28, "l", F_BOLD(17), TEXT)
+    label_box(sd, "Satur8", sw - 14, sh - 28, "r", F_BOLD(17), CYAN_2)
+    card.alpha_composite(rounded(split, 14), (inset, inset + 4))
+
+    cd = ImageDraw.Draw(card, "RGBA")
+    row = inset + 4 + sh + 34
+    cd.text((inset + 2, row), "SATURATION", font=F_MONO_B(14), fill=MUTED)
+    slider(cd, inset + 2, row + 36, pw - inset * 2 - 96, 0.78, "1.75x")
+    img.alpha_composite(card, (px, py))
 
     return img.convert("RGB")
-
-
-# ---------------------------------------------------------------------------
-# demo.gif (60fps via ffmpeg)
-# ---------------------------------------------------------------------------
-def hud(scene, status, sat_t, sat_label, dot=CYAN):
-    W, H = scene.size
-    img = scene.convert("RGBA")
-    d = ImageDraw.Draw(img, "RGBA")
-    bar_h = 88
-    bar_cy = H - bar_h // 2
-    d.rectangle([0, H - bar_h, W, H], fill=(7, 8, 11, 215))
-    d.rectangle([0, H - bar_h, W, H - bar_h + 2], fill=CYAN + (180,))
-    d.ellipse([24, bar_cy - 7, 38, bar_cy + 7], fill=dot)
-    d.text((52, bar_cy), status, font=F_BOLD(22), fill=TEXT, anchor="lm")
-    slider(d, W - 360, bar_cy - 3, 240, sat_t, sat_label)
-    # Wordmark watermark.
-    d.text((22, 30), "Satur", font=F_BOLD(26), fill=(243, 246, 251, 235), anchor="lm")
-    sw = d.textlength("Satur", font=F_BOLD(26))
-    d.text((22 + sw, 30), "8", font=F_BOLD(26), fill=CYAN + (255,), anchor="lm")
-    return img.convert("RGB")
-
-
-def make_demo():
-    W, H = 800, 440
-    scene = base_scene(W, H)
-    fps = 60
-
-    # Saturation keyframes (time seconds, factor) with eased ramps.
-    kf = [(0.0, 1.0), (1.3, 1.0), (2.0, 1.75), (3.0, 1.75),
-          (3.5, 1.75), (4.2, 1.0), (4.8, 1.0)]
-    spans = [
-        (0.0, 0.7, "Desktop idle", MUTED),
-        (0.7, 1.3, "cs2 focused, profile matched", CYAN),
-        (1.3, 2.0, "Applying saturation", CYAN),
-        (2.0, 3.0, "Saturation applied", CYAN),
-        (3.0, 3.5, "Switched away from game", AMBER),
-        (3.5, 4.2, "Restoring desktop", CYAN),
-        (4.2, 4.8, "Desktop restored", CYAN),
-    ]
-    dur = kf[-1][0]
-    nframes = int(round(dur * fps))
-
-    def factor_at(t):
-        for i in range(len(kf) - 1):
-            t0, f0 = kf[i]
-            t1, f1 = kf[i + 1]
-            if t0 <= t <= t1:
-                lt = 0 if t1 == t0 else (t - t0) / (t1 - t0)
-                lt = lt * lt * (3 - 2 * lt)  # smoothstep
-                return f0 + (f1 - f0) * lt
-        return kf[-1][1]
-
-    def span_at(t):
-        for s in spans:
-            if s[0] <= t < s[1]:
-                return s[2], s[3]
-        return spans[-1][2], spans[-1][3]
-
-    def slider_t(v):
-        return max(0.0, min(1.0, (v - 0.8) / (2.0 - 0.8)))
-
-    # Cache rendered frames by quantized factor so we do not re-enhance 288x.
-    cache = {}
-    tmp = tempfile.mkdtemp(prefix="satur8demo_")
-    try:
-        for i in range(nframes):
-            t = i / fps
-            fac = round(factor_at(t), 3)
-            status, dot = span_at(t)
-            key = (fac, status, dot)
-            if key not in cache:
-                cache[key] = hud(satur(scene, fac), status, slider_t(fac), f"{fac:.2f}x", dot)
-            cache[key].save(os.path.join(tmp, f"f{i:04d}.png"))
-        frames_in = os.path.join(tmp, "f%04d.png")
-        subprocess.run([
-            "ffmpeg", "-y", "-loglevel", "error", "-framerate", str(fps),
-            "-i", frames_in,
-            "-filter_complex",
-            "split[s0][s1];[s0]palettegen=stats_mode=diff[p];"
-            "[s1][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle",
-            "-loop", "0", os.path.join(OUT, "demo.gif"),
-        ], check=True)
-        # H.264 MP4 for autoplay-loop <video> in the README (avoids GitHub's
-        # gif player overlay and autoplays inline).
-        subprocess.run([
-            "ffmpeg", "-y", "-loglevel", "error", "-framerate", str(fps),
-            "-i", frames_in,
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            "-movflags", "+faststart", "-an",
-            os.path.join(OUT, "demo.mp4"),
-        ], check=True)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +438,7 @@ def make_architecture():
     bw, bh, gap = 200, 86, 56
     x0, y0 = 30, 60
     total_w = len(boxes) * bw + (len(boxes) - 1) * gap + 60
-    H = 320
+    H = 250
 
     def esc(s):
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -576,94 +506,9 @@ def make_architecture():
         f.write("\n".join(parts))
 
 
-def _wrap(draw, text, font, max_w):
-    words, lines, cur = text.split(), [], ""
-    for w in words:
-        t = (cur + " " + w).strip()
-        if draw.textlength(t, font=font) <= max_w:
-            cur = t
-        else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
-    return lines
-
-
-def _icon_sliders(d, x, y, s, c):
-    for i, frac in enumerate([0.7, 0.4, 0.85]):
-        yy = y + i * (s // 2)
-        d.line([(x, yy), (x + s, yy)], fill=c + (90,), width=3)
-        kx = x + int(s * frac)
-        d.ellipse([kx - 5, yy - 5, kx + 5, yy + 5], fill=c + (255,))
-
-
-def _icon_shield(d, x, y, s, c):
-    cx = x + s // 2
-    pts = [(cx, y), (x + s, y + s * 0.22), (x + s, y + s * 0.55),
-           (cx, y + s), (x, y + s * 0.55), (x, y + s * 0.22)]
-    d.polygon(pts, outline=c + (255,), width=3)
-    d.line([(cx - s * 0.22, y + s * 0.5), (cx - s * 0.04, y + s * 0.66),
-            (cx + s * 0.26, y + s * 0.32)], fill=c + (255,), width=3, joint="curve")
-
-
-def _icon_chip(d, x, y, s, c):
-    d.rounded_rectangle([x, y, x + s, y + s], radius=6, outline=c + (255,), width=3)
-    inset = int(s * 0.28)
-    d.rounded_rectangle([x + inset, y + inset, x + s - inset, y + s - inset],
-                        radius=3, outline=c + (200,), width=2)
-    for i in range(3):
-        px = x + int(s * (0.3 + 0.2 * i))
-        d.line([(px, y - 6), (px, y)], fill=c + (255,), width=3)
-        d.line([(px, y + s), (px, y + s + 6)], fill=c + (255,), width=3)
-        d.line([(x - 6, px), (x, px)], fill=c + (255,), width=3)
-        d.line([(x + s, px), (x + s + 6, px)], fill=c + (255,), width=3)
-
-
-def make_why():
-    W, H = 1200, 420
-    img = site_background(W, H, grid=False)
-    d = ImageDraw.Draw(img, "RGBA")
-    cards = [
-        ("Per-game profiles",
-         "Tune saturation per game instead of changing your whole desktop every "
-         "time. Profiles match by executable name, window class, or Steam AppID.",
-         _icon_sliders),
-        ("Game-safe approach",
-         "Satur8 works outside the game process. It does not inject code, hook "
-         "rendering APIs, or require an overlay. It changes the display pipeline "
-         "after the game has rendered.",
-         _icon_shield),
-        ("Native Linux backends",
-         "Uses the compositor, driver, or display color path that fits your "
-         "session, across both Wayland and X11.",
-         _icon_chip),
-    ]
-    margin, gap = 40, 24
-    cw = (W - margin * 2 - gap * 2) // 3
-    ch = H - margin * 2
-    title_f, body_f = F_BOLD(27), F_REG(18)
-    for i, (title, body, icon) in enumerate(cards):
-        x = margin + i * (cw + gap)
-        y = margin
-        d.rounded_rectangle([x, y, x + cw, y + ch], radius=14,
-                            fill=(14, 17, 23, 235), outline=(30, 37, 50, 255), width=1)
-        pad = 26
-        icon(d, x + pad, y + pad + 4, 30, VIOLET)
-        d.text((x + pad, y + pad + 58), title, font=title_f, fill=TEXT)
-        ty = y + pad + 100
-        for ln in _wrap(d, body, body_f, cw - pad * 2):
-            d.text((x + pad, ty), ln, font=body_f, fill=MUTED)
-            ty += 27
-    return img.convert("RGB")
-
-
 def main():
     make_hero().save(os.path.join(OUT, "hero.png"))
     make_before_after().convert("RGB").save(os.path.join(OUT, "before-after.png"))
-    make_why().save(os.path.join(OUT, "why-satur8.png"))
-    make_demo()
     make_architecture()
     print("wrote:", ", ".join(sorted(os.listdir(OUT))))
 
