@@ -75,7 +75,9 @@ cd satur8-*-linux-x86_64
 packaging/install.sh
 ```
 
-For a system-wide KWin effect install:
+The installer needs no root. On KDE Plasma it places the KWin effect in your home directory and adds that directory to KWin's plugin search path, which KWin reads at login, so log out and back in once after the first install.
+
+To use the effect without logging out, install it to the system plugin directory instead (uses `sudo`):
 
 ```sh
 packaging/install.sh --system
@@ -202,7 +204,10 @@ Inspect the environment and backend:
 satur8 status       # environment, chosen backend, and current state
 satur8 doctor       # diagnose backend availability
 satur8 outputs      # list the outputs the active backend can target
+satur8 repair       # rebuild the KWin effect if the running KWin rejects it
 ```
+
+KWin only loads an effect built for its exact version, so a KWin update used to break Satur8 until you reinstalled it. The focus daemon now runs `satur8 repair` at every login: when KWin rejects the effect, it rebuilds it from the installed source in a few seconds. That needs `cmake`, a C++ compiler, and the Qt 6 and KWin development files. `satur8 doctor` shows which KWin version each installed copy of the effect was built for.
 
 Manage per-game profiles:
 
@@ -210,6 +215,8 @@ Manage per-game profiles:
 satur8 profile add cs2 1.75 --exe cs2 --steam-app-id 730
 satur8 profile list
 satur8 profile show cs2
+satur8 profile disable cs2
+satur8 profile enable cs2
 satur8 profile remove cs2
 satur8 profile path
 ```
