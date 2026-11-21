@@ -127,29 +127,47 @@ build_binaries() {
     bin_src="$repo/target/release"
 }
 
+# Whether this machine has KWin at all. The effect only matters on KDE Plasma;
+# GNOME, Hyprland, NVIDIA X11 and gamescope sessions use other backends.
+kwin_present() {
+    command -v kwin_wayland >/dev/null 2>&1 ||
+    command -v kwin_x11 >/dev/null 2>&1 ||
+    [ -f /usr/include/kwin/config-kwin.h ]
+}
+
+# Build the effect for the installed KWin. Returns non-zero, with the reason in
+# effect_skip_reason, when it cannot: a missing effect must never stop the rest
+# of Satur8 from installing. (This runs inside an `if`, where `set -e` is off,
+# so every step checks its own result.)
 build_effect() {
+    effect_skip_reason=""
     if [ ! -f "$repo/assets/kwin-effect/CMakeLists.txt" ]; then
-        echo "the bundled KWin effect is incompatible and this archive lacks its source" >&2
-        echo "install Satur8 from a distro package or use a release archive that can rebuild for this KWin version" >&2
-        exit 1
+        effect_skip_reason="the bundled effect does not match this KWin and this archive lacks the effect source"
+        return 1
     fi
     for command in cmake c++; do
         if ! command -v "$command" >/dev/null 2>&1; then
-            echo "cannot rebuild the KWin effect: missing $command" >&2
-            exit 1
+            effect_skip_reason="missing $command"
+            return 1
         fi
     done
     if [ ! -f /usr/include/kwin/config-kwin.h ]; then
-        echo "cannot rebuild the KWin effect: KWin development headers are not installed" >&2
-        exit 1
+        effect_skip_reason="the KWin development headers are not installed"
+        return 1
     fi
     say "Building the KWin effect"
     local effect_build="$repo/target/kwin-effect-install"
-    cmake --fresh -S "$repo/assets/kwin-effect" -B "$effect_build" \
-        -DCMAKE_BUILD_TYPE=Release >/dev/null
-    cmake --build "$effect_build" >/dev/null
+    if ! cmake --fresh -S "$repo/assets/kwin-effect" -B "$effect_build" \
+        -DCMAKE_BUILD_TYPE=Release >/dev/null ||
+        ! cmake --build "$effect_build" >/dev/null; then
+        effect_skip_reason="the effect failed to compile against the installed KWin"
+        return 1
+    fi
+    if ! check_effect_abi "$effect_build/satur8.so" >/dev/null 2>&1; then
+        effect_skip_reason="the rebuilt effect does not match the installed KWin"
+        return 1
+    fi
     effect_so="$effect_build/satur8.so"
-    check_effect_abi "$effect_so" >/dev/null
 }
 
 prepare_artifacts() {
@@ -160,15 +178,24 @@ prepare_artifacts() {
         build_binaries
     fi
 
+    # The KWin effect is optional: no KWin, or no way to build a matching
+    # effect, skips it and installs everything else.
+    effect_so=""
+    effect_skip_reason=""
     local prebuilt_effect="$prebuilt/kwin/satur8.so"
-    if [ -f "$prebuilt_effect" ] && check_effect_abi "$prebuilt_effect" >/dev/null 2>&1; then
+    if ! kwin_present; then
+        say "KWin not found: skipping the KWin effect (only KDE Plasma uses it)"
+    elif [ -f "$prebuilt_effect" ] && check_effect_abi "$prebuilt_effect" >/dev/null 2>&1; then
         say "Using bundled KWin effect for ABI $(runtime_kwin_abi)"
         effect_so="$prebuilt_effect"
     else
         if [ -f "$prebuilt_effect" ]; then
             say "Bundled KWin effect does not match KWin $(runtime_kwin_abi); rebuilding locally"
         fi
-        build_effect
+        if ! build_effect; then
+            effect_so=""
+            say "Skipping the KWin effect: $effect_skip_reason"
+        fi
     fi
 }
 
@@ -186,7 +213,9 @@ install_all() {
     [ -f "$bin_src/satur8-gui" ] && \
         install -m755 "$bin_src/satur8-gui" "$bindir/satur8-gui"
 
-    if [ "$mode" = system ]; then
+    if [ -z "$effect_so" ]; then
+        : # no effect to install on this machine; see prepare_artifacts
+    elif [ "$mode" = system ]; then
         say "Installing KWin effect to $qt_plugin_sys (sudo)"
         sudo install -Dm755 "$effect_so" "$qt_plugin_sys/satur8.so"
         if [ -f "$qt_plugin_user/satur8.so" ]; then
@@ -238,6 +267,13 @@ Installed. Next steps:
       kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
       qdbus6 org.kde.KWin /KWin reconfigure
 EOF
+
+    if [ -n "$effect_skip_reason" ]; then
+        echo
+        echo "NOTE: the KWin effect was not installed ($effect_skip_reason)."
+        echo "  Everything else is installed. On KDE Plasma, install cmake, a C++"
+        echo "  compiler, and the Qt 6 and KWin development files, then run: satur8 repair"
+    fi
 
     resume_runtime
     trap - EXIT
