@@ -7,7 +7,7 @@
 # the crates vendored instead, because Koji builds offline.
 
 Name:           satur8
-Version:        0.3.3
+Version:        0.3.4
 Release:        1%{?dist}
 Summary:        Per-game digital vibrance for Linux
 
@@ -26,6 +26,8 @@ BuildRequires:  gcc-c++
 BuildRequires:  cmake
 BuildRequires:  extra-cmake-modules
 BuildRequires:  qt6-qtbase-devel
+# KWin 6.8 headers include qqmlregistration.h, so the effect links Qt6::Qml.
+BuildRequires:  qt6-qtdeclarative-devel
 BuildRequires:  kf6-kcoreaddons-devel
 BuildRequires:  kf6-kconfig-devel
 BuildRequires:  kwin-devel
@@ -43,6 +45,17 @@ BuildRequires:  systemd-rpm-macros
 # runtime. The other backends only matter on their own desktops, so they are
 # weak dependencies rather than hard ones.
 Recommends:     kwin-wayland
+# KWin only loads an effect built for its exact version, so `satur8 repair`
+# rebuilds it in the user's home after a KWin update. That needs the same
+# toolchain the effect was built with.
+Recommends:     cmake
+Recommends:     gcc-c++
+Recommends:     kwin-devel
+Recommends:     qt6-qtbase-devel
+Recommends:     qt6-qtdeclarative-devel
+Recommends:     kf6-kcoreaddons-devel
+Recommends:     kf6-kconfig-devel
+Recommends:     libepoxy-devel
 Suggests:       gnome-shell
 Suggests:       gamescope
 
@@ -82,6 +95,14 @@ install -Dm0755 target/release/satur8-gui    %{buildroot}%{_bindir}/satur8-gui
 install -Dm0755 build-kwin/satur8.so \
     %{buildroot}%{_qt6_plugindir}/kwin/effects/plugins/satur8.so
 
+# Effect source, so `satur8 repair` can rebuild it after a KWin update, and the
+# environment file that lets KWin find that per-user rebuild.
+for f in CMakeLists.txt metadata.json satur8_effect.cpp satur8_effect.h; do
+    install -Dm0644 assets/kwin-effect/$f %{buildroot}%{_datadir}/satur8/kwin-effect/$f
+done
+install -Dm0644 packaging/60-satur8.conf \
+    %{buildroot}%{_prefix}/lib/environment.d/60-satur8.conf
+
 # KWin focus-forwarder script.
 install -d %{buildroot}%{_datadir}/kwin/scripts/satur8-focus
 cp -r assets/kwin-script/. %{buildroot}%{_datadir}/kwin/scripts/satur8-focus/
@@ -96,11 +117,11 @@ install -Dm0644 assets/gamescope/Satur8.fx \
     %{buildroot}%{_datadir}/gamescope/reshade/Shaders/Satur8.fx
 
 # systemd user unit. The shipped unit points at the per-user tarball install
-# (~/.local/bin); for the packaged install the daemon binary is in %{_bindir},
-# so rewrite ExecStart to the packaged path. (%%h is the literal text in the
-# source file, not an rpm macro.)
+# (~/.local/bin); for the packaged install the binaries are in %{_bindir}, so
+# rewrite those paths. (%%h is the literal text in the source file, not an rpm
+# macro.)
 install -d %{buildroot}%{_userunitdir}
-sed 's|%%h/.local/bin/satur8-daemon|%{_bindir}/satur8-daemon|' \
+sed 's|%%h/.local/bin/|%{_bindir}/|g' \
     packaging/satur8-daemon.service \
     > %{buildroot}%{_userunitdir}/satur8-daemon.service
 
@@ -115,6 +136,8 @@ install -Dm0644 packaging/satur8.desktop \
 %{_bindir}/satur8-tray
 %{_bindir}/satur8-gui
 %{_qt6_plugindir}/kwin/effects/plugins/satur8.so
+%{_datadir}/satur8/
+%{_prefix}/lib/environment.d/60-satur8.conf
 %{_datadir}/kwin/scripts/satur8-focus/
 %{_datadir}/gnome-shell/extensions/satur8@satur8.github.io/
 %{_datadir}/gamescope/reshade/Shaders/Satur8.fx

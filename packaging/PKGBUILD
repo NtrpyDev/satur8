@@ -1,12 +1,14 @@
 # Maintainer: Satur8 <ntrpydev@pm.me>
 pkgname=satur8
-pkgver=0.3.3
+pkgver=0.3.4
 pkgrel=1
 pkgdesc="Per-game digital vibrance for Linux: compositor/scanout saturation boost, never injected into the game"
 arch=('x86_64')
 url="https://github.com/NtrpyDev/satur8"
 license=('GPL-3.0-or-later')
-depends=('fontconfig' 'freetype2' 'gcc-libs' 'glibc')
+# cmake and gcc are runtime dependencies on purpose: KWin only loads an effect
+# built for its exact version, so `satur8 repair` rebuilds it after KWin updates.
+depends=('fontconfig' 'freetype2' 'gcc-libs' 'glibc' 'cmake' 'gcc')
 # KWin backend (effect): kwin at runtime; build needs the KDE/KWin SDK.
 optdepends=('kwin: KDE Plasma Wayland backend (saturation effect)'
             'gnome-shell: GNOME Wayland backend (Shell extension)'
@@ -14,7 +16,7 @@ optdepends=('kwin: KDE Plasma Wayland backend (saturation effect)'
             'nvidia-settings: NVIDIA X11 Digital Vibrance backend')
 makedepends=('rust' 'cmake' 'kwin' 'extra-cmake-modules' 'qt6-base' 'kcoreaddons' 'kconfig')
 source=("$pkgname-v$pkgver-source.tar.gz::$url/releases/download/v$pkgver/$pkgname-v$pkgver-source.tar.gz")
-sha256sums=('9edc70b28e6a02e8c46790a56068745e10b624752ea818003f8a91f5c206f797')
+sha256sums=('9ff4aae0997b591d5b12384eaba3ec3b3e96ace31e7874e1af7289e08f6705d2')
 
 build() {
     cd "$pkgname-$pkgver"
@@ -36,6 +38,13 @@ package() {
     install -Dm755 build-kwin/satur8.so \
         "$pkgdir/usr/lib/qt6/plugins/kwin/effects/plugins/satur8.so"
 
+    # Effect source, so `satur8 repair` can rebuild it after a KWin update, and
+    # the environment file that lets KWin find that per-user rebuild.
+    for f in CMakeLists.txt metadata.json satur8_effect.cpp satur8_effect.h; do
+        install -Dm644 "assets/kwin-effect/$f" "$pkgdir/usr/share/satur8/kwin-effect/$f"
+    done
+    install -Dm644 packaging/60-satur8.conf "$pkgdir/usr/lib/environment.d/60-satur8.conf"
+
     # KWin focus-forwarder script.
     install -d "$pkgdir/usr/share/kwin/scripts/satur8-focus"
     cp -r assets/kwin-script/. "$pkgdir/usr/share/kwin/scripts/satur8-focus/"
@@ -50,9 +59,9 @@ package() {
         "$pkgdir/usr/share/gamescope/reshade/Shaders/Satur8.fx"
 
     # The shipped unit targets the per-user tarball install (~/.local/bin); for
-    # the packaged install the daemon binary is in /usr/bin, so rewrite ExecStart.
+    # the packaged install the binaries are in /usr/bin, so rewrite those paths.
     install -d "$pkgdir/usr/lib/systemd/user"
-    sed 's|%h/.local/bin/satur8-daemon|/usr/bin/satur8-daemon|' \
+    sed 's|%h/.local/bin/|/usr/bin/|g' \
         packaging/satur8-daemon.service \
         > "$pkgdir/usr/lib/systemd/user/satur8-daemon.service"
     install -Dm644 packaging/satur8.desktop "$pkgdir/usr/share/applications/satur8.desktop"
