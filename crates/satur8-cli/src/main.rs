@@ -17,6 +17,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use satur8_backend::{all_outputs, select_backend};
 use satur8_core::{CostNote, Desktop, Environment, Gpu, Saturation, SessionType};
+use satur8_gamescope::compose::{self, OnScreen};
 use satur8_gamescope::session::{self, ColorState, Focus, Look, X11Root};
 use satur8_kwin::KwinBackend;
 
@@ -680,7 +681,17 @@ fn gamescope_lines(display: &str, root: &X11Root) -> Vec<String> {
         Ok((session::read_color_state(root)?, session::read_focus(root)?))
     };
     match read() {
-        Ok((state, focus)) => gamescope_report(display, gpu, &state, &focus, daemon_running()),
+        Ok((state, focus)) => {
+            let forces_itself = state.pid.and_then(compose::gamescope_forces_itself);
+            gamescope_report(
+                display,
+                gpu,
+                &state,
+                forces_itself,
+                &focus,
+                daemon_running(),
+            )
+        }
         Err(error) => vec![
             format!("  session type : Steam Game Mode (gamescope on {display})"),
             format!("  [!!] couldn't read gamescope's state: {error:#}"),
@@ -706,6 +717,7 @@ fn gamescope_report(
     display: &str,
     gpu: Gpu,
     state: &ColorState,
+    forces_itself: Option<bool>,
     focus: &Focus,
     daemon_running: Option<bool>,
 ) -> Vec<String> {
@@ -752,19 +764,58 @@ fn gamescope_report(
         Some((amount, _, _)) if amount > 0.0 => format!("on (amount {amount:.2})"),
         _ => "off".to_string(),
     };
-    vec![
+    let mut lines = vec![
         format!("  session type : Steam Game Mode (gamescope on {display})"),
         format!("  gpu          : {gpu}"),
         "  preferred    : gamescope".to_string(),
         reachable,
         table,
+    ];
+    lines.extend(screen_line(gpu, state, forces_itself));
+    lines.extend([
         focused,
         service,
         format!(
             "  Steam settings (left alone): vibrancy {vibrancy}, white point {white_point}, \
              night mode {night_mode}"
         ),
-    ]
+    ]);
+    lines
+}
+
+/// Whether Satur8's look reaches the screen, on a GPU where gamescope colors
+/// only the frames it composites (see `satur8_gamescope::compose`). `None` on
+/// AMD, where it always does.
+fn screen_line(gpu: Gpu, state: &ColorState, forces_itself: Option<bool>) -> Option<String> {
+    let loaded = matches!(state.look, Look::Satur8(_));
+    let line = match compose::on_screen(gpu, state.composite_force, forces_itself) {
+        OnScreen::Always => return None,
+        OnScreen::TurnedOffByOther => "  [!!] not on screen in a fullscreen game: something set \
+             GAMESCOPE_COMPOSITE_FORCE to 0, so gamescope shows such a game directly, without \
+             Satur8's look. Satur8 leaves another program's setting alone; remove it with \
+             `DISPLAY=:0 xprop -root -remove GAMESCOPE_COMPOSITE_FORCE`, then run \
+             `satur8 on <strength>`"
+            .to_string(),
+        _ if !loaded => format!(
+            "  [ok] on screen: on this GPU ({gpu}) gamescope colors only frames it composites, \
+             so Satur8 makes it composite every frame while a look is on: one extra GPU pass \
+             per frame, nothing extra while no look is on"
+        ),
+        OnScreen::Composited => format!(
+            "  [ok] on screen: gamescope composites every frame while the look is on \
+             (on this GPU, {gpu}, one extra GPU pass per frame)"
+        ),
+        OnScreen::ComposedByGamescope => {
+            "  [ok] on screen: gamescope composites every frame by its own settings".to_string()
+        }
+        OnScreen::NotForDirectWindows => format!(
+            "  [!!] look set but not on screen in a fullscreen game: on this GPU ({gpu}) \
+             gamescope shows such a game directly, without the look, unless it composites. \
+             Run `satur8 on <strength>` again, or switch away from the game and back, and \
+             Satur8 makes it composite"
+        ),
+    };
+    Some(line)
 }
 
 fn cost_suffix(cost: CostNote) -> &'static str {
@@ -1338,6 +1389,77 @@ mod tests {
         }
     }
 
+    fn nvidia_lines(look: Look, force: Option<u32>, forces_itself: Option<bool>) -> Vec<String> {
+        let state = ColorState {
+            composite_force: force,
+            ..deck_state(look)
+        };
+        gamescope_report(
+            ":0",
+            Gpu::Nvidia,
+            &state,
+            forces_itself,
+            &home(),
+            Some(true),
+        )
+    }
+
+    /// The RTX 3070 Ti under Bazzite, 2026-11-22: a fullscreen game shown
+    /// directly had no look until composition was forced.
+    #[test]
+    fn on_nvidia_the_report_says_whether_the_look_is_on_screen() {
+        let ours = Look::Satur8(satur8_core::Saturation::new(1.75));
+
+        let forced = nvidia_lines(ours.clone(), Some(1), Some(false));
+        assert_eq!(forced.len(), 9);
+        assert_eq!(
+            forced[5],
+            "  [ok] on screen: gamescope composites every frame while the look is on \
+             (on this GPU, NVIDIA (proprietary), one extra GPU pass per frame)"
+        );
+
+        let direct = nvidia_lines(ours.clone(), None, Some(false));
+        assert!(direct[5].starts_with(
+            "  [!!] look set but not on screen in a fullscreen game: on this GPU \
+             (NVIDIA (proprietary)) gamescope shows such a game directly"
+        ));
+        assert!(direct[5].contains("satur8 on <strength>"));
+
+        let by_gamescope = nvidia_lines(ours.clone(), None, Some(true));
+        assert_eq!(
+            by_gamescope[5],
+            "  [ok] on screen: gamescope composites every frame by its own settings"
+        );
+
+        let zero = nvidia_lines(ours, Some(0), Some(true));
+        assert!(zero[5].starts_with("  [!!] not on screen in a fullscreen game: something set"));
+        assert!(zero[5].contains("xprop -root -remove GAMESCOPE_COMPOSITE_FORCE"));
+    }
+
+    #[test]
+    fn on_nvidia_without_a_look_the_report_states_the_cost() {
+        let lines = nvidia_lines(Look::None, None, None);
+        assert_eq!(lines.len(), 9);
+        assert!(lines[5].starts_with("  [ok] on screen: on this GPU (NVIDIA (proprietary))"));
+        assert!(
+            lines[5].contains("one extra GPU pass per frame, nothing extra while no look is on")
+        );
+        // The rest of the report keeps its order.
+        assert_eq!(lines[4], "  [ok] Satur8 table: not loaded");
+        assert_eq!(lines[6], "  [ok] focused app: 769");
+    }
+
+    #[test]
+    fn on_amd_the_report_has_no_screen_line() {
+        let state = ColorState {
+            composite_force: Some(0),
+            ..deck_state(Look::Satur8(satur8_core::Saturation::new(1.75)))
+        };
+        let lines = gamescope_report(":0", Gpu::Amd, &state, None, &home(), Some(true));
+        assert_eq!(lines.len(), 8);
+        assert!(lines.iter().all(|line| !line.contains("on screen")));
+    }
+
     fn home() -> Focus {
         Focus {
             app_id: Some(769),
@@ -1347,7 +1469,14 @@ mod tests {
 
     #[test]
     fn game_mode_report_matches_the_design() {
-        let lines = gamescope_report(":0", Gpu::Amd, &deck_state(Look::None), &home(), Some(true));
+        let lines = gamescope_report(
+            ":0",
+            Gpu::Amd,
+            &deck_state(Look::None),
+            None,
+            &home(),
+            Some(true),
+        );
         assert_eq!(
             lines,
             [
@@ -1367,11 +1496,11 @@ mod tests {
     #[test]
     fn game_mode_report_names_the_loaded_table() {
         let ours = deck_state(Look::Satur8(Saturation::new(1.75)));
-        let lines = gamescope_report(":0", Gpu::Amd, &ours, &home(), Some(true));
+        let lines = gamescope_report(":0", Gpu::Amd, &ours, None, &home(), Some(true));
         assert_eq!(lines[4], "  [ok] Satur8 table: loaded, saturation 1.75");
 
         let foreign = deck_state(Look::Foreign("/home/deck/vivid.cube".into()));
-        let lines = gamescope_report(":0", Gpu::Amd, &foreign, &home(), Some(true));
+        let lines = gamescope_report(":0", Gpu::Amd, &foreign, None, &home(), Some(true));
         assert_eq!(
             lines[4],
             "  [ok] Satur8 table: set by something else: /home/deck/vivid.cube"
@@ -1384,6 +1513,7 @@ mod tests {
             ":0",
             Gpu::Amd,
             &deck_state(Look::None),
+            None,
             &Focus::default(),
             Some(false),
         );
@@ -1392,7 +1522,7 @@ mod tests {
             lines[6],
             "  [..] background service: off (systemctl --user enable --now satur8-daemon)"
         );
-        let lines = gamescope_report(":0", Gpu::Amd, &deck_state(Look::None), &home(), None);
+        let lines = gamescope_report(":0", Gpu::Amd, &deck_state(Look::None), None, &home(), None);
         assert_eq!(
             lines[6],
             "  [..] background service: unknown (session bus unreachable)"
@@ -1406,7 +1536,7 @@ mod tests {
         state.night_mode = Some((0.4, 0.1, 0.9));
         state.sdr_gamut_wideness = None;
         state.virtual_white = None;
-        let lines = gamescope_report(":0", Gpu::Amd, &state, &home(), Some(true));
+        let lines = gamescope_report(":0", Gpu::Amd, &state, None, &home(), Some(true));
         assert!(lines[3].starts_with("  [!!] gamescope reachable (pid 6366), color management off"));
         assert_eq!(
             lines[7],

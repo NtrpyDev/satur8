@@ -1280,14 +1280,7 @@ fn spawn_live_poll(w: slint::Weak<AppWindow>) {
         if STATUS_VISIBLE.load(Ordering::Acquire) {
             let live = status::probe_live();
             let (saturation, note) = match live.applied {
-                Some(sat) => (
-                    percent_text(sat),
-                    if (sat - 1.0).abs() < 1e-3 {
-                        "normal colors, read from the compositor".to_string()
-                    } else {
-                        "read from the compositor".to_string()
-                    },
-                ),
+                Some(sat) => (percent_text(sat), status::applied_note(sat, live.hidden)),
                 None => {
                     // Not readable here: show what should be applied.
                     let profiles = load_profiles(Profiles::default());

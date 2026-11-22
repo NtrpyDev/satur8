@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use satur8_core::{Desktop, Environment, SessionType};
+use satur8_core::{Desktop, Environment, Gpu, SessionType};
 use satur8_kwin::repair::Step as RepairStep;
 use zbus::blocking::Connection;
 
@@ -1052,6 +1052,9 @@ pub struct Live {
     pub applied: Option<f32>,
     /// Steam Game Mode: gamescope's own session was found.
     pub game_mode: bool,
+    /// Steam Game Mode: Satur8's look is loaded but gamescope shows a
+    /// fullscreen game directly, without it (see [`look_hidden`]).
+    pub hidden: bool,
 }
 
 /// Light, read-only poll for the "Right now" card.
@@ -1078,11 +1081,47 @@ pub fn probe_live() -> Live {
     } else if let Some((_, root)) = satur8_gamescope::session::find_session() {
         // Steam Game Mode: the table gamescope has loaded says it.
         live.game_mode = true;
-        live.applied = satur8_gamescope::session::read_color_state(&root)
-            .ok()
-            .and_then(|state| applied_from_look(&state.look));
+        if let Ok(state) = satur8_gamescope::session::read_color_state(&root) {
+            live.applied = applied_from_look(&state.look);
+            live.hidden = look_hidden(
+                Environment::detect().gpu,
+                &state.look,
+                state.composite_force,
+                state
+                    .pid
+                    .and_then(satur8_gamescope::compose::gamescope_forces_itself),
+            );
+        }
     }
     live
+}
+
+/// Whether Satur8's loaded look is kept off the screen in a fullscreen game:
+/// on a GPU where gamescope colors only the frames it composites, with
+/// nothing making it composite.
+pub fn look_hidden(
+    gpu: Gpu,
+    look: &satur8_gamescope::session::Look,
+    composite_force: Option<u32>,
+    forces_itself: Option<bool>,
+) -> bool {
+    use satur8_gamescope::compose::{on_screen, OnScreen};
+    matches!(look, satur8_gamescope::session::Look::Satur8(_))
+        && matches!(
+            on_screen(gpu, composite_force, forces_itself),
+            OnScreen::NotForDirectWindows | OnScreen::TurnedOffByOther
+        )
+}
+
+/// The note under the "Right now" saturation read from the compositor.
+pub fn applied_note(saturation: f32, hidden: bool) -> String {
+    if hidden {
+        "set, but not on screen in a fullscreen game on this GPU: see satur8 doctor".to_string()
+    } else if (saturation - 1.0).abs() < 1e-3 {
+        "normal colors, read from the compositor".to_string()
+    } else {
+        "read from the compositor".to_string()
+    }
 }
 
 /// The saturation gamescope shows, from the look it has loaded: Satur8's
@@ -1942,6 +1981,28 @@ mod tests {
         assert_eq!(describe_active(&live, false), "None, desktop default");
         live.active_profile = Some("ELDEN RING".into());
         assert_eq!(describe_active(&live, true), "ELDEN RING");
+    }
+
+    #[test]
+    fn a_look_gamescope_shows_without_is_reported_as_hidden() {
+        use satur8_gamescope::session::Look;
+        let ours = Look::Satur8(satur8_core::Saturation::new(1.75));
+        assert!(look_hidden(Gpu::Nvidia, &ours, None, Some(false)));
+        assert!(look_hidden(Gpu::Nvidia, &ours, Some(0), Some(true)));
+        assert!(!look_hidden(Gpu::Nvidia, &ours, Some(1), None));
+        assert!(!look_hidden(Gpu::Nvidia, &ours, None, Some(true)));
+        assert!(!look_hidden(Gpu::Amd, &ours, None, None));
+        assert!(!look_hidden(Gpu::Nvidia, &Look::None, None, None));
+
+        assert_eq!(
+            applied_note(1.75, true),
+            "set, but not on screen in a fullscreen game on this GPU: see satur8 doctor"
+        );
+        assert_eq!(applied_note(1.75, false), "read from the compositor");
+        assert_eq!(
+            applied_note(1.0, false),
+            "normal colors, read from the compositor"
+        );
     }
 
     #[test]
