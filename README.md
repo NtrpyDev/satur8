@@ -166,12 +166,12 @@ In Game Mode, Steam shows only programs started from its library, so the app nee
 
 There the app has its own layout for the Deck's screen and controls, not the desktop window made smaller:
 
-- **Everything else** is the first row: Steam's own screens and every game without a row of its own. It is what the desktop app calls Desktop vibrance.
+- **General** is the first row: Steam's own screens and every game without a row of its own. It is what the desktop app calls Desktop vibrance.
 - **Add a game** lists your installed Steam games by name. A game that is running is first and says so. Pick one and it gets a row, matched by its Steam AppID.
-- Each game has a row with its value, an on/off switch, a remove button that asks first, and a wide slider. Tap the track or drag along it; dragging up or down scrolls the page instead.
+- Each game has a row with its value, an on/off switch, a remove button that asks first, and a wide slider. Tap the track or drag along it; dragging up or down scrolls the page instead. A game whose row is switched off shows its normal colors, not the General value.
 - The Deck's buttons work: the D-pad or left stick moves a highlight, A selects (on a slider, A then left and right change it), B goes back or undoes, X turns the game on or off, Y opens the list, L1 and R1 change page, L2 and R2 change the row's slider by one. A bar along the bottom says what the buttons do at that moment.
 
-A game's setting shows while that game is on screen. While Satur8 itself is on screen you see Everything else, so switch back to the game to see its setting.
+A game's setting shows while that game is on screen. While Satur8 itself is on screen you see General, so switch back to the game to see its setting.
 
 The entry's artwork is put in place by `satur8 steam-shortcut artwork`, and by the app the first time it is started from the library; Steam shows new artwork after it restarts. `satur8 steam-shortcut status` says whether the entry is there and with which AppID.
 
@@ -200,7 +200,7 @@ Matching by executable also works for Proton games. Use the Windows executable n
 
 A profile you add or change while the service runs takes effect right away, also for the game that is on screen.
 
-The Steam home screen and games without a profile get `default_saturation` from `~/.config/satur8/profiles.toml`. At 1.0, the default, Satur8 loads nothing there.
+The Steam home screen and games without a profile get `default_saturation` from `~/.config/satur8/profiles.toml`. At 1.0, the default, Satur8 loads nothing there. A game whose profile is disabled gets neither its profile's value nor `default_saturation`: it shows its normal colors (1.0).
 
 ### Automatic switching
 
@@ -333,10 +333,10 @@ The screenshots below show the Satur8 GUI.
 
 On the Main page you can:
 
-- Set the desktop vibrance, which is also the default when no game profile is active, and restore the desktop to normal.
+- Set the desktop vibrance, which games without a profile also get, and restore the desktop to normal.
 - Add a game from one list of your games by name: installed Steam games, with any that is running first. Launchers and other background programs are not listed.
 - Set the saturation level per game.
-- Enable or disable a profile.
+- Enable or disable a profile. A game whose profile is disabled shows its normal colors, not the desktop vibrance.
 
 <img src="assets/readme/gui-status-v036.png" alt="Satur8 status page with health checks and settings" width="900">
 
@@ -392,6 +392,8 @@ satur8 profile enable cs2
 satur8 profile remove cs2
 satur8 profile path
 ```
+
+A disabled profile still belongs to its game: while it is disabled the game shows its normal colors (1.0), not the default saturation. Remove the profile to give the game the default saturation again.
 
 A profile needs at least one match rule: `--exe`, `--window-class`, `--steam-app-id`, or `--steam-game`. `satur8 games` lists the installed Steam games and the profile each one uses (`--json` for scripts). `--steam-game` takes a game's name, part of it, or its AppID, and stores the AppID.
 

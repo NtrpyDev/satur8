@@ -12,7 +12,7 @@ The app in Steam Game Mode: its own layout for the Deck's screen, touch and butt
   could be touched: the desktop slider stopped at +5% and the add button
   could not be reached. In a gamescope session it now opens at exactly the
   screen's size and shows a layout of its own, drawn 640 logical pixels wide
-  (a scale of 2 on a Deck): "Everything else" first (Steam's own screens and
+  (a scale of 2 on a Deck): "General" first (Steam's own screens and
   every game without a row), then one full-width row per game with a wide
   slider, an on/off switch and a remove button that asks first. A tap on a
   slider's track jumps there, a sideways drag changes the value, and a drag
@@ -27,6 +27,18 @@ The app in Steam Game Mode: its own layout for the Deck's screen, touch and butt
   such a program as a gamepad, which the app reads from the kernel's input
   devices directly; it acts on them only while it is the app in front. A
   keyboard works the same way (arrows, Enter, Escape).
+- A game whose row is turned off now shows its normal colors, instead of
+  taking the general saturation. This holds in Steam Game Mode and on a
+  desktop, in the background service and in `satur8 run`. A game with no row
+  at all still gets the general value, and so do the desktop and Steam's own
+  screens. On a setup with a value per output, an off row is normal on the
+  outputs it would change when on: all of them, the ones it lists, or the
+  focused one with `profile_outputs = "focused"`. The first row in Game Mode
+  is now called "General" (it was "Everything else").
+- A profile the v0.5.0 app named after its program (`eldenring` for
+  `eldenring.exe`) shows under its Steam library name ("ELDEN RING") in the
+  app when it carries a Steam AppID. Only what is shown changes; the profile
+  keeps its name in the file and in the commands.
 - "Add game" is one list of your games by name, in both layouts: the
   installed Steam games, with any that is running first and marked. A
   running Steam game is recognized by its Steam AppID and shown under its
