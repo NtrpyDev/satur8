@@ -139,6 +139,38 @@ compositor. We ship our own minimal, single-purpose **saturation** effect
 - Investigate whether recent KWin (6.x) exposes a per-output color/CTM path we
   can use instead of a shader - if so, KDE moves to zero-cost too. Track this.
 
+**A different value per output (since v0.5.0).** Implemented; checked on
+headless KWin with two virtual outputs and software rendering (pixels on
+6.7.3, 6.8.2 and 6.8.3), and on a real KWin 6.8.3 session with three monitors
+the focus script reported the window's monitor as it moved. A different value
+on each of several real monitors has not been seen yet.
+
+- *File.* `profile_outputs` (`"all"`, the default, or `"focused"`) and
+  `[output."NAME"]` tables with their own `default_saturation`, written only
+  when used. Outputs are named by port, as KWin names them.
+- *Resolver.* `crates/satur8-core/src/levels.rs` turns the file, the matched
+  profile, the focused output and whether the backend can target one output
+  into the levels every output shows, plus notes for what could not be done.
+  All rules are pure and table-tested there.
+- *Backends.* `Backend::per_output()` and `apply_levels()`; the defaults keep
+  one value on every output. KWin is per-output when the loaded effect
+  answers the new slots, and DRM CTM sets each CRTC. GNOME, Hyprland,
+  NV-CONTROL and gamescope stay one value for every output, and the reports
+  say so when the file asks for more.
+- *Effect.* A base value plus a table from output name to value, read per
+  window from `EffectWindow::screen()` at draw time, so a monitor plugged in
+  later gets its value with no daemon work. D-Bus: `setOutputSaturation(sd)`,
+  `setSaturations(da{sv})`, `outputSaturations() -> a{sv}`,
+  `outputs() -> a{sv}`. `setSaturation` keeps its meaning and clears the
+  table. An effect without the new slots answers
+  `org.freedesktop.DBus.Error.UnknownMethod`, and the backend falls back to one
+  value with a note.
+- *Focus.* The focus script sends `WindowActivatedOn(class, caption, pid,
+  output)` and reports again when the focused window changes output; until
+  the daemon answers that call it also sends `WindowActivatedPid` first, so an
+  older daemon still follows focus. The daemon handles focus calls in the order
+  they arrive.
+
 **How the effect reaches systems without build tools (since v0.4.1).**
 
 - *The compatibility key.* KWin loads an effect only when its embedded plugin
