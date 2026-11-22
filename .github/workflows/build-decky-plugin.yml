@@ -1,0 +1,73 @@
+name: build decky plugin
+
+# Builds and tests the Satur8 Decky plugin ZIP (decky-plugin/), the file Decky
+# Loader installs on a Steam Deck. No AI, no secrets, nothing published:
+# release.yml attaches the result.
+#
+# decky-plugin/build-zip.sh does everything: it checks the plugin's version
+# against Satur8's, runs the backend's tests, type-checks and builds the panel
+# with the tools pinned in pnpm-lock.yaml, and packs the ZIP.
+#
+# Called by release.yml and ci.yml. It can also be run by hand.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to build; empty means the commit the caller runs on"
+        type: string
+        required: false
+        default: ""
+    outputs:
+      artifact:
+        description: "Name of the artifact that holds satur8-decky-plugin.zip"
+        value: ${{ jobs.build.outputs.artifact }}
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build; empty means the branch this runs on"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: zip
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      artifact: decky-plugin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      # The pnpm version is the one named in decky-plugin/package.json.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: decky-plugin/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: decky-plugin/pnpm-lock.yaml
+
+      - name: Test, build and pack
+        run: decky-plugin/build-zip.sh target/dist
+
+      # DeckyHub lists a plugin whose release has exactly one plugin ZIP, with
+      # one plugin.json inside. The second half is checked by pack-zip.py.
+      - name: One ZIP came out
+        run: |
+          ls -l target/dist
+          [ "$(find target/dist -name '*.zip' | wc -l)" -eq 1 ]
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: decky-plugin
+          path: target/dist/satur8-decky-plugin.zip
+          if-no-files-found: error
