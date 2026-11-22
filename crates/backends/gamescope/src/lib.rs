@@ -12,6 +12,8 @@
 //! Unlike the other backends this is launch-only (it wraps the game's lifetime),
 //! so it is not a `Backend` impl - it's a run strategy used by `satur8 run`.
 
+pub mod look;
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
