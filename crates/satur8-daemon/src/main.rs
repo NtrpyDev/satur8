@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use satur8_backend::{install_signal_handler, select_backend, RestoreGuard};
 use satur8_core::levels::{desktop_picture, profile_outputs_not_connected, profile_picture};
-use satur8_core::{Backend, BackendError, Levels, Note, Profile, Profiles};
+use satur8_core::{Backend, BackendError, Levels, Note, Profile, ProfileOutputs, Profiles};
 use zbus::interface;
 
 const SERVICE: &str = "org.satur8.Daemon";
@@ -44,16 +44,49 @@ fn match_focused<'a>(
         .or_else(|| profiles.match_window_class(window_class))
 }
 
+/// The output a profile's picture is limited to: the focused output, when the
+/// profile follows focus (`profile_outputs = "focused"` and no outputs of its
+/// own), the backend can target one output, and the focus source reported it.
+fn limited_output(
+    profiles: &Profiles,
+    profile: &Profile,
+    focused_output: Option<&str>,
+    per_output: bool,
+) -> Option<String> {
+    let follows_focus =
+        profiles.profile_outputs == ProfileOutputs::Focused && profile.outputs.is_empty();
+    (per_output && follows_focus)
+        .then_some(focused_output)
+        .flatten()
+        .map(str::to_string)
+}
+
+/// What the profile already applied, so a repeated report is a no-op and a
+/// move to another output is a change.
+#[derive(Debug, Clone, Copy, Default)]
+struct Current<'a> {
+    profile: Option<&'a str>,
+    output: Option<&'a str>,
+}
+
 fn decide_focus_action(
-    current: Option<&str>,
+    current: Current,
     window_class: &str,
     exe: Option<&str>,
+    focused_output: Option<&str>,
+    per_output: bool,
     profiles: &Profiles,
 ) -> FocusAction {
     match match_focused(profiles, window_class, exe) {
-        Some(profile) if current == Some(profile.name.as_str()) => FocusAction::None,
+        Some(profile)
+            if current.profile == Some(profile.name.as_str())
+                && current.output
+                    == limited_output(profiles, profile, focused_output, per_output).as_deref() =>
+        {
+            FocusAction::None
+        }
         Some(profile) => FocusAction::Apply(profile.clone()),
-        None if current.is_some() => FocusAction::Restore,
+        None if current.profile.is_some() => FocusAction::Restore,
         None => FocusAction::None,
     }
 }
@@ -131,13 +164,23 @@ impl BackendState {
         }
     }
 
+    /// Whether the active backend can show a different saturation on each
+    /// output; false while no backend is active.
+    fn per_output(&self) -> bool {
+        self.guard
+            .as_ref()
+            .is_some_and(|guard| guard.backend().per_output())
+    }
+
     /// Show `profile` and remember the desktop to put back. Returns what the
-    /// user should be told about the result.
+    /// user should be told about the result, and the output the picture was
+    /// limited to.
     fn apply_profile(
         &mut self,
         profiles: &Profiles,
         profile: &Profile,
-    ) -> Result<Vec<Note>, BackendError> {
+        focused_output: Option<&str>,
+    ) -> Result<(Vec<Note>, Option<String>), BackendError> {
         self.try_detect(profiles);
         let guard = self
             .guard
@@ -145,7 +188,8 @@ impl BackendState {
             .ok_or_else(|| BackendError::Unavailable("no backend is currently reachable".into()))?;
         let per_output = guard.backend().per_output();
         let desktop = desktop_picture(profiles, per_output);
-        let picture = profile_picture(profiles, profile, None, per_output);
+        let picture = profile_picture(profiles, profile, focused_output, per_output);
+        let limited_to = limited_output(profiles, profile, focused_output, per_output);
         let not_connected = if per_output {
             profile_outputs_not_connected(profiles, profile, &guard.backend().outputs())
         } else {
@@ -154,12 +198,13 @@ impl BackendState {
         guard.set_restore_to(desktop.levels);
         guard.backend_mut().apply_levels(&picture.levels)?;
         guard.arm();
-        Ok(desktop
+        let notes = desktop
             .notes
             .into_iter()
             .chain(picture.notes)
             .chain(not_connected)
-            .collect())
+            .collect();
+        Ok((notes, limited_to))
     }
 
     /// Put the desktop back. Returns what the user should be told about it.
@@ -182,12 +227,16 @@ struct Activation {
     class: String,
     /// The pid resolved to its program name when the focus was reported.
     exe: Option<String>,
+    /// The output the focused window is on, when the focus source said.
+    output: Option<String>,
 }
 
 struct Daemon {
     profiles: Profiles,
     backend: Arc<Mutex<BackendState>>,
     current: Option<String>,
+    /// The output the applied profile was limited to, when it was.
+    current_output: Option<String>,
     /// What the focus script last reported: the resolved executable when the
     /// pid could be resolved, otherwise the window class. Read by the GUI.
     last_focused: String,
@@ -209,6 +258,7 @@ impl Daemon {
             profiles,
             backend,
             current: None,
+            current_output: None,
             last_focused: String::new(),
             last_activation: None,
             logged_notes: Vec::new(),
@@ -222,6 +272,7 @@ impl Daemon {
             profiles,
             backend: Arc::new(Mutex::new(state)),
             current: None,
+            current_output: None,
             last_focused: String::new(),
             last_activation: None,
             logged_notes: Vec::new(),
@@ -238,58 +289,83 @@ impl Daemon {
         }
     }
 
+    /// A focus report with no output: the KWin script before per-output
+    /// support, and the gamescope focus thread.
     fn react(&mut self, class: &str, pid: u32) {
-        self.backend
-            .lock()
-            .expect("backend state mutex poisoned")
-            .try_detect(&self.profiles);
+        self.react_on(class, pid, None);
+    }
+
+    /// A focus report, with the output the focused window is on when the
+    /// focus source knows it. A report for the same window on another output
+    /// re-resolves a profile that follows focus.
+    fn react_on(&mut self, class: &str, pid: u32, output: Option<&str>) {
+        let per_output = {
+            let mut backend = self.backend.lock().expect("backend state mutex poisoned");
+            backend.try_detect(&self.profiles);
+            backend.per_output()
+        };
         let exe = (pid != 0).then(|| satur8_core::resolve_exe(pid)).flatten();
         self.last_focused = exe.clone().unwrap_or_else(|| class.to_string());
         self.last_activation = Some(Activation {
             class: class.to_string(),
             exe: exe.clone(),
+            output: output.map(str::to_string),
         });
+        let current = Current {
+            profile: self.current.as_deref(),
+            output: self.current_output.as_deref(),
+        };
         match decide_focus_action(
-            self.current.as_deref(),
+            current,
             class,
             exe.as_deref(),
+            output,
+            per_output,
             &self.profiles,
         ) {
             FocusAction::Apply(profile) => {
                 eprintln!(
-                    "satur8-daemon: '{}' -> profile '{}' ({:.2})",
+                    "satur8-daemon: '{}' -> profile '{}' ({:.2}){}",
                     exe.as_deref().unwrap_or(class),
                     profile.name,
-                    profile.saturation().get()
+                    profile.saturation().get(),
+                    output.map(|o| format!(" on {o}")).unwrap_or_default()
                 );
-                let result = self
-                    .backend
-                    .lock()
-                    .expect("backend state mutex poisoned")
-                    .apply_profile(&self.profiles, &profile);
-                match result {
-                    Ok(notes) => {
-                        self.current = Some(profile.name);
-                        self.log_notes(notes);
-                    }
-                    Err(error) => {
-                        self.current = None;
-                        eprintln!("satur8-daemon: apply failed: {error}");
-                    }
-                }
+                self.show_profile(&profile, output);
             }
             FocusAction::Restore => {
                 eprintln!("satur8-daemon: '{class}' has no profile -> restoring default");
-                self.current = None;
+                self.invalidate_current();
                 self.restore_default();
             }
             FocusAction::None => {}
         }
     }
 
+    /// Apply `profile` for a window on `focused_output`, and remember it.
+    fn show_profile(&mut self, profile: &Profile, focused_output: Option<&str>) {
+        let result = self
+            .backend
+            .lock()
+            .expect("backend state mutex poisoned")
+            .apply_profile(&self.profiles, profile, focused_output);
+        match result {
+            Ok((notes, limited_to)) => {
+                self.current = Some(profile.name.clone());
+                self.current_output = limited_to;
+                self.log_notes(notes);
+            }
+            Err(error) => {
+                self.invalidate_current();
+                eprintln!("satur8-daemon: apply failed: {error}");
+            }
+        }
+    }
+
     /// Forget which profile is applied, so the next focus applies again.
     fn invalidate_current(&mut self) {
         self.current = None;
+        self.current_output = None;
     }
 
     /// Re-evaluate focus from scratch when a focus source (re)connects: apply
@@ -384,11 +460,13 @@ impl Daemon {
         if !backend_active {
             return;
         }
-        let Some((class, exe)) = self
-            .last_activation
-            .as_ref()
-            .map(|activation| (activation.class.clone(), activation.exe.clone()))
-        else {
+        let Some((class, exe, output)) = self.last_activation.as_ref().map(|activation| {
+            (
+                activation.class.clone(),
+                activation.exe.clone(),
+                activation.output.clone(),
+            )
+        }) else {
             return;
         };
 
@@ -409,21 +487,7 @@ impl Daemon {
                         saturation.get()
                     );
                 }
-                let result = self
-                    .backend
-                    .lock()
-                    .expect("backend state mutex poisoned")
-                    .apply_profile(&self.profiles, &profile);
-                match result {
-                    Ok(notes) => {
-                        self.current = Some(name);
-                        self.log_notes(notes);
-                    }
-                    Err(error) => {
-                        self.current = None;
-                        eprintln!("satur8-daemon: apply failed: {error}");
-                    }
-                }
+                self.show_profile(&profile, output.as_deref());
             }
             (None, Some(current)) => {
                 let still_enabled = self
@@ -440,7 +504,7 @@ impl Daemon {
                         "satur8-daemon: active profile '{current}' is disabled or missing -> restoring default"
                     );
                 }
-                self.current = None;
+                self.invalidate_current();
                 self.restore_default();
             }
             (None, None) => {}
@@ -448,7 +512,10 @@ impl Daemon {
     }
 }
 
-#[interface(name = "org.satur8.Daemon")]
+// Focus reports are handled in the order they arrive (`spawn = false`): zbus
+// otherwise gives each call its own task, and two quick reports could then be
+// applied in the wrong order, leaving the profile of the window that lost focus.
+#[interface(name = "org.satur8.Daemon", spawn = false)]
 impl Daemon {
     /// Called on every window activation. Kept for older focus scripts that
     /// cannot report a pid; matching then falls back to the window class.
@@ -463,6 +530,26 @@ impl Daemon {
         self.react(&class, pid.trim().parse::<u32>().unwrap_or(0));
     }
 
+    /// Window activation with the output the window is on, also sent again
+    /// when the focused window moves to another output. `output` is empty
+    /// when the script knows none. Returns true, so a focus script can tell
+    /// this daemon understands the call: an older daemon answers with an error.
+    fn window_activated_on(
+        &mut self,
+        class: String,
+        _caption: String,
+        pid: String,
+        output: String,
+    ) -> bool {
+        let output = output.trim();
+        self.react_on(
+            &class,
+            pid.trim().parse::<u32>().unwrap_or(0),
+            (!output.is_empty()).then_some(output),
+        );
+        true
+    }
+
     /// Re-read the profiles file from disk.
     fn reload(&mut self) {
         self.reload_profiles();
@@ -472,6 +559,13 @@ impl Daemon {
     #[zbus(property)]
     fn active_profile(&self) -> String {
         self.current.clone().unwrap_or_default()
+    }
+
+    /// The output the applied profile is limited to (empty string when it
+    /// changes every output, or none is applied).
+    #[zbus(property)]
+    fn active_output(&self) -> String {
+        self.current_output.clone().unwrap_or_default()
     }
 
     /// The window the focus script last reported (executable or window class;
@@ -1177,6 +1271,123 @@ mod tests {
                 profile: "game".into(),
                 output: "DP-9".into()
             }]
+        );
+    }
+
+    fn following_focus() -> Profiles {
+        Profiles {
+            profile_outputs: ProfileOutputs::Focused,
+            ..profiles()
+        }
+    }
+
+    #[test]
+    fn a_profile_that_follows_focus_changes_only_the_games_output() {
+        let (mut daemon, pictures) = per_output_setup(following_focus());
+
+        assert!(daemon.window_activated_on(
+            "game.class".into(),
+            "Game".into(),
+            "0".into(),
+            "HDMI-A-1".into()
+        ));
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [shown(1.0, &[("HDMI-A-1", 1.5)])]
+        );
+        assert_eq!(daemon.active_output(), "HDMI-A-1");
+        assert!(daemon.logged_notes.is_empty());
+    }
+
+    #[test]
+    fn moving_the_game_to_another_output_moves_the_change() {
+        let (mut daemon, pictures) = per_output_setup(following_focus());
+
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+        daemon.react_on("game.class", 0, Some("DP-1"));
+        // The same report again changes nothing.
+        daemon.react_on("game.class", 0, Some("DP-1"));
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [
+                shown(1.0, &[("HDMI-A-1", 1.5)]),
+                shown(1.0, &[("DP-1", 1.5)])
+            ]
+        );
+        assert_eq!(daemon.active_output(), "DP-1");
+    }
+
+    #[test]
+    fn a_profile_with_outputs_of_its_own_ignores_moves() {
+        let mut profiles = following_focus();
+        profiles.profiles[0].outputs = vec!["DP-1".into()];
+        let (mut daemon, pictures) = per_output_setup(profiles);
+
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+        daemon.react_on("game.class", 0, Some("DP-1"));
+
+        assert_eq!(*pictures.lock().unwrap(), [shown(1.0, &[("DP-1", 1.5)])]);
+        assert_eq!(daemon.active_output(), "");
+    }
+
+    /// An older focus script still calls WindowActivatedPid: no output is
+    /// known, so a profile that follows focus changes every output and the
+    /// user is told why.
+    #[test]
+    fn the_old_method_still_works_without_an_output() {
+        let (mut daemon, pictures) = per_output_setup(following_focus());
+
+        daemon.window_activated_pid("game.class".into(), "Game".into(), "0".into());
+
+        assert_eq!(*pictures.lock().unwrap(), [shown(1.5, &[])]);
+        assert_eq!(
+            daemon.logged_notes,
+            [Note::FocusedOutputUnknown {
+                profile: "game".into()
+            }]
+        );
+        assert_eq!(daemon.current.as_deref(), Some("game"));
+    }
+
+    #[test]
+    fn an_output_reported_on_a_uniform_backend_changes_every_output_once() {
+        let (mut daemon, calls, _) = setup_with(following_focus());
+
+        daemon.window_activated_on(
+            "game.class".into(),
+            "".into(),
+            "0".into(),
+            "HDMI-A-1".into(),
+        );
+        daemon.window_activated_on("game.class".into(), "".into(), "0".into(), "DP-1".into());
+
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
+        assert_eq!(
+            daemon.logged_notes,
+            [Note::ProfileChangesEveryOutput {
+                profile: "game".into()
+            }]
+        );
+        assert_eq!(daemon.active_output(), "");
+    }
+
+    #[test]
+    fn a_reload_keeps_the_games_output() {
+        let (mut daemon, pictures) = per_output_setup(following_focus());
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+
+        let mut updated = daemon.profiles.clone();
+        updated.profiles[0].saturation = 2.0;
+        daemon.replace_profiles(updated);
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [
+                shown(1.0, &[("HDMI-A-1", 1.5)]),
+                shown(1.0, &[("HDMI-A-1", 2.0)])
+            ]
         );
     }
 }
