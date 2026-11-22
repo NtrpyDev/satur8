@@ -4068,7 +4068,7 @@ dependencies = [
 
 [[package]]
 name = "satur8-backend"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "satur8-core",
@@ -4078,12 +4078,14 @@ dependencies = [
  "satur8-hyprland",
  "satur8-kwin",
  "satur8-nv-control",
+ "serde",
  "signal-hook",
+ "zbus",
 ]
 
 [[package]]
 name = "satur8-cli"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -4098,7 +4100,7 @@ dependencies = [
 
 [[package]]
 name = "satur8-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
  "toml 0.8.23",
@@ -4106,7 +4108,7 @@ dependencies = [
 
 [[package]]
 name = "satur8-daemon"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "satur8-backend",
@@ -4117,7 +4119,7 @@ dependencies = [
 
 [[package]]
 name = "satur8-drm-ctm"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "drm 0.15.0",
@@ -4126,7 +4128,7 @@ dependencies = [
 
 [[package]]
 name = "satur8-gamescope"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "satur8-core",
@@ -4135,21 +4137,21 @@ dependencies = [
 
 [[package]]
 name = "satur8-gnome"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
- "anyhow",
  "satur8-core",
  "zbus",
 ]
 
 [[package]]
 name = "satur8-gui"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "image",
  "libc",
  "satur8-backend",
  "satur8-core",
+ "satur8-gamescope",
  "satur8-kwin",
  "serde",
  "slint",
@@ -4160,32 +4162,29 @@ dependencies = [
 
 [[package]]
 name = "satur8-hyprland"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
- "anyhow",
  "satur8-core",
 ]
 
 [[package]]
 name = "satur8-kwin"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
- "anyhow",
  "satur8-core",
  "zbus",
 ]
 
 [[package]]
 name = "satur8-nv-control"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
- "anyhow",
  "satur8-core",
 ]
 
 [[package]]
 name = "satur8-tray"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "ksni",
