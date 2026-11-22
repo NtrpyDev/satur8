@@ -187,7 +187,7 @@ The background service does the switching. If you installed without `--enable-da
 systemctl --user enable --now satur8-daemon
 ```
 
-The service starts with the Game Mode session. This was checked by switching the Deck to Desktop Mode and back; a cold boot was not tested.
+The service starts with the Game Mode session. This was checked by switching the Deck to Desktop Mode and back, and by restarting the Deck with v0.4.1 installed: with nobody touching it, the service was running in Game Mode about ten seconds after boot and Steam's color settings were unchanged.
 
 In Game Mode, a game's profile loads when the game takes focus and is removed when you leave or close the game. Opening Steam's overlay menu over the game keeps its profile. If the service is killed, systemd restarts it within 5 seconds. Stopping the service puts `default_saturation` back; `~/.local/bin/satur8 off` removes Satur8's table at any value.
 
@@ -232,7 +232,7 @@ Desktop Mode is Verified on a Steam Deck OLED with SteamOS 3.9.5 and KWin 6.7.3,
 - With the right effect loaded, the effect file was replaced by one built for another KWin. `satur8 doctor` reported it, and `satur8 repair` installed the 6.7.3 effect from the set while KWin kept running.
 - Switching between Game Mode and Desktop Mode several times left Steam's color settings unchanged.
 
-The `steamos-6.8.2` effect for SteamOS 3.10 is included but has not been run on a device.
+The `steamos-6.8.2` effect for SteamOS 3.10 is included. It has not been run on a Deck; in a headless KWin 6.8.2 session built from Valve's SteamOS 3.10 packages, with software rendering, it changed window colors by the same values as the `steamos-6.7.3` effect does on KWin 6.7.3.
 
 ### Uninstall from the Deck
 
@@ -244,13 +244,16 @@ packaging/install.sh --uninstall
 
 This stops the service, removes Satur8's table, and removes the commands, the service and the table folder. It was checked on the Deck with a game running and its table loaded: the picture went back to normal. Your profiles in `~/.config/satur8/profiles.toml` are kept, so they come back if you reinstall.
 
+### Known: gamescope can abort when Game Mode ends
+
+On the tested Deck, gamescope sometimes aborts while Game Mode shuts down for the switch to Desktop Mode. The switch still completes. This happens without Satur8: in repeated trials a session that never had a Satur8 table aborted the same way (1 of 8 sessions without a table, 2 of 6 with one, too few to say whether a table changes the odds). All the aborts have one signature, two threads of gamescope 3.16.30.1 using the session's D-Bus connection at the same time during shutdown, and Satur8's Game Mode code does not use that connection. No abort was seen while a game was running.
+
 ### Not tested yet
 
-- A cold boot of the Deck straight into Game Mode.
 - HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged. A game presenting SDR does get the look: ELDEN RING through Proton, presenting SDR on the tested Deck, turned grayscale in gamescope's own screenshot.
 - An external display.
 - The desktop app (`satur8-gui`) on the Deck beyond starting it: it starts in Desktop Mode and shows the KWin backend active, but it was not clicked through.
-- The `steamos-6.8.2` effect on a Deck running SteamOS 3.10.
+- The `steamos-6.8.2` effect on a Deck running SteamOS 3.10 (it was only run headless, see above).
 - A Bazzite device (see [Bazzite](#bazzite)) and other systems that run a gamescope session.
 - gamescope versions other than 3.16.30.1.
 
@@ -277,6 +280,7 @@ Satur8 chooses the best available backend for your session. Zero per-frame cost 
 | Environment | Backend | Per-frame cost | Status |
 |---|---|---:|---|
 | KDE Plasma Wayland | KWin saturation effect | One compositor pass | Verified |
+| KDE Plasma Wayland, a different value per output | KWin saturation effect | One compositor pass | Implemented |
 | GNOME Wayland | GNOME Shell shader extension | One compositor pass | Verified |
 | X11 with NVIDIA | NV-CONTROL Digital Vibrance | Zero | Verified |
 | Hyprland | `hyprctl` shader backend | One compositor pass | Verified |
@@ -290,6 +294,8 @@ Status legend:
 
 - Verified: tested on real hardware
 - Implemented: built and behind environment detection, not yet independently verified
+
+KDE Plasma is Verified for one value on every output. A different value per output is new in v0.5.0 and is Implemented, not Verified: it was checked on headless KWin with two virtual outputs and software rendering, in pixels on KWin 6.7.3, 6.8.2 and 6.8.3, and on a real KWin 6.8.3 session with three monitors the focus script reported which monitor a window was on as it moved. A different value on each of several real monitors has not been seen yet. See [Multiple monitors](#multiple-monitors).
 
 In Steam Game Mode, the focus daemon sets gamescope's look table per game, so Steam's own vibrancy and color temperature keep working on top; see [Steam Deck](#steam-deck). The gamescope-native path is a launch option that drives an already-running gamescope compositor through its Xwayland color override atoms, instead of launching a nested gamescope. While it runs, it replaces Steam's color settings.
 
@@ -338,7 +344,7 @@ Inspect the environment and backend:
 ```sh
 satur8 status       # environment, chosen backend, and current state
 satur8 doctor       # diagnose backend availability
-satur8 outputs      # list the outputs the active backend can target
+satur8 outputs      # list the outputs the active backend can target, and what it can do with them
 satur8 repair       # put back a KWin effect that fits the running KWin
 ```
 
@@ -362,6 +368,46 @@ satur8 profile path
 ```
 
 A profile needs at least one match rule: `--exe`, `--window-class`, `--steam-app-id`, or `--steam-game`. `satur8 games` lists the installed Steam games and the profile each one uses (`--json` for scripts). `--steam-game` takes a game's name, part of it, or its AppID, and stores the AppID.
+
+### Multiple monitors
+
+By default every setting applies to every output, as it always has. On KDE Plasma, Satur8 can also give each output its own value. This is new in v0.5.0: it was checked on headless KWin with two virtual outputs and software rendering, in pixels on KWin 6.7.3, 6.8.2 and 6.8.3, and on a real KWin 6.8.3 session with three monitors the focus script reported which monitor a window was on as it moved. A different value on each of several real monitors has not been seen yet. Every other desktop applies one saturation to every output, and `satur8 outputs`, `satur8 doctor` and `satur8 status` say so when the file asks for more.
+
+Outputs are named by port, as `satur8 outputs` lists them (for example `DP-2` or `HDMI-A-1`), so a setting follows the port, not the monitor.
+
+```sh
+satur8 outputs                          # each output, its value now, and what game profiles change
+satur8 outputs default HDMI-A-1 0.85    # this output's value when no game profile is changing it
+satur8 outputs default HDMI-A-1 --unset # back to default_saturation
+satur8 outputs follow focused           # game profiles change only the output the game is on
+satur8 outputs follow all               # game profiles change every output (the default)
+satur8 profile add couch 1.3 --exe hades --output HDMI-A-1   # repeatable; `all` means every output
+satur8 on 1.3 --output DP-2             # this output only, now; the same as `satur8 set 1.3 --output DP-2`
+satur8 profile list                     # a profile that names outputs lists them as outputs=HDMI-A-1
+satur8 status                           # names the output when the active profile is limited to one
+```
+
+The same settings in `~/.config/satur8/profiles.toml`:
+
+```toml
+default_saturation = 1.0
+profile_outputs = "focused"      # absent means "all"
+
+[output."HDMI-A-1"]
+default_saturation = 0.85
+
+[[profile]]
+name = "couch"
+saturation = 1.3
+exe = "hades"
+outputs = ["HDMI-A-1"]
+```
+
+- With `profile_outputs = "focused"`, a profile that lists no outputs changes only the output the game window is on, and moves with the window. A window across two outputs takes one value, from the output KWin assigns it to. When the output is unknown, for example after an upgrade until the next login, the profile changes every output and the daemon logs why.
+- On KDE Plasma, an output that is not connected keeps its setting, and it applies as soon as the output is plugged in.
+- `satur8 set 1.3 --output DP-2` changes only that output on KDE Plasma and leaves the others as they are; `satur8 set 1.3` and `satur8 off` still change every output. A desktop that shows one saturation everywhere refuses `--output NAME`, as before.
+- After upgrading, log out and back in once: KWin keeps the effect and the focus script it loaded at login, and until it loads the new ones Satur8 applies one value to every output. `satur8 outputs` says so until then, and so do `satur8 doctor` and `satur8 status` when the file uses per-output settings.
+- A Satur8 older than this one loads a file with these settings and ignores them, but if it saves the file (any `satur8 profile` change or the desktop app) it writes it back without them.
 
 ## Development
 
