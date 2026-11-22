@@ -66,18 +66,24 @@ pub enum ExtState {
 }
 
 impl ExtState {
+    /// GNOME Shell sends the state as a D-Bus double. Only a whole number in
+    /// range names a state: it is converted to an integer once and matched.
     pub fn from_number(number: f64) -> ExtState {
-        match number {
-            n if n == 1.0 => ExtState::Active,
-            n if n == 2.0 => ExtState::Inactive,
-            n if n == 3.0 => ExtState::Error,
-            n if n == 4.0 => ExtState::OutOfDate,
-            n if n == 5.0 => ExtState::Downloading,
-            n if n == 6.0 => ExtState::Initialized,
-            n if n == 7.0 => ExtState::Deactivating,
-            n if n == 8.0 => ExtState::Activating,
-            n if n == 99.0 => ExtState::Uninstalled,
-            n => ExtState::Other(n),
+        // `contains` is false for NaN, so NaN is reported as unknown too.
+        if !(0.0..=255.0).contains(&number) || number.fract() > 0.0 {
+            return ExtState::Other(number);
+        }
+        match number as u8 {
+            1 => ExtState::Active,
+            2 => ExtState::Inactive,
+            3 => ExtState::Error,
+            4 => ExtState::OutOfDate,
+            5 => ExtState::Downloading,
+            6 => ExtState::Initialized,
+            7 => ExtState::Deactivating,
+            8 => ExtState::Activating,
+            99 => ExtState::Uninstalled,
+            _ => ExtState::Other(number),
         }
     }
 
@@ -723,10 +729,12 @@ mod tests {
 
     #[test]
     fn state_numbers_match_gnome_shell() {
-        let names: Vec<String> = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 99.0, 42.0]
-            .iter()
-            .map(|&n| ExtState::from_number(n).name())
-            .collect();
+        let names: Vec<String> = [
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 99.0, 42.0, 1.5, -1.0,
+        ]
+        .iter()
+        .map(|&n| ExtState::from_number(n).name())
+        .collect();
         assert_eq!(
             names,
             [
@@ -740,6 +748,8 @@ mod tests {
                 "ACTIVATING",
                 "UNINSTALLED",
                 "unknown (42)",
+                "unknown (1.5)",
+                "unknown (-1)",
             ]
         );
     }
@@ -1000,6 +1010,15 @@ mod tests {
             assert_eq!(next_step(&facts), NextStep::Reinstall, "{metadata:?}");
             assert!(doctor_lines(&facts)[2].starts_with("  [!!] "));
         }
+    }
+
+    #[test]
+    fn nan_state_is_unknown() {
+        assert!(matches!(
+            ExtState::from_number(f64::NAN),
+            ExtState::Other(_)
+        ));
+        assert!(matches!(ExtState::from_number(1e9), ExtState::Other(_)));
     }
 
     #[test]
