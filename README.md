@@ -320,6 +320,9 @@ Manage per-game profiles:
 
 ```sh
 satur8 profile add cs2 1.75 --exe cs2 --steam-app-id 730
+satur8 games
+satur8 games --json
+satur8 profile add cs2 1.75 --steam-game cs2
 satur8 profile list
 satur8 profile show cs2
 satur8 profile disable cs2
@@ -328,7 +331,7 @@ satur8 profile remove cs2
 satur8 profile path
 ```
 
-A profile needs at least one match rule: `--exe`, `--window-class`, or `--steam-app-id`.
+A profile needs at least one match rule: `--exe`, `--window-class`, `--steam-app-id`, or `--steam-game`. `satur8 games` lists the installed Steam games and the profile each one uses (`--json` for scripts). `--steam-game` takes a game's name, part of it, or its AppID, and stores the AppID.
 
 ## Development
 
