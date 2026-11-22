@@ -677,6 +677,15 @@ fn run_command(mut cmd: Command) -> Result<String, String> {
     }
 }
 
+/// The rows the Game Mode layout lists: what is checked there. The KDE
+/// effect and the KDE focus script belong to Desktop Mode, so their rows are
+/// left out while they do not apply; the background service always shows.
+pub fn game_mode_rows(rows: Vec<HealthRow>) -> Vec<HealthRow> {
+    rows.into_iter()
+        .filter(|row| row.level != Level::NotApplicable || row.label == "Background service")
+        .collect()
+}
+
 // ------------------------------------------------------------ read-only probe
 
 fn session() -> Result<Connection, String> {
@@ -1946,6 +1955,30 @@ mod tests {
         assert_eq!(
             applied_from_look(&Look::Foreign("/x/steam.cube".into())),
             None
+        );
+    }
+
+    #[test]
+    fn the_game_mode_page_keeps_the_service_row_and_drops_kdes() {
+        let labels = |facts: &Facts| -> Vec<&'static str> {
+            game_mode_rows(health_rows(facts))
+                .into_iter()
+                .map(|row| row.label)
+                .collect()
+        };
+        // Service off and not asked for: still listed, so it can be seen.
+        assert_eq!(
+            labels(&game(Some(false), UnitState::Disabled)),
+            ["Color control", "Background service"]
+        );
+        assert_eq!(
+            labels(&game(Some(false), UnitState::Unknown)),
+            ["Color control", "Background service"]
+        );
+        // Running: the detection row applies and shows.
+        assert_eq!(
+            labels(&game(Some(true), UnitState::Enabled)),
+            ["Color control", "Background service", "Game detection"]
         );
     }
 

@@ -16,6 +16,8 @@ use crate::gm::{Button, Press};
 // Linux input event types and codes (linux/input-event-codes.h).
 pub const EV_KEY: u16 = 0x01;
 pub const EV_ABS: u16 = 0x03;
+pub const KEY_A: u16 = 30;
+pub const BTN_LEFT: u16 = 0x110;
 pub const BTN_SOUTH: u16 = 0x130;
 pub const BTN_EAST: u16 = 0x131;
 /// `BTN_NORTH`, which the kernel's Xbox pad driver and Steam's pad use for X.
@@ -317,7 +319,13 @@ impl Repeater {
 /// it has the A button and either a stick or a D-pad. `has_key` and `has_abs`
 /// answer for one key or axis code.
 pub fn is_gamepad(has_key: impl Fn(u16) -> bool, has_abs: impl Fn(u16) -> bool) -> bool {
-    has_key(BTN_SOUTH) && (has_abs(ABS_X) || has_abs(ABS_HAT0X) || has_key(BTN_DPAD_UP))
+    // A device that also declares a keyboard's letters or a mouse's button is
+    // a virtual device that declares every key (ydotool's, for one), not a
+    // pad.
+    let keyboard_or_mouse = has_key(KEY_A) || has_key(BTN_LEFT);
+    has_key(BTN_SOUTH)
+        && !keyboard_or_mouse
+        && (has_abs(ABS_X) || has_abs(ABS_HAT0X) || has_key(BTN_DPAD_UP))
 }
 
 // ------------------------------------------------------------------ reader
@@ -877,6 +885,14 @@ mod tests {
         assert!(!is_gamepad(keys(&[0x110, 0x111]), keys(&[])));
         assert!(!is_gamepad(keys(&[30, 31, 32]), keys(&[])));
         assert!(!is_gamepad(keys(&[0x14a]), keys(&[ABS_X, ABS_Y])));
+        // A virtual device that declares every key code, as ydotool's does
+        // ("ydotoold virtual device", seen on the development PC).
+        assert!(!is_gamepad(|_| true, keys(&[])));
+        assert!(!is_gamepad(
+            keys(&[BTN_SOUTH, BTN_DPAD_UP, KEY_A]),
+            keys(&[ABS_X])
+        ));
+        assert!(!is_gamepad(keys(&[BTN_SOUTH, BTN_LEFT]), keys(&[ABS_X])));
         // Buttons but nothing to point with.
         assert!(!is_gamepad(keys(&[BTN_SOUTH]), keys(&[])));
     }

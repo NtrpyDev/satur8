@@ -1153,9 +1153,7 @@ fn apply_facts(ui: &AppWindow, facts: status::Facts) {
     // The system info for a bug report keeps every row.
     let sysinfo = status::system_info_for_this_machine(&facts, &rows);
     if ui.get_touch() {
-        // The Game Mode page lists what is checked there, not what belongs
-        // to other sessions (the KDE effect and its focus script).
-        rows.retain(|row| row.level != status::Level::NotApplicable);
+        rows = status::game_mode_rows(rows);
     }
     let switch = status::switch_state(&facts);
     ui.set_health(ModelRc::from(Rc::new(VecModel::from(
