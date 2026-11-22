@@ -162,20 +162,7 @@ fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> 
     let clamped = Saturation::try_new(saturation)?;
     let mut backend = select_backend()?;
 
-    // Pick the target output: a named one (validated against the backend) or all.
-    let target = match &output {
-        Some(id) => backend
-            .outputs()
-            .into_iter()
-            .find(|o| &o.id == id)
-            .with_context(|| {
-                format!(
-                    "no output '{id}' on the {} backend (see `satur8 outputs`)",
-                    backend.name()
-                )
-            })?,
-        None => all_outputs(),
-    };
+    let target = set_target(backend.name(), &backend.outputs(), output.as_deref())?;
 
     let linear_active = apply_with_linear_flag(backend.as_mut(), &target, clamped, linear)?;
     if linear && !linear_active {
@@ -200,6 +187,28 @@ fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> 
         );
     }
     Ok(())
+}
+
+/// The output `satur8 set` targets: every output with no `--output` or with
+/// `--output all`, else the named one, which must be in the backend's list. A
+/// backend that shows one saturation everywhere lists no single outputs, so a
+/// name there is refused rather than changing every screen.
+fn set_target(
+    backend: &str,
+    outputs: &[satur8_core::Output],
+    output: Option<&str>,
+) -> Result<satur8_core::Output> {
+    match output {
+        None => Ok(all_outputs()),
+        Some(id) if id == satur8_core::levels::ALL_OUTPUTS => Ok(all_outputs()),
+        Some(id) => outputs
+            .iter()
+            .find(|o| o.id == id)
+            .cloned()
+            .with_context(|| {
+                format!("no output '{id}' on the {backend} backend (see `satur8 outputs`)")
+            }),
+    }
 }
 
 fn apply_with_linear_flag(
@@ -765,6 +774,53 @@ mod tests {
                 }
             }) if query == "sushi"
         ));
+    }
+
+    #[test]
+    fn set_targets_every_output_unless_one_is_named() {
+        let listed = [satur8_core::Output {
+            id: "DP-1".into(),
+            human_name: "Dell U2720Q".into(),
+        }];
+        assert_eq!(set_target("kwin", &listed, None).unwrap().id, "all");
+        assert_eq!(set_target("kwin", &listed, Some("all")).unwrap().id, "all");
+        assert_eq!(
+            set_target("kwin", &listed, Some("DP-1")).unwrap().id,
+            "DP-1"
+        );
+    }
+
+    /// The message v0.4.1 already printed for a name the backend does not
+    /// list: a per-output backend's unknown name, and any name on a backend
+    /// that shows one saturation everywhere.
+    #[test]
+    fn set_refuses_a_name_the_backend_does_not_list() {
+        let kwin = [satur8_core::Output {
+            id: "DP-1".into(),
+            human_name: "Dell U2720Q".into(),
+        }];
+        assert_eq!(
+            set_target("kwin", &kwin, Some("DP-9"))
+                .unwrap_err()
+                .to_string(),
+            "no output 'DP-9' on the kwin backend (see `satur8 outputs`)"
+        );
+        assert_eq!(
+            set_target("gnome-shell", &[all_outputs()], Some("DP-1"))
+                .unwrap_err()
+                .to_string(),
+            "no output 'DP-1' on the gnome-shell backend (see `satur8 outputs`)"
+        );
+        let drm = [satur8_core::Output {
+            id: "42".into(),
+            human_name: "CRTC 42".into(),
+        }];
+        assert_eq!(
+            set_target("drm-ctm", &drm, Some("999"))
+                .unwrap_err()
+                .to_string(),
+            "no output '999' on the drm-ctm backend (see `satur8 outputs`)"
+        );
     }
 
     #[test]

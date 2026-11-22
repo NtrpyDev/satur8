@@ -14,6 +14,10 @@ GitHub release notes for that tag.
   headless KWin with two virtual outputs (pixels on KWin 6.7.3, state only on
   KWin 6.8.2); not yet run on real monitors. Log out and back in once after
   upgrading so KWin loads the new effect and focus script.
+- `satur8 set VALUE --output NAME` on KDE Plasma changes only that output and
+  keeps every other output's level. `--output all` means every output on every
+  desktop. A desktop that shows one saturation everywhere still refuses
+  `--output NAME` with the same message as before.
 - On every other desktop one saturation still applies to every output, and
   `satur8 outputs`, `satur8 doctor` and `satur8 status` now say so when the
   profiles file asks for a single output. `doctor` and `status` print nothing

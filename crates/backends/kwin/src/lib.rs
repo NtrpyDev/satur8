@@ -244,6 +244,8 @@ trait EffectApi {
     /// `outputs`: connected output name to description, or `None` when the
     /// loaded effect has no such method.
     fn effect_outputs(&self) -> Result<Option<BTreeMap<String, String>>, BackendError>;
+    /// `setOutputSaturation`: one output's level; the others keep theirs.
+    fn set_output_level(&self, output: &str, saturation: Saturation) -> Result<(), BackendError>;
     /// `setSaturations`: the whole picture in one call.
     fn set_levels(
         &self,
@@ -293,6 +295,15 @@ impl EffectApi for KwinBackend {
             Err(error) if is_unknown_method(&error) => Ok(None),
             Err(error) => Err(apply_err(error)),
         }
+    }
+
+    fn set_output_level(&self, output: &str, saturation: Saturation) -> Result<(), BackendError> {
+        self.call_effect(
+            "setOutputSaturation",
+            &(output, f64::from(saturation.get())),
+        )
+        .map(|_| ())
+        .map_err(|e| BackendError::Apply(format!("couldn't set saturation on {output}: {e}")))
     }
 
     fn set_levels(
@@ -384,6 +395,52 @@ fn apply_levels_via(api: &dyn EffectApi, levels: &Levels) -> Result<(), BackendE
     api.set_levels(levels.base, &levels.outputs)
 }
 
+/// Why a single output cannot be set: the loaded effect predates per-output
+/// support.
+fn one_level_only() -> BackendError {
+    BackendError::Unsupported(
+        "the loaded KWin effect shows one saturation on every output; \
+         log out and back in to load the newer effect"
+            .to_string(),
+    )
+}
+
+/// Unload the effect once every output is back to 1.0, so no GPU pass stays.
+fn unload_if_unchanged(api: &dyn EffectApi) {
+    if current_levels_via(api).is_some_and(|levels| levels.is_identity()) {
+        let _ = api.unload_effect();
+    }
+}
+
+/// A manual change to one output (`satur8 set --output NAME`): only that
+/// output changes, every other output keeps its level.
+fn apply_output_via(
+    api: &dyn EffectApi,
+    output: &str,
+    saturation: Saturation,
+) -> Result<(), BackendError> {
+    api.load_effect()?;
+    if api.effect_outputs()?.is_none() {
+        return Err(one_level_only());
+    }
+    api.set_output_level(output, saturation)?;
+    unload_if_unchanged(api);
+    Ok(())
+}
+
+/// Put one output back to the base level; the others keep theirs.
+fn reset_output_via(api: &dyn EffectApi, output: &str) -> Result<(), BackendError> {
+    if !api.effect_loaded()? {
+        return Ok(());
+    }
+    if api.effect_outputs()?.is_none() {
+        return Err(one_level_only());
+    }
+    api.set_output_level(output, api.base_level()?)?;
+    unload_if_unchanged(api);
+    Ok(())
+}
+
 /// What every output shows now: unchanged when the effect is not loaded, else
 /// the effect's base and, for a per-output effect, its table.
 fn current_levels_via(api: &dyn EffectApi) -> Option<Levels> {
@@ -420,7 +477,12 @@ impl Backend for KwinBackend {
         }
     }
 
-    fn apply(&mut self, _output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+    /// A named output changes only that output, through the per-output calls.
+    /// Every output (`"all"`) works as it always has.
+    fn apply(&mut self, output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+        if output.id != satur8_core::levels::ALL_OUTPUTS {
+            return apply_output_via(self, &output.id, saturation);
+        }
         // Identity means "no change". Loading the effect at identity would
         // leave an unnecessary compositor pass running, so unload instead.
         if saturation.is_identity() {
@@ -431,7 +493,10 @@ impl Backend for KwinBackend {
         self.set_saturation(saturation)
     }
 
-    fn reset(&mut self, _output: &Output) -> Result<(), BackendError> {
+    fn reset(&mut self, output: &Output) -> Result<(), BackendError> {
+        if output.id != satur8_core::levels::ALL_OUTPUTS {
+            return reset_output_via(self, &output.id);
+        }
         // Identity then unload, so we leave no GPU pass running.
         let _ = self.set_saturation(Saturation::IDENTITY);
         self.unload()
@@ -491,6 +556,7 @@ mod tests {
         Load,
         Unload,
         SetOne(f32),
+        SetOutput(String, f32),
         SetLevels(f32, Vec<(String, f32)>),
     }
 
@@ -556,6 +622,26 @@ mod tests {
 
         fn effect_outputs(&self) -> Result<Option<BTreeMap<String, String>>, BackendError> {
             Ok(self.new_effect.then(|| self.listed.clone()))
+        }
+
+        fn set_output_level(
+            &self,
+            output: &str,
+            saturation: Saturation,
+        ) -> Result<(), BackendError> {
+            assert!(self.new_effect, "an old effect has no setOutputSaturation");
+            // As the effect does: a value equal to the base removes the entry.
+            if saturation.get() == *self.base.borrow() {
+                self.table.borrow_mut().remove(output);
+            } else {
+                self.table
+                    .borrow_mut()
+                    .insert(output.to_string(), saturation);
+            }
+            self.calls
+                .borrow_mut()
+                .push(Call::SetOutput(output.to_string(), saturation.get()));
+            Ok(())
         }
 
         fn set_levels(
@@ -748,5 +834,75 @@ mod tests {
             Some(Levels::uniform(Saturation::IDENTITY))
         );
         assert!(effect.calls().is_empty());
+    }
+
+    #[test]
+    fn a_manual_change_to_one_output_keeps_the_others() {
+        let effect = FakeEffect::new(true);
+        apply_levels_via(&effect, &levels(1.0, &[("HDMI-A-1", 0.85)])).unwrap();
+
+        apply_output_via(&effect, "DP-1", Saturation::new(1.5)).unwrap();
+
+        assert_eq!(
+            effect.calls().last(),
+            Some(&Call::SetOutput("DP-1".into(), 1.5))
+        );
+        assert_eq!(
+            current_levels_via(&effect),
+            Some(levels(1.0, &[("DP-1", 1.5), ("HDMI-A-1", 0.85)]))
+        );
+    }
+
+    #[test]
+    fn a_manual_change_to_one_output_loads_the_effect_first() {
+        let effect = FakeEffect::new(true);
+        apply_output_via(&effect, "DP-1", Saturation::new(1.5)).unwrap();
+        assert_eq!(
+            effect.calls(),
+            [Call::Load, Call::SetOutput("DP-1".into(), 1.5)]
+        );
+        assert_eq!(
+            current_levels_via(&effect),
+            Some(levels(1.0, &[("DP-1", 1.5)]))
+        );
+    }
+
+    #[test]
+    fn resetting_one_output_puts_only_it_back_to_the_base() {
+        let effect = FakeEffect::new(true);
+        apply_levels_via(&effect, &levels(1.2, &[("HDMI-A-1", 0.85), ("DP-1", 1.5)])).unwrap();
+
+        reset_output_via(&effect, "DP-1").unwrap();
+
+        assert_eq!(
+            current_levels_via(&effect),
+            Some(levels(1.2, &[("HDMI-A-1", 0.85)]))
+        );
+        assert_eq!(
+            effect.calls().last(),
+            Some(&Call::SetOutput("DP-1".into(), 1.2))
+        );
+    }
+
+    #[test]
+    fn the_last_output_back_to_unchanged_unloads_the_effect() {
+        let effect = FakeEffect::new(true);
+        apply_output_via(&effect, "DP-1", Saturation::new(1.5)).unwrap();
+        reset_output_via(&effect, "DP-1").unwrap();
+        assert_eq!(effect.calls().last(), Some(&Call::Unload));
+        // Nothing loaded, nothing to reset.
+        reset_output_via(&effect, "DP-1").unwrap();
+        assert_eq!(effect.calls().last(), Some(&Call::Unload));
+    }
+
+    #[test]
+    fn an_old_effect_refuses_one_output_instead_of_changing_every_screen() {
+        let effect = FakeEffect::new(false);
+        let err = apply_output_via(&effect, "DP-1", Saturation::new(1.5)).unwrap_err();
+        assert!(matches!(err, BackendError::Unsupported(_)), "{err}");
+        assert!(!effect
+            .calls()
+            .iter()
+            .any(|call| matches!(call, Call::SetOne(_))));
     }
 }

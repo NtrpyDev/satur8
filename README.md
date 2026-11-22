@@ -399,6 +399,7 @@ outputs = ["HDMI-A-1"]
 
 - With `profile_outputs = "focused"`, a profile that lists no outputs changes only the output the game window is on, and moves with the window. A window across two outputs takes one value, from the output KWin assigns it to. When the output is unknown, for example after an upgrade until the next login, the profile changes every output and the daemon logs why.
 - On KDE Plasma, an output that is not connected keeps its setting, and it applies as soon as the output is plugged in.
+- `satur8 set 1.3 --output DP-2` changes only that output on KDE Plasma and leaves the others as they are; `satur8 set 1.3` and `satur8 off` still change every output. A desktop that shows one saturation everywhere refuses `--output NAME`, as before.
 - After upgrading, log out and back in once: KWin keeps the effect and the focus script it loaded at login, and until it loads the new ones Satur8 applies one value to every output.
 - A Satur8 older than this one loads a file with these settings and ignores them, but if it saves the file (any `satur8 profile` change or the desktop app) it writes it back without them.
 
