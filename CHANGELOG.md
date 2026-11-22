@@ -3,6 +3,18 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## Unreleased
+
+- Checked, with no code change: the DRM/KMS path, the last backend that had
+  never been run on real hardware. On a Steam Deck OLED's AMD GPU with its
+  session held open and no compositor running, `satur8 doctor` chose
+  `drm-ctm`, `satur8 set 0` turned color bars gray, 0.5 and 2.0 landed where
+  expected, `satur8 off` put the picture back, `--output` with a CRTC ID
+  changed that CRTC and an unknown ID was refused. The background service,
+  started by hand on that console, showed the desktop saturation at start,
+  followed a change to it and restored it when stopped. The README's backend
+  table now lists DRM/KMS as Verified.
+
 ## v0.5.0 - 2026-11-22
 
 A different saturation on each monitor on KDE Plasma, and a desktop saturation that shows from the start of the session.

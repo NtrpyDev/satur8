@@ -284,7 +284,7 @@ Satur8 chooses the best available backend for your session. Zero per-frame cost 
 | GNOME Wayland | GNOME Shell shader extension | One compositor pass | Verified |
 | X11 with NVIDIA | NV-CONTROL Digital Vibrance | Zero | Verified |
 | Hyprland | `hyprctl` shader backend | One compositor pass | Verified |
-| DRM/KMS sessions | DRM CTM | Zero | Implemented |
+| DRM/KMS sessions (a console with no display server) | DRM CTM | Zero | Verified on a Steam Deck OLED's AMD GPU (2026-11-22) |
 | Steam Game Mode (Steam Deck) | gamescope look table, automatic | Reuses gamescope's color pipeline | Verified on a Steam Deck OLED, SteamOS 3.9.5, gamescope 3.16.30.1 (2026-11-21) |
 | Steam Game Mode (Bazzite) | gamescope look table, automatic | Reuses gamescope's color pipeline | Implemented |
 | gamescope (running compositor) | gamescope-native color atoms | Reuses existing gamescope | Verified |

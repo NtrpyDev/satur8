@@ -7,14 +7,16 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.5.0 is the current release. Seven of the eight backend paths are verified on
+v0.5.0 is the current release. All eight backend paths are verified on
 real hardware: KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland,
 NVIDIA X11 NV-CONTROL, automatic per-game switching in Steam Game Mode through
 gamescope's look table (verified on a Steam Deck OLED with SteamOS 3.9.5 and
 gamescope 3.16.30.1), the gamescope-native launch option for a running
-full-screen gamescope compositor, and the nested gamescope fallback for
-unsupported Wayland sessions. The remaining implemented-but-unverified path is
-DRM/KMS. Since v0.4.1 the release tarball needs glibc 2.35 or newer (checked
+full-screen gamescope compositor, the nested gamescope fallback for
+unsupported Wayland sessions, and DRM/KMS on a console with no display server
+(verified on a Steam Deck OLED's AMD GPU). Still Implemented rather than
+Verified: a different value per monitor on KDE Plasma, and Steam Game Mode on
+Bazzite. Since v0.4.1 the release tarball needs glibc 2.35 or newer (checked
 by starting each program in containers of Ubuntu 22.04, Debian 12, Ubuntu
 24.04, openSUSE Leap 16.0 and Fedora 43) and carries prebuilt KWin effects for
 SteamOS 3.9 (KWin 6.7.3), SteamOS 3.10 (KWin 6.8.2), and Fedora 44 and 45
@@ -121,6 +123,15 @@ other backends.
       implemented and unit-tested; the read-only probe already passes (see
       PLAN.md section 10), but real apply/off verification is deferred and the
       backend remains honestly listed as Implemented.
+- [x] Verify the DRM/KMS path on real hardware. Done 2026-11-22 on a Steam
+      Deck OLED (AMD, SteamOS 3.9.5, v0.5.0) with its session held open and no
+      compositor running, color bars on screen, read with a camera: `satur8
+      doctor` chose `drm-ctm`; `satur8 set 0` turned the picture gray (0.82 to
+      0.22), 0.5 and 2.0 landed in between and above, `satur8 off` put it
+      back; `satur8 set 0 --output 118` changed that CRTC and an unknown ID
+      was refused. The background service, started by hand on that console,
+      showed the desktop saturation at start, followed a change to it, and
+      restored it when stopped.
 - [x] Verify the GNOME Wayland Shell-extension backend on real GNOME (GNOME
       50.2, NVIDIA Wayland). Required fixes: shell-version range and the
       Clutter.ShaderType enum removed in Mutter 18.
