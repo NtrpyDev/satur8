@@ -87,6 +87,26 @@ def button_label(installed, latest):
     return None
 
 
+def reinstall_label(installed, latest):
+    """The smaller second button, the repair path: Satur8 is installed and
+    the main button offers nothing. With an update on offer the main button
+    already does the same download and install, so there is no second one."""
+    if installed is None or action(installed, latest) is not None:
+        return None
+    return "Reinstall Satur8"
+
+
+def reinstall_question(installed):
+    """The one line the panel asks before a reinstall. It says "newest"
+    because the download is always the newest release, which is a later
+    version when the check for one could not be made. Satur8's installer does
+    not touch the saved games and settings."""
+    return (
+        "Download the newest Satur8 and install it over v%s? "
+        "Your games and their settings are kept." % installed
+    )
+
+
 def summary(installed, latest):
     """One line on what is installed."""
     if installed is None:

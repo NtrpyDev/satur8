@@ -89,6 +89,10 @@ class Plugin:
             "latest": self.latest,
             "summary": logic.summary(installed, self.latest),
             "button": logic.button_label(installed, self.latest),
+            "reinstall": logic.reinstall_label(installed, self.latest),
+            "reinstall_question": (
+                logic.reinstall_question(installed) if installed is not None else ""
+            ),
             "busy": self.busy,
             "step": self.step,
             "steps": list(logic.STEPS),
@@ -115,8 +119,10 @@ class Plugin:
         return self.latest
 
     async def install(self, in_steam_library=False):
-        """Start the install or update. Returns at once; `status` reports the
-        step. `in_steam_library` is what Steam's own list says right now."""
+        """Start the install, update or reinstall: all three are the same
+        checked download and the same installer. Returns at once; `status`
+        reports the step. `in_steam_library` is what Steam's own list says
+        right now."""
         if self.busy:
             return
         self.busy = True

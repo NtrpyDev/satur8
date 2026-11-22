@@ -38,15 +38,10 @@ fn render(games: &[SteamGame], profiles: &Profiles, json: bool) -> String {
     }
 }
 
-/// The profile shown for a game: the enabled one that applies to it, else the
-/// first disabled one with its AppID.
+/// The profile shown for a game: the one that applies to it, which is an
+/// enabled one ahead of a disabled one.
 fn profile_for(profiles: &Profiles, app_id: u32) -> Option<&Profile> {
-    profiles.match_steam_app_id(app_id).or_else(|| {
-        profiles
-            .profiles
-            .iter()
-            .find(|profile| profile.match_rule.steam_app_id == Some(app_id))
-    })
+    profiles.match_steam_app_id(app_id)
 }
 
 /// `sushiamo 1.75`, or `sushiamo 1.75 (disabled)`.
@@ -97,7 +92,8 @@ fn games_table(games: &[SteamGame], profiles: &Profiles) -> String {
 /// A JSON array of `{ "app_id", "name", "profile", "saturation", "enabled" }`
 /// objects, one per line. `profile`, `saturation` and `enabled` are `null` for
 /// a game without a profile; `enabled` is `false` for a disabled one, which the
-/// table marks `(disabled)`.
+/// table marks `(disabled)`. `saturation` is the value the profile stores; a
+/// disabled profile's game shows normal colors (1.0), not that value.
 fn games_json(games: &[SteamGame], profiles: &Profiles) -> String {
     if games.is_empty() {
         return "[]".to_string();

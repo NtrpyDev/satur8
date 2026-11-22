@@ -67,6 +67,40 @@ class TheButton(unittest.TestCase):
         self.assertIsNone(logic.button_label("0.5.1", None))
         self.assertIsNone(logic.button_label("0.6.0", "0.5.1"))
 
+    def test_reinstall_is_offered_whenever_installed_and_no_update_is(self):
+        # Up to date: the repair path, which the main button does not give.
+        self.assertEqual(logic.reinstall_label("0.5.1", "0.5.1"), "Reinstall Satur8")
+        # The newest version could not be read: still offered.
+        self.assertEqual(logic.reinstall_label("0.5.1", None), "Reinstall Satur8")
+        # Newer here than the newest release (a build of one's own).
+        self.assertEqual(logic.reinstall_label("0.6.0", "0.5.1"), "Reinstall Satur8")
+
+    def test_reinstall_is_not_a_second_button_for_the_same_thing(self):
+        # Not installed: the main button installs.
+        self.assertIsNone(logic.reinstall_label(None, "0.5.1"))
+        self.assertIsNone(logic.reinstall_label(None, None))
+        # An update is out: the main button already downloads and installs.
+        self.assertIsNone(logic.reinstall_label("0.5.0", "0.5.1"))
+
+    def test_exactly_one_of_the_two_buttons_shows_when_installed(self):
+        for installed, latest in (("0.5.1", "0.5.1"), ("0.5.0", "0.5.1"), ("0.5.1", None)):
+            shown = [
+                label
+                for label in (
+                    logic.button_label(installed, latest),
+                    logic.reinstall_label(installed, latest),
+                )
+                if label is not None
+            ]
+            self.assertEqual(len(shown), 1, (installed, latest))
+
+    def test_the_reinstall_question_says_what_happens_and_what_is_kept(self):
+        self.assertEqual(
+            logic.reinstall_question("0.5.1"),
+            "Download the newest Satur8 and install it over v0.5.1? "
+            "Your games and their settings are kept.",
+        )
+
     def test_summary_lines(self):
         self.assertEqual(logic.summary(None, "0.5.1"), "Satur8 is not installed")
         self.assertEqual(logic.summary("0.5.1", None), "Satur8 v0.5.1 is installed")

@@ -501,6 +501,35 @@ pub fn log_line(profiles: &Profiles, index: usize, changed: bool, created: bool)
     }
 }
 
+/// The name a profile's row shows. The file is not changed.
+///
+/// Before the app named a profile after its game in the Steam library, it
+/// named it after the program: `eldenring` for `eldenring.exe`. A profile
+/// still named exactly like its program (ignoring case, `.exe` and
+/// `.x86_64`) that carries a Steam AppID shows that game's library name,
+/// when `library_name` knows it. Any other name is one somebody chose, and
+/// is shown as it is.
+pub fn display_name(profile: &Profile, library_name: impl Fn(u32) -> Option<String>) -> String {
+    let stem = |text: &str| {
+        let text = text.trim().to_ascii_lowercase();
+        text.trim_end_matches(".exe")
+            .trim_end_matches(".x86_64")
+            .to_string()
+    };
+    let named_after_its_program = profile
+        .match_rule
+        .exe
+        .as_deref()
+        .is_some_and(|exe| stem(exe) == stem(&profile.name));
+    profile
+        .match_rule
+        .steam_app_id
+        .filter(|_| named_after_its_program)
+        .and_then(library_name)
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| profile.name.clone())
+}
+
 /// The small line under a game card's name: the executable it matches, else
 /// the Steam AppID, else the profile name.
 pub fn card_subtitle(profile: &Profile) -> String {
@@ -1134,5 +1163,63 @@ mod tests {
         p.match_rule.exe = Some("Sushiamo.exe".into());
         assert_eq!(card_subtitle(&p), "Sushiamo.exe");
         assert_eq!(card_subtitle(&profile("CS2", 1.6, true, None)), "CS2");
+    }
+
+    /// The profile the v0.5.0 app left on the owner's Deck.
+    fn old_elden_ring() -> Profile {
+        Profile {
+            name: "eldenring".into(),
+            enabled: true,
+            saturation: 1.4,
+            match_rule: MatchRule {
+                exe: Some("eldenring.exe".into()),
+                window_class: None,
+                steam_app_id: Some(1245620),
+            },
+            outputs: vec![],
+        }
+    }
+
+    fn steam_name(app_id: u32) -> Option<String> {
+        (app_id == 1245620).then(|| "ELDEN RING".to_string())
+    }
+
+    #[test]
+    fn a_profile_named_after_its_program_shows_the_steam_library_name() {
+        assert_eq!(display_name(&old_elden_ring(), steam_name), "ELDEN RING");
+        // Case and the Linux suffix do not matter.
+        let mut native = old_elden_ring();
+        native.name = "EldenRing".into();
+        native.match_rule.exe = Some("eldenring.x86_64".into());
+        assert_eq!(display_name(&native, steam_name), "ELDEN RING");
+    }
+
+    #[test]
+    fn any_other_profile_keeps_the_name_it_has() {
+        // A name somebody chose.
+        let mut chosen = old_elden_ring();
+        chosen.name = "Souls, vivid".into();
+        assert_eq!(display_name(&chosen, steam_name), "Souls, vivid");
+        // No Steam AppID: nothing says which game it is.
+        let mut no_id = old_elden_ring();
+        no_id.match_rule.steam_app_id = None;
+        assert_eq!(display_name(&no_id, steam_name), "eldenring");
+        // No program to compare the name with.
+        let mut no_exe = old_elden_ring();
+        no_exe.match_rule.exe = None;
+        assert_eq!(display_name(&no_exe, steam_name), "eldenring");
+        // A game that is not installed, so the library has no name for it.
+        assert_eq!(display_name(&old_elden_ring(), |_| None), "eldenring");
+        assert_eq!(
+            display_name(&old_elden_ring(), |_| Some("  ".into())),
+            "eldenring"
+        );
+        // A profile already named from the library.
+        let mut named = old_elden_ring();
+        named.name = "ELDEN RING".into();
+        assert_eq!(
+            display_name(&named, |_| Some("something else".into())),
+            "ELDEN RING"
+        );
     }
 }

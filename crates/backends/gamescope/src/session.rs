@@ -125,7 +125,9 @@ pub fn read_focus(props: &dyn RootProps) -> Result<Focus> {
     let pid = match first(props.cardinals(FOCUSED_WINDOW)?) {
         Some(window) => props.cardinals(FOCUSABLE_WINDOWS)?.and_then(|triplets| {
             triplets
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .find(|triplet| triplet[0] == window)
                 .map(|triplet| triplet[2])
         }),

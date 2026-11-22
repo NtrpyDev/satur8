@@ -9,4 +9,3 @@ description = "KWin (KDE Plasma Wayland) backend for Satur8: drives the shipped 
 [dependencies]
 satur8-core = { workspace = true }
 zbus = { workspace = true }
-anyhow = { workspace = true }

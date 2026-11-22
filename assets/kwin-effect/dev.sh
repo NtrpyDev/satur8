@@ -40,8 +40,17 @@ cmd_install() {
 
 cmd_install_user() {
     mkdir -p "$user_dir"
-    # install writes a new file: overwriting a loaded effect in place crashed KWin.
-    install -m755 "$so" "$user_dir/satur8.so"
+    # Stage the new file next to the destination, then rename it into place.
+    # The rename is one step, so KWin never finds a half-written plugin, and
+    # the loaded effect's file is replaced by a new one, never written over
+    # (overwriting a loaded effect in place crashed KWin). The staged name
+    # does not end in .so, so Qt's plugin scan skips it.
+    local staged="$user_dir/.satur8.so.$$.tmp"
+    if ! install -m755 "$so" "$staged"; then
+        rm -f "$staged"
+        return 1
+    fi
+    mv -f "$staged" "$user_dir/satur8.so"
     echo "installed -> $user_dir (add this dir's root to QT_PLUGIN_PATH and re-login)"
 }
 

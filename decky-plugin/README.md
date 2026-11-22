@@ -16,6 +16,10 @@ Open the Quick Access Menu, then Decky, then Satur8.
   end, what it did. If something fails it says what failed and where the log
   is.
 - **Open Satur8** starts Satur8's entry in the Steam library.
+- **Reinstall Satur8**, the smaller button, is there whenever Satur8 is
+  installed and no update is out. It asks once, then does the same checked
+  download and install again: the way to repair an install without a
+  terminal. Your games and their settings are kept.
 - **Add Satur8 to the Steam library** appears only when Satur8 is installed
   and Steam does not list it.
 

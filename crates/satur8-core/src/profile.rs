@@ -28,7 +28,9 @@ pub struct MatchRule {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Profile {
     pub name: String,
-    /// Disabled profiles remain editable but never match a running game.
+    /// A profile that is off still matches its game, and the game then shows
+    /// its normal colors (1.0) instead of the general saturation. See
+    /// [`Profile::shown_saturation`].
     #[serde(default = "profile_enabled")]
     pub enabled: bool,
     /// Target saturation, mirrors `Saturation` (0.0..=4.0, 1.0 = unchanged).
@@ -46,8 +48,20 @@ fn profile_enabled() -> bool {
 }
 
 impl Profile {
+    /// The value the profile stores, on or off.
     pub fn saturation(&self) -> Saturation {
         Saturation::new(self.saturation)
+    }
+
+    /// What the profile's game shows: the stored value while the profile is
+    /// on, normal colors (1.0) while it is off. Off is not "no profile": a
+    /// game with no profile shows the general saturation.
+    pub fn shown_saturation(&self) -> Saturation {
+        if self.enabled {
+            self.saturation()
+        } else {
+            Saturation::IDENTITY
+        }
     }
 }
 
@@ -144,21 +158,34 @@ impl Profiles {
         Saturation::new(self.default_saturation)
     }
 
+    /// The first profile `matches` accepts that is on, else the first that is
+    /// off. A profile that is off still stands for its game (the game then
+    /// shows normal colors), but never ahead of one that is on.
+    fn find_on_then_off(&self, matches: impl Fn(&Profile) -> bool) -> Option<&Profile> {
+        let find = |enabled: bool| {
+            self.profiles
+                .iter()
+                .find(|p| p.enabled == enabled && matches(p))
+        };
+        find(true).or_else(|| find(false))
+    }
+
     /// Find a profile by executable basename. Case-insensitive, and `.exe` /
     /// `.x86_64` suffixes are ignored so a profile added as `EscapeFromTarkov.exe`
-    /// still matches a process resolved as `EscapeFromTarkov`.
+    /// still matches a process resolved as `EscapeFromTarkov`. A profile that
+    /// is on is found ahead of one that is off.
     pub fn match_exe(&self, exe: &str) -> Option<&Profile> {
         let exe_norm = normalize_game_id(exe);
-        self.profiles.iter().find(|p| {
-            p.enabled
-                && p.match_rule
-                    .exe
-                    .as_deref()
-                    .is_some_and(|e| normalize_game_id(e) == exe_norm)
+        self.find_on_then_off(|p| {
+            p.match_rule
+                .exe
+                .as_deref()
+                .is_some_and(|e| normalize_game_id(e) == exe_norm)
         })
     }
 
-    /// Find a profile by window class / app id (case-insensitive).
+    /// Find a profile by window class / app id (case-insensitive). A profile
+    /// that is on is found ahead of one that is off.
     pub fn match_window_class(&self, class: &str) -> Option<&Profile> {
         let class = class.trim();
         let class_norm = normalize_game_id(class);
@@ -166,26 +193,23 @@ impl Profiles {
             .strip_prefix("steam_app_")
             .and_then(|id| id.parse::<u32>().ok());
 
-        self.profiles.iter().find(|p| {
-            p.enabled
-                && (p
-                    .match_rule
-                    .window_class
+        self.find_on_then_off(|p| {
+            p.match_rule
+                .window_class
+                .as_deref()
+                .is_some_and(|c| normalize_game_id(c) == class_norm)
+                || p.match_rule
+                    .exe
                     .as_deref()
-                    .is_some_and(|c| normalize_game_id(c) == class_norm)
-                    || p.match_rule
-                        .exe
-                        .as_deref()
-                        .is_some_and(|e| normalize_game_id(e) == class_norm)
-                    || steam_app_id.is_some_and(|app_id| p.match_rule.steam_app_id == Some(app_id)))
+                    .is_some_and(|e| normalize_game_id(e) == class_norm)
+                || steam_app_id.is_some_and(|app_id| p.match_rule.steam_app_id == Some(app_id))
         })
     }
 
-    /// Find a profile by Steam AppID.
+    /// Find a profile by Steam AppID. A profile that is on is found ahead of
+    /// one that is off.
     pub fn match_steam_app_id(&self, app_id: u32) -> Option<&Profile> {
-        self.profiles
-            .iter()
-            .find(|p| p.enabled && p.match_rule.steam_app_id == Some(app_id))
+        self.find_on_then_off(|p| p.match_rule.steam_app_id == Some(app_id))
     }
 
     /// Look a profile up by its name (case-insensitive).
@@ -354,16 +378,54 @@ mod tests {
     }
 
     #[test]
-    fn disabled_profile_never_matches() {
+    fn a_profile_that_is_off_still_matches_its_game_and_shows_normal_colors() {
         let profiles = Profiles::from_toml(
-            "[[profile]]\nname = 'CS2'\nsaturation = 1.6\nenabled = false\nexe = 'cs2'\nsteam_app_id = 730",
+            "default_saturation = 1.3\n[[profile]]\nname = 'CS2'\nsaturation = 1.6\nenabled = false\nexe = 'cs2'\nsteam_app_id = 730",
         )
         .unwrap();
 
-        assert!(profiles.match_exe("cs2").is_none());
-        assert!(profiles.match_window_class("cs2").is_none());
-        assert!(profiles.match_window_class("steam_app_730").is_none());
-        assert!(profiles.match_steam_app_id(730).is_none());
+        for found in [
+            profiles.match_exe("cs2"),
+            profiles.match_window_class("cs2"),
+            profiles.match_window_class("steam_app_730"),
+            profiles.match_steam_app_id(730),
+        ] {
+            let profile = found.expect("an off profile is still its game's profile");
+            assert_eq!(profile.name, "CS2");
+            assert_eq!(profile.saturation(), Saturation::new(1.6));
+            assert_eq!(profile.shown_saturation(), Saturation::IDENTITY);
+        }
+        // A game with no profile at all is still no match.
+        assert!(profiles.match_exe("dota2").is_none());
+        assert!(profiles.match_steam_app_id(570).is_none());
+    }
+
+    #[test]
+    fn a_profile_that_is_on_shows_its_own_value() {
+        let profiles =
+            Profiles::from_toml("[[profile]]\nname = 'CS2'\nsaturation = 1.6\nexe = 'cs2'")
+                .unwrap();
+        assert_eq!(
+            profiles.match_exe("cs2").unwrap().shown_saturation(),
+            Saturation::new(1.6)
+        );
+    }
+
+    #[test]
+    fn a_profile_that_is_on_is_found_ahead_of_one_that_is_off() {
+        // The off one comes first in the file and matches every way.
+        let profiles = Profiles::from_toml(
+            "[[profile]]\nname = 'old'\nsaturation = 1.2\nenabled = false\nexe = 'cs2'\nwindow_class = 'cs2'\nsteam_app_id = 730\n\
+             [[profile]]\nname = 'new'\nsaturation = 1.6\nexe = 'cs2'\nwindow_class = 'cs2'\nsteam_app_id = 730",
+        )
+        .unwrap();
+        assert_eq!(profiles.match_exe("cs2").unwrap().name, "new");
+        assert_eq!(profiles.match_window_class("cs2").unwrap().name, "new");
+        assert_eq!(
+            profiles.match_window_class("steam_app_730").unwrap().name,
+            "new"
+        );
+        assert_eq!(profiles.match_steam_app_id(730).unwrap().name, "new");
     }
 
     #[test]

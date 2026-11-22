@@ -133,6 +133,51 @@ class Backend(unittest.TestCase):
         self.assertEqual(status["result"], "Updated to v0.5.2")
         self.assertEqual(self.installer_args(), "--enable-daemon --no-steam-entry")
 
+    def test_reinstall_of_the_current_version_runs_the_same_install(self):
+        make_release(self.release, "0.5.1")
+        first = self.install()
+        self.assertEqual(first["result"], "Installed Satur8 v0.5.1")
+
+        # Installed and current: no main button, the reinstall one instead.
+        self.plugin.latest = "0.5.1"
+        status = asyncio.run(self.plugin.status())
+        self.assertIsNone(status["button"])
+        self.assertEqual(status["reinstall"], "Reinstall Satur8")
+        self.assertIn("install it over v0.5.1", status["reinstall_question"])
+
+        # Something broke the install; the user's own files are beside it.
+        os.remove(os.path.join(self.home, "installer-args.txt"))
+        settings = os.path.join(self.home, ".config", "satur8")
+        os.makedirs(settings)
+        with open(os.path.join(settings, "profiles.toml"), "w") as handle:
+            handle.write("default_saturation = 1.3\n")
+
+        status = self.install(in_steam_library=True)
+        self.assertEqual(status["error"], "")
+        self.assertEqual(status["result"], "Satur8 v0.5.1 was installed again")
+        self.assertEqual(self.installer_args(), "--enable-daemon --no-steam-entry")
+        self.assertEqual(status["reinstall"], "Reinstall Satur8")
+        self.assertIn("Checking the download against its SHA-256", self.log())
+        with open(os.path.join(settings, "profiles.toml")) as handle:
+            self.assertEqual(handle.read(), "default_saturation = 1.3\n")
+
+    def test_reinstall_is_not_offered_before_satur8_is_installed(self):
+        status = asyncio.run(self.plugin.status())
+        self.assertIsNone(status["reinstall"])
+        self.assertEqual(status["reinstall_question"], "")
+
+    def test_a_reinstall_that_fails_its_checksum_leaves_the_install_alone(self):
+        make_release(self.release, "0.5.1")
+        self.install()
+        os.remove(os.path.join(self.home, "installer-args.txt"))
+        with open(os.path.join(self.release, logic.TARBALL), "ab") as handle:
+            handle.write(b"tampered")
+        status = self.install()
+        self.assertIn("does not match its checksum", status["error"])
+        self.assertIsNone(self.installer_args())
+        self.assertEqual(status["installed"], "0.5.1")
+        self.assertEqual(status["reinstall"], "Reinstall Satur8")
+
     def test_a_download_that_does_not_match_its_checksum_runs_nothing(self):
         make_release(self.release, "0.5.1")
         with open(os.path.join(self.release, logic.TARBALL), "ab") as handle:

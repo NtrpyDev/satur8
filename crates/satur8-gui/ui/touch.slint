@@ -44,7 +44,7 @@ export global Gm {
     in property <int> page: 0;              // 0 Games, 1 Status, 2 About
     in property <[GmGame]> games;
     in property <int> rest-percent: 0;
-    // Focus (src/gm.rs, Focus): kind 0 Everything else, 1 Add a game,
+    // Focus (src/gm.rs, Focus): kind 0 General, 1 Add a game,
     // 2 a game's row, 3 its remove question, 4 a list row, 5 a page item.
     in property <int> focus-kind: 1;
     in property <int> focus-index: 0;
@@ -678,7 +678,7 @@ export component GameModeUi inherits Rectangle {
     }
 
     // ================= Games =================
-    // Rows, top to bottom: Everything else, the Games heading with Add a
+    // Rows, top to bottom: General, the Games heading with Add a
     // game, one row per game, a note.
     if Gm.page == 0: games-page := Scroller {
         x: 0; y: root.top; width: root.width; height: root.body-h;
@@ -700,9 +700,10 @@ export component GameModeUi inherits Rectangle {
             }
         }
 
-        // Everything else: what the desktop app calls Desktop vibrance. In a
-        // gaming session there is no desktop: it is Steam's own screens and
-        // every game without a row below. It is the base the games sit on,
+        // General: what the desktop app calls Desktop vibrance. In a gaming
+        // session there is no desktop: it is Steam's own screens and every
+        // game without a row below. A game whose row is turned off does not
+        // take it: that game shows normal colors. It is the base the games sit on,
         // so it is not one more card: it is a band across the screen, joined
         // to the header.
         Rectangle {
@@ -714,13 +715,13 @@ export component GameModeUi inherits Rectangle {
             x: 16px; y: 0px; width: root.row-w; height: 102px;
             Text {
                 x: 14px; y: 7px; width: parent.width - 14px - 250px; height: 22px;
-                text: "Everything else";
+                text: "General";
                 font-family: Font.head; font-weight: Font.head-weight; font-size: 17px; color: Pal.ink;
                 vertical-alignment: center;
             }
             Text {
                 x: 14px; y: 28px; width: parent.width - 14px - 250px; height: 16px;
-                text: "Steam and games without a row below";
+                text: "Steam's own screens, and games with no row below";
                 font-family: Font.reg; font-weight: Font.reg-weight; font-size: 12px; color: Pal.muted;
                 vertical-alignment: center; overflow: elide;
             }
@@ -1093,7 +1094,7 @@ export component GameModeUi inherits Rectangle {
             }
             Text {
                 x: 16px; y: 54px; width: parent.width - 32px; height: 66px;
-                text: "Per-game digital vibrance for Linux. Satur8 changes the display's colors after the game has drawn them; it does not read or change the game. In Steam Game Mode each game's setting shows while that game is on screen, and Steam's own screens use Everything else.";
+                text: "Per-game digital vibrance for Linux. Satur8 changes the display's colors after the game has drawn them; it does not read or change the game. In Steam Game Mode each game's setting shows while that game is on screen, and Steam's own screens use General.";
                 font-family: Font.reg; font-weight: Font.reg-weight; font-size: 13px; color: Pal.soft;
                 wrap: word-wrap;
             }
