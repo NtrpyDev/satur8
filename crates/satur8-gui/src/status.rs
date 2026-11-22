@@ -2,40 +2,39 @@
 //! switching toggle, the repair plan, the "Right now" view, and the system
 //! information used by "Copy system info" and "Report a bug".
 //!
-//! Everything that changes the system goes through [`System`], so the plans
-//! can be tested with a fake. [`RealSystem`] is the only implementation that
-//! touches the user's session, and it only runs after a click.
+//! Everything that changes the system goes through
+//! [`System`](satur8_core::switching::System), so the plans can be tested
+//! with a fake. [`RealSystem`] is the only implementation that touches the
+//! user's session, and it only runs after a click.
 
 use std::path::PathBuf;
-use std::process::Command;
 
-use satur8_core::{Desktop, Environment, SessionType};
+use satur8_core::Environment;
+#[cfg(test)]
+use satur8_core::{Desktop, SessionType};
 use satur8_kwin::repair::Step as RepairStep;
 use zbus::blocking::Connection;
 
-/// The daemon's systemd user unit (installed by install.sh and the packages).
-pub const DAEMON_UNIT: &str = "satur8-daemon.service";
-/// The KWin script id (assets/kwin-script/metadata.json).
-pub const FOCUS_SCRIPT: &str = "satur8-focus";
-/// kwinrc key that enables the script at login (packaging/install.sh:267).
-const FOCUS_KEY: &str = "satur8-focusEnabled";
-const DAEMON_BUS: &str = "org.satur8.Daemon";
+// The switching toggle's state and steps are shared with `satur8 auto`: the
+// pure part lives in satur8_core::switching, the system part in
+// satur8_backend::switching.
+use satur8_backend::switching::{
+    find_script, name_has_owner, script_enabled, script_loaded, unit_state, DAEMON_BUS,
+};
+pub use satur8_backend::switching::{wait_for_daemon, RealSystem};
+use satur8_core::switching::{self as switching, SwitchFacts};
+pub use satur8_core::switching::{
+    execute, kde_wayland, plan_starts_daemon, Action, SwitchState, UnitState,
+};
+#[cfg(test)]
+use satur8_core::switching::{
+    focus_enabled_in, manager_steps, parse_unit_state, unit_state_from_manager, ManagerStep, System,
+};
+
 const DAEMON_PATH: &str = "/org/satur8/Daemon";
 const KWIN_BUS: &str = "org.kde.KWin";
-const SYSTEMD_BUS: &str = "org.freedesktop.systemd1";
-const SYSTEMD_PATH: &str = "/org/freedesktop/systemd1";
-const SYSTEMD_MANAGER: &str = "org.freedesktop.systemd1.Manager";
 
 // ------------------------------------------------------------------ facts
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UnitState {
-    Enabled,
-    Disabled,
-    NotInstalled,
-    /// systemctl could not answer (no user manager reachable).
-    Unknown,
-}
 
 /// What the KWin effect check found. Only filled on KDE Plasma Wayland.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -83,16 +82,24 @@ pub struct Facts {
     pub script_path: Option<PathBuf>,
 }
 
-pub fn kde_wayland(env: &Environment) -> bool {
-    env.session == SessionType::Wayland && env.desktop == Desktop::Kde
+impl Facts {
+    /// The part of the facts automatic per-game switching depends on.
+    pub fn switching(&self) -> SwitchFacts {
+        SwitchFacts {
+            env: self.env,
+            backend: self.backend.clone(),
+            daemon_running: self.daemon_running,
+            unit: self.unit,
+            script_enabled: self.script_enabled,
+            script_loaded: self.script_loaded,
+            script_path: self.script_path.clone(),
+        }
+    }
 }
 
-/// Steam Game Mode: the backend Satur8 selected is gamescope. Selection only
-/// reaches gamescope when no desktop backend answered, so this is never true
-/// in a KDE Plasma, GNOME, Hyprland or NVIDIA X11 session. There the daemon
-/// follows gamescope's focus by itself: no KWin effect, no KWin script.
+/// Steam Game Mode; see [`satur8_core::switching::game_mode`].
 pub fn game_mode(facts: &Facts) -> bool {
-    facts.backend.as_deref() == Some("gamescope")
+    switching::game_mode(facts.backend.as_deref())
 }
 
 /// KDE Plasma on Wayland, where the KWin effect and focus script apply.
@@ -336,183 +343,22 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
 
 // ------------------------------------------------- per-game switching toggle
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SwitchState {
-    /// The toggle can be used in this session.
-    pub available: bool,
-    /// Every part of per-game switching is on right now.
-    pub on: bool,
-    /// One line under the toggle.
-    pub detail: String,
-}
-
-/// The line under the toggle when switching is not fully on: what is done.
-fn partly_detail(done: &[&str]) -> String {
-    if done.is_empty() {
-        "Off. Game profiles are not applied automatically".to_string()
-    } else {
-        format!("Partly on ({}). Turn on to finish", done.join(", "))
-    }
-}
-
-/// The toggle in Steam Game Mode, where switching is only the user service.
-fn game_mode_switch_state(facts: &Facts) -> SwitchState {
-    if facts.unit == UnitState::NotInstalled {
-        return SwitchState {
-            available: false,
-            on: false,
-            detail: "The background service is not installed; reinstall Satur8".into(),
-        };
-    }
-    let running = facts.daemon_running == Some(true);
-    if running && facts.unit != UnitState::Disabled {
-        return SwitchState {
-            available: true,
-            on: true,
-            detail: "Each game's profile applies when its window is focused".into(),
-        };
-    }
-    let mut done = Vec::new();
-    if running {
-        done.push("service running");
-    }
-    if facts.unit == UnitState::Enabled {
-        done.push("service starts at login");
-    }
-    SwitchState {
-        available: true,
-        on: false,
-        detail: partly_detail(&done),
-    }
-}
-
 /// Derive the toggle from the real system state (never from a stored flag).
 pub fn switch_state(facts: &Facts) -> SwitchState {
-    if game_mode(facts) {
-        return game_mode_switch_state(facts);
-    }
-    if !kde_wayland(&facts.env) {
-        return SwitchState {
-            available: false,
-            on: false,
-            detail: format!(
-                "Needs KDE Plasma on Wayland; this session is {} / {}",
-                facts.env.session, facts.env.desktop
-            ),
-        };
-    }
-    if facts.script_path.is_none() {
-        return SwitchState {
-            available: false,
-            on: false,
-            detail: "The focus script is not installed; reinstall Satur8".into(),
-        };
-    }
-    if facts.unit == UnitState::NotInstalled {
-        return SwitchState {
-            available: false,
-            on: false,
-            detail: "The background service is not installed; reinstall Satur8".into(),
-        };
-    }
-
-    let running = facts.daemon_running == Some(true);
-    let at_login = facts.unit != UnitState::Disabled;
-    let loaded = facts.script_loaded == Some(true);
-    let on = running && at_login && facts.script_enabled && loaded;
-    if on {
-        return SwitchState {
-            available: true,
-            on: true,
-            detail: "Each game's profile applies when its window is focused".into(),
-        };
-    }
-
-    let mut done = Vec::new();
-    if running {
-        done.push("service running");
-    }
-    if facts.unit == UnitState::Enabled {
-        done.push("service starts at login");
-    }
-    if facts.script_enabled {
-        done.push("detection turned on");
-    }
-    if loaded {
-        done.push("detection running");
-    }
-    SwitchState {
-        available: true,
-        on: false,
-        detail: partly_detail(&done),
-    }
+    switching::switch_state(&facts.switching())
 }
 
 // ------------------------------------------------------------------ actions
 
-/// One system-changing step. Only [`RealSystem`] executes these for real.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Action {
-    /// What `satur8 repair` does (satur8_kwin::repair::repair).
-    RepairEffect,
-    /// `systemctl --user <args> satur8-daemon.service`.
-    Systemctl(Vec<&'static str>),
-    /// kwinrc [Plugins] satur8-focusEnabled = value, via kwriteconfig6.
-    SetFocusEnabled(bool),
-    /// Ask the running KWin to reread its configuration.
-    KwinReconfigure,
-    /// Load and start the focus script in the running KWin, unless loaded.
-    LoadScript(PathBuf),
-    /// Unload the focus script from the running KWin.
-    UnloadScript,
-}
-
-impl Action {
-    pub fn describe(&self) -> String {
-        match self {
-            Action::RepairEffect => "Check and repair the saturation effect".into(),
-            Action::Systemctl(args) => format!("systemctl --user {} {DAEMON_UNIT}", args.join(" ")),
-            Action::SetFocusEnabled(on) => {
-                format!("kwriteconfig6 --file kwinrc --group Plugins --key {FOCUS_KEY} {on}")
-            }
-            Action::KwinReconfigure => "Ask KDE to reload its settings".into(),
-            Action::LoadScript(_) => "Start game detection in KDE".into(),
-            Action::UnloadScript => "Stop game detection in KDE".into(),
-        }
-    }
-}
-
 /// The installer's three steps, plus loading the script into the running
-/// KWin (reconfigure alone does not hot-load it). In Game Mode only the
-/// service step applies.
+/// KWin. In Game Mode only the service step applies.
 pub fn plan_enable(facts: &Facts) -> Vec<Action> {
-    if game_mode(facts) {
-        return vec![Action::Systemctl(vec!["enable", "--now"])];
-    }
-    let mut plan = vec![
-        Action::Systemctl(vec!["enable", "--now"]),
-        Action::SetFocusEnabled(true),
-        Action::KwinReconfigure,
-    ];
-    if facts.script_loaded != Some(true) {
-        if let Some(path) = &facts.script_path {
-            plan.push(Action::LoadScript(path.clone()));
-        }
-    }
-    plan
+    switching::plan_enable(&facts.switching())
 }
 
 /// The reverse of [`plan_enable`].
 pub fn plan_disable(facts: &Facts) -> Vec<Action> {
-    if game_mode(facts) {
-        return vec![Action::Systemctl(vec!["disable", "--now"])];
-    }
-    vec![
-        Action::SetFocusEnabled(false),
-        Action::KwinReconfigure,
-        Action::UnloadScript,
-        Action::Systemctl(vec!["disable", "--now"]),
-    ]
+    switching::plan_disable(&facts.switching())
 }
 
 /// `satur8 repair`, plus starting the daemon and loading the focus script when
@@ -535,146 +381,6 @@ pub fn plan_repair(facts: &Facts) -> Vec<Action> {
         }
     }
     plan
-}
-
-/// Whether a plan starts the background service. `systemctl start` returns
-/// once the process is forked, before the daemon has claimed its bus name, so
-/// a re-check right after it would still report "Not running".
-pub fn plan_starts_daemon(plan: &[Action]) -> bool {
-    plan.iter().any(|action| match action {
-        Action::Systemctl(args) => {
-            args.contains(&"start") || (args.contains(&"enable") && args.contains(&"--now"))
-        }
-        _ => false,
-    })
-}
-
-/// Wait until org.satur8.Daemon has an owner, up to `timeout`. Read-only.
-pub fn wait_for_daemon(timeout: std::time::Duration) -> bool {
-    let Ok(conn) = session() else {
-        return false;
-    };
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        if name_has_owner(&conn, DAEMON_BUS) == Some(true) {
-            return true;
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(250));
-    }
-}
-
-/// Something that can carry out an [`Action`].
-pub trait System {
-    fn run(&mut self, action: &Action) -> Result<String, String>;
-}
-
-/// Run every step, in order, and return one log line per step. A failed step
-/// does not stop the later ones; each one reports for itself.
-pub fn execute(system: &mut dyn System, plan: &[Action]) -> Vec<(bool, String)> {
-    plan.iter()
-        .map(|action| match system.run(action) {
-            Ok(note) if note.is_empty() => (true, action.describe()),
-            Ok(note) => (true, format!("{}: {note}", action.describe())),
-            Err(error) => (false, format!("{} failed: {error}", action.describe())),
-        })
-        .collect()
-}
-
-/// The real thing. Spawns systemctl and kwriteconfig6 (system tools, not a
-/// satur8 binary) and talks to KWin over D-Bus.
-pub struct RealSystem;
-
-impl System for RealSystem {
-    fn run(&mut self, action: &Action) -> Result<String, String> {
-        match action {
-            Action::RepairEffect => satur8_kwin::repair::repair().map(|outcome| outcome.describe()),
-            Action::Systemctl(args) => {
-                if on_path("systemctl") {
-                    let mut cmd = Command::new("systemctl");
-                    cmd.arg("--user").args(args).arg(DAEMON_UNIT);
-                    run_command(cmd)
-                } else {
-                    // Steam starts the app inside its runtime container,
-                    // which has no systemctl; the user's systemd is still on
-                    // the session bus.
-                    let conn = session()?;
-                    for step in manager_steps(args) {
-                        run_manager_step(&conn, step)?;
-                    }
-                    Ok(String::new())
-                }
-            }
-            Action::SetFocusEnabled(on) => {
-                let mut cmd = Command::new("kwriteconfig6");
-                cmd.args(["--file", "kwinrc", "--group", "Plugins", "--key", FOCUS_KEY])
-                    .arg(if *on { "true" } else { "false" });
-                run_command(cmd)
-            }
-            Action::KwinReconfigure => {
-                let conn = session()?;
-                // reconfigure is declared Q_NOREPLY; a normal call would wait
-                // for a reply that never comes.
-                let msg = zbus::Message::method_call("/KWin", "reconfigure")
-                    .and_then(|b| b.destination(KWIN_BUS))
-                    .and_then(|b| b.interface("org.kde.KWin"))
-                    .and_then(|b| b.with_flags(zbus::message::Flags::NoReplyExpected))
-                    .and_then(|b| b.build(&()))
-                    .map_err(|e| e.to_string())?;
-                conn.send(&msg).map_err(|e| e.to_string())?;
-                Ok(String::new())
-            }
-            Action::LoadScript(path) => {
-                let conn = session()?;
-                if script_loaded(&conn) == Some(true) {
-                    return Ok("already running".into());
-                }
-                let id: i32 = call(
-                    &conn,
-                    KWIN_BUS,
-                    "/Scripting",
-                    "org.kde.kwin.Scripting",
-                    "loadScript",
-                    &(path.to_string_lossy().as_ref(), FOCUS_SCRIPT),
-                )?;
-                if id < 0 {
-                    return Err(format!("KDE refused to load the script (id {id})"));
-                }
-                call::<()>(
-                    &conn,
-                    KWIN_BUS,
-                    "/Scripting",
-                    "org.kde.kwin.Scripting",
-                    "start",
-                    &(),
-                )?;
-                Ok(String::new())
-            }
-            Action::UnloadScript => {
-                let conn = session()?;
-                let _: bool = call(
-                    &conn,
-                    KWIN_BUS,
-                    "/Scripting",
-                    "org.kde.kwin.Scripting",
-                    "unloadScript",
-                    &(FOCUS_SCRIPT,),
-                )?;
-                Ok(String::new())
-            }
-        }
-    }
-}
-
-fn run_command(mut cmd: Command) -> Result<String, String> {
-    let out = cmd.output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(String::new())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
 }
 
 /// The rows the Game Mode layout lists: what is checked there. The KDE
@@ -709,30 +415,6 @@ where
     reply.body().deserialize::<R>().map_err(|e| e.to_string())
 }
 
-fn name_has_owner(conn: &Connection, name: &str) -> Option<bool> {
-    call(
-        conn,
-        "org.freedesktop.DBus",
-        "/org/freedesktop/DBus",
-        "org.freedesktop.DBus",
-        "NameHasOwner",
-        &(name,),
-    )
-    .ok()
-}
-
-fn script_loaded(conn: &Connection) -> Option<bool> {
-    call(
-        conn,
-        KWIN_BUS,
-        "/Scripting",
-        "org.kde.kwin.Scripting",
-        "isScriptLoaded",
-        &(FOCUS_SCRIPT,),
-    )
-    .ok()
-}
-
 fn get_property<R>(conn: &Connection, dest: &str, path: &str, iface: &str, name: &str) -> Option<R>
 where
     R: TryFrom<zbus::zvariant::OwnedValue>,
@@ -747,192 +429,6 @@ where
     )
     .ok()?;
     R::try_from(value).ok()
-}
-
-fn unit_state() -> UnitState {
-    match Command::new("systemctl")
-        .args(["--user", "is-enabled", DAEMON_UNIT])
-        .output()
-    {
-        Ok(out) => parse_unit_state(
-            &String::from_utf8_lossy(&out.stdout),
-            &String::from_utf8_lossy(&out.stderr),
-        ),
-        // No systemctl to run: Steam's runtime container, where the app runs
-        // when it is started from the Steam library. Ask systemd itself.
-        Err(_) => {
-            let answer = session().and_then(|conn| {
-                call::<String>(
-                    &conn,
-                    SYSTEMD_BUS,
-                    SYSTEMD_PATH,
-                    SYSTEMD_MANAGER,
-                    "GetUnitFileState",
-                    &(DAEMON_UNIT,),
-                )
-            });
-            unit_state_from_manager(answer.as_deref().map_err(String::as_str))
-        }
-    }
-}
-
-/// Map systemd's own answer to `GetUnitFileState` to a [`UnitState`]: the
-/// state word `systemctl is-enabled` prints, or its error for a unit that
-/// does not exist ("No such file or directory").
-pub fn unit_state_from_manager(answer: Result<&str, &str>) -> UnitState {
-    match answer {
-        Ok(state) => parse_unit_state(state, ""),
-        Err(error) if error.contains("No such file") => UnitState::NotInstalled,
-        Err(_) => UnitState::Unknown,
-    }
-}
-
-/// One call to the user's systemd over the session bus.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ManagerStep {
-    Enable,
-    Disable,
-    /// Reread unit files, as `systemctl enable` and `disable` do afterwards.
-    Reload,
-    Start,
-    Stop,
-}
-
-/// The calls that do what `systemctl --user <args> satur8-daemon.service`
-/// does, for the argument lists [`Action::Systemctl`] is built with.
-pub fn manager_steps(args: &[&str]) -> Vec<ManagerStep> {
-    let now = args.contains(&"--now");
-    let mut steps = Vec::new();
-    for arg in args {
-        match *arg {
-            "enable" => {
-                steps.extend([ManagerStep::Enable, ManagerStep::Reload]);
-                if now {
-                    steps.push(ManagerStep::Start);
-                }
-            }
-            "disable" => {
-                steps.extend([ManagerStep::Disable, ManagerStep::Reload]);
-                if now {
-                    steps.push(ManagerStep::Stop);
-                }
-            }
-            "start" => steps.push(ManagerStep::Start),
-            "stop" => steps.push(ManagerStep::Stop),
-            _ => {}
-        }
-    }
-    steps
-}
-
-fn run_manager_step(conn: &Connection, step: ManagerStep) -> Result<(), String> {
-    type Changes = Vec<(String, String, String)>;
-    fn manager<R>(
-        conn: &Connection,
-        method: &str,
-        body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
-    ) -> Result<R, String>
-    where
-        R: for<'d> zbus::zvariant::DynamicDeserialize<'d>,
-    {
-        call(
-            conn,
-            SYSTEMD_BUS,
-            SYSTEMD_PATH,
-            SYSTEMD_MANAGER,
-            method,
-            body,
-        )
-    }
-    match step {
-        ManagerStep::Enable => {
-            manager::<(bool, Changes)>(conn, "EnableUnitFiles", &(vec![DAEMON_UNIT], false, false))
-                .map(|_| ())
-        }
-        ManagerStep::Disable => {
-            manager::<Changes>(conn, "DisableUnitFiles", &(vec![DAEMON_UNIT], false)).map(|_| ())
-        }
-        ManagerStep::Reload => manager::<()>(conn, "Reload", &()),
-        ManagerStep::Start => {
-            manager::<zbus::zvariant::OwnedObjectPath>(conn, "StartUnit", &(DAEMON_UNIT, "replace"))
-                .map(|_| ())
-        }
-        ManagerStep::Stop => {
-            manager::<zbus::zvariant::OwnedObjectPath>(conn, "StopUnit", &(DAEMON_UNIT, "replace"))
-                .map(|_| ())
-        }
-    }
-}
-
-/// Whether a program of this name is on `PATH`.
-fn on_path(program: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
-}
-
-/// Map `systemctl --user is-enabled` output to a [`UnitState`].
-pub fn parse_unit_state(stdout: &str, stderr: &str) -> UnitState {
-    match stdout.trim() {
-        "enabled" | "enabled-runtime" | "static" | "linked" | "linked-runtime" | "alias" => {
-            UnitState::Enabled
-        }
-        "disabled" | "indirect" | "masked" | "masked-runtime" => UnitState::Disabled,
-        "not-found" => UnitState::NotInstalled,
-        // Older systemd: "Failed to get unit file state for X: No such file
-        // or directory". A failed connection to the user manager also says
-        // "No such file or directory", so only this exact phrase counts.
-        _ if stderr.contains("Failed to get unit file state") => UnitState::NotInstalled,
-        _ => UnitState::Unknown,
-    }
-}
-
-fn config_home() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-}
-
-/// Read kwinrc [Plugins] satur8-focusEnabled.
-pub fn focus_enabled_in(kwinrc: &str) -> bool {
-    let mut in_plugins = false;
-    for line in kwinrc.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            in_plugins = line == "[Plugins]";
-            continue;
-        }
-        if !in_plugins {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once('=') {
-            if key.trim() == FOCUS_KEY {
-                return value.trim().eq_ignore_ascii_case("true");
-            }
-        }
-    }
-    false
-}
-
-fn find_script() -> Option<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Some(data) = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()) {
-        dirs.push(PathBuf::from(data));
-    } else if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(PathBuf::from(home).join(".local/share"));
-    }
-    let system = std::env::var("XDG_DATA_DIRS")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-    dirs.extend(system.split(':').map(PathBuf::from));
-    dirs.into_iter()
-        .map(|d| {
-            d.join("kwin/scripts")
-                .join(FOCUS_SCRIPT)
-                .join("contents/code/main.js")
-        })
-        .find(|p| p.is_file())
 }
 
 /// Pull "KWin version: x.y.z" out of KWin's support information.
@@ -1018,10 +514,7 @@ pub fn probe() -> Facts {
         (None, None, None)
     };
 
-    let script_enabled = config_home()
-        .and_then(|d| std::fs::read_to_string(d.join("kwinrc")).ok())
-        .map(|text| focus_enabled_in(&text))
-        .unwrap_or(false);
+    let script_enabled = script_enabled();
 
     Facts {
         env,

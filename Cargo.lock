@@ -4078,7 +4078,9 @@ dependencies = [
  "satur8-hyprland",
  "satur8-kwin",
  "satur8-nv-control",
+ "serde",
  "signal-hook",
+ "zbus",
 ]
 
 [[package]]

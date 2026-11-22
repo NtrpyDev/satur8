@@ -4,6 +4,7 @@
 //! saturation from the command line - directly (`set`/`on`/`off`), as a launch
 //! wrapper (`run`), or via per-game profiles (`profile`).
 
+mod auto_cmd;
 mod config;
 mod games_cmd;
 mod gnome_report;
@@ -103,6 +104,12 @@ enum Command {
         #[command(subcommand)]
         cmd: steam_shortcut_cmd::SteamShortcutCmd,
     },
+    /// Turn automatic per-game switching on or off, as the desktop app's
+    /// Status page switch does, or say whether it is on.
+    Auto {
+        #[command(subcommand)]
+        cmd: auto_cmd::AutoCmd,
+    },
     /// Show the current environment, chosen backend, and state.
     Status,
     /// Diagnose the environment and backend availability.
@@ -128,7 +135,13 @@ fn main() -> Result<()> {
     // default so they always reach their restore path.
     if matches!(
         cli.command,
-        Command::Status | Command::Doctor | Command::Outputs { cmd: None } | Command::Games { .. }
+        Command::Status
+            | Command::Doctor
+            | Command::Outputs { cmd: None }
+            | Command::Games { .. }
+            | Command::Auto {
+                cmd: auto_cmd::AutoCmd::Status
+            }
     ) {
         // SAFETY: called once at startup, before any other thread exists.
         unsafe {
@@ -168,6 +181,7 @@ fn main() -> Result<()> {
         Command::Games { json } => games_cmd::run(json),
         Command::Profile { cmd } => profile_cmd::run(cmd),
         Command::SteamShortcut { cmd } => steam_shortcut_cmd::run(cmd),
+        Command::Auto { cmd } => auto_cmd::run(cmd),
         Command::Status => cmd_status(),
         Command::Doctor => cmd_doctor(),
         Command::Repair => cmd_repair(),
@@ -819,6 +833,21 @@ mod tests {
         fn supports_linear_light(&self) -> bool {
             self.supports_linear
         }
+    }
+
+    #[test]
+    fn auto_command_takes_on_off_and_status() {
+        for (word, cmd) in [
+            ("on", auto_cmd::AutoCmd::On),
+            ("off", auto_cmd::AutoCmd::Off),
+            ("status", auto_cmd::AutoCmd::Status),
+        ] {
+            assert!(matches!(
+                Cli::try_parse_from(["satur8", "auto", word]).map(|cli| cli.command),
+                Ok(Command::Auto { cmd: parsed }) if parsed == cmd
+            ));
+        }
+        assert!(Cli::try_parse_from(["satur8", "auto"]).is_err());
     }
 
     #[test]
