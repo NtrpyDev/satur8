@@ -158,8 +158,30 @@ and Bazzite is Fedora-based (the live COPR work carries over).
       plugin: the release tarball's per-user installer puts everything in the
       home folder, which survives SteamOS updates, `--enable-daemon` turns on
       the background service, and `--system` is refused on SteamOS.
-- [ ] Bazzite (atomic Fedora): evaluate rpm-ostree layering versus a Decky/
-      Flatpak split.
+- [ ] Bazzite (atomic Fedora). Checked 2026-11-21 against Bazzite stable
+      45.20261117.1, from source and in a container, not on a Bazzite device:
+      Game Mode runs the OpenGamingCollective gamescope fork 3.17.0-ogc1 with
+      the same look table, focus and server-id properties as the Deck's
+      3.16.30.1, and the per-user tarball installer works unchanged. Bazzite
+      Game Mode is Implemented, not Verified.
+  - [x] Container check: the v0.3.5 per-user installer installs and uninstalls
+        cleanly on the `bazzite-deck` image and uses the bundled KWin 6.8.3
+        effect.
+  - [x] Container check: Bazzite's gamescope, run headless with `--steam`,
+        publishes the focus and server-id properties and applies a Satur8
+        look table (grayscale and 2x confirmed in screenshots).
+  - [x] Installer refuses `--system` on image-based systems (read-only `/usr`).
+        Done in v0.4.0.
+  - [ ] Game Mode on a real Bazzite device with an AMD GPU: the same background
+        service checks that were run on the Steam Deck for v0.4.0.
+  - [ ] KDE Desktop Mode: keep the KWin effect working across KWin updates on
+        an image with no `cmake` or KWin headers.
+  - [ ] GNOME images: add GNOME 51 to the Shell extension once it is tested on
+        GNOME 51.
+  - [ ] Decide on a Fedora 45 COPR build and whether to document `rpm-ostree`
+        layering.
+  - [ ] NVIDIA and Intel Game Mode: check on hardware whether the look applies
+        when gamescope scans a game out directly.
 - [ ] Document clearly what works and what does not on each. SteamOS is done in
       the README's Steam Deck section (v0.4.0); Bazzite is open.
 
