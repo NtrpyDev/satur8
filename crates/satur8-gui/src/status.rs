@@ -1046,9 +1046,46 @@ mod tests {
         let mut facts = healthy();
         facts.unit = UnitState::Disabled;
         assert!(!switch_state(&facts).on);
-        // systemctl unreachable: judge by what is running.
+        // Whether it starts at login could not be read: everything runs,
+        // but that is not "on", which promises the next login too.
         facts.unit = UnitState::Unknown;
+        let switch = switch_state(&facts);
+        assert!(switch.available && !switch.on && switch.login_unchecked);
+        assert!(
+            switch.detail.contains("could not be checked"),
+            "{}",
+            switch.detail
+        );
+        // Confirmed: on.
+        facts.unit = UnitState::Enabled;
         assert!(switch_state(&facts).on);
+    }
+
+    /// The same in Steam Game Mode, where switching is the service alone.
+    #[test]
+    fn game_mode_is_on_only_when_the_service_is_known_to_start_at_login() {
+        assert!(switch_state(&game(Some(true), UnitState::Enabled)).on);
+        let unchecked = switch_state(&game(Some(true), UnitState::Unknown));
+        assert!(unchecked.available && !unchecked.on && unchecked.login_unchecked);
+        assert_eq!(
+            unchecked.detail,
+            "Running now, but whether it starts at login could not be checked. Turn on to make sure"
+        );
+        assert!(
+            unchecked.detail.contains("could not be checked"),
+            "{}",
+            unchecked.detail
+        );
+        // Not running and not readable is simply off, as before.
+        let off = switch_state(&game(Some(false), UnitState::Unknown));
+        assert!(off.available && !off.on && !off.login_unchecked);
+        assert!(off.detail.starts_with("Off"));
+        // Turning it on from there runs the enable step, which does no harm
+        // to a service that is already enabled.
+        assert_eq!(
+            plan_enable(&game(Some(true), UnitState::Unknown)),
+            vec![Action::Systemctl(vec!["enable", "--now"])]
+        );
     }
 
     #[test]
@@ -1349,6 +1386,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: true,
+                login_unchecked: false,
                 detail: "Each game's profile applies when its window is focused".into(),
             }
         );
@@ -1483,6 +1521,7 @@ mod tests {
                 SwitchState {
                     available: false,
                     on: false,
+                    login_unchecked: false,
                     detail: format!(
                         "Needs KDE Plasma on Wayland; this session is {} / {}",
                         facts.env.session, facts.env.desktop
@@ -1732,6 +1771,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: false,
+                login_unchecked: false,
                 detail: "Off. Game profiles are not applied automatically".into(),
             }
         );
@@ -1758,6 +1798,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: false,
+                login_unchecked: false,
                 detail: "Partly on (service starts at login). Turn on to finish".into(),
             }
         );
@@ -1782,6 +1823,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: true,
+                login_unchecked: false,
                 detail: "Each game's profile applies when its window is focused".into(),
             }
         );
