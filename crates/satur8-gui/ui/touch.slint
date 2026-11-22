@@ -7,7 +7,7 @@
 // (src/mode.rs), which is a scale of 2 on a Deck's 1280x800 screen at about
 // 204 pixels per inch: 1 logical pixel is 0.25 mm. So the 44 pixel controls
 // below are 11 mm, the 52 pixel list rows 13 mm, the 12 pixel small text 3 mm
-// and the 30 pixel slider handle 7.5 mm.
+// and the 36 pixel slider handle 9 mm, a fingertip.
 //
 // What is in focus, what the buttons do and what the prompt bar says come
 // from src/gm.rs through the Gm global; this file only draws them and reports
@@ -284,7 +284,7 @@ component TSwitch inherits Rectangle {
 // (+100%), so the strip shows what the value does. Five fixed gradients,
 // drawn once; nothing is animated.
 //
-// The whole 46 pixel band takes the touch. A tap jumps there; a sideways drag
+// The whole 48 pixel band takes the touch. A tap jumps there; a sideways drag
 // from anywhere on the band moves the value; an up-and-down drag scrolls the
 // page and leaves the value alone.
 component TSlider inherits Rectangle {
@@ -298,12 +298,12 @@ component TSlider inherits Rectangle {
     callback down();
     callback pan-begin();
     callback pan-by(length);
-    height: 46px;
-    property <length> pad: 18px;
+    height: 48px;
+    property <length> pad: 22px;
     property <length> track-w: self.width - 2 * root.pad;
     property <length> pos: root.pad + Math.floor(root.track-w * (root.value + 100) / 200 / 1px) * 1px;
     property <length> mid: root.pad + Math.floor(root.track-w / 2px) * 1px;
-    property <length> cy: 23px;
+    property <length> cy: 24px;
     pure function at(x: length) -> float {
         Math.round(Math.clamp((x - root.pad) / root.track-w, 0, 1) * 200 - 100)
     }
@@ -355,14 +355,14 @@ component TSlider inherits Rectangle {
     }
     // The handle: light, so it reads on any color under it.
     Rectangle {
-        x: root.pos - 15px; y: root.cy - 15px; width: 30px; height: 30px;
-        border-radius: 15px; background: Pal.bg;
+        x: root.pos - 18px; y: root.cy - 18px; width: 36px; height: 36px;
+        border-radius: 18px; background: Pal.bg;
         Rectangle {
-            x: 2px; y: 2px; width: 26px; height: 26px;
-            border-radius: 13px; background: Pal.ink;
+            x: 2px; y: 2px; width: 32px; height: 32px;
+            border-radius: 16px; background: Pal.ink;
             Rectangle {
-                x: 9px; y: 9px; width: 8px; height: 8px;
-                border-radius: 4px; background: Pal.bg;
+                x: 11px; y: 11px; width: 10px; height: 10px;
+                border-radius: 5px; background: Pal.bg;
             }
         }
     }
@@ -405,7 +405,7 @@ component GameRowT inherits Card {
     in property <int> index;
     callback pan-begin();
     callback pan-by(length);
-    height: 100px;
+    height: 102px;
     property <bool> here: (Gm.focus-kind == 2 || Gm.focus-kind == 3) && Gm.focus-index == root.index;
     property <bool> asking: Gm.focus-kind == 3 && Gm.focus-index == root.index;
     border-color: root.here && Gm.highlight ? Pal.accent-line : Pal.line;
@@ -682,8 +682,8 @@ export component GameModeUi inherits Rectangle {
     // game, one row per game, a note.
     if Gm.page == 0: games-page := Scroller {
         x: 0; y: root.top; width: root.width; height: root.body-h;
-        property <length> rows-y: 100px + 8px + 52px;
-        property <length> rows-h: Gm.games.length == 0 ? 80px : Gm.games.length * 108px - 8px;
+        property <length> rows-y: 102px + 8px + 52px;
+        property <length> rows-h: Gm.games.length == 0 ? 80px : Gm.games.length * 110px - 8px;
         property <length> note-y: self.rows-y + self.rows-h + 6px;
         content-height: self.note-y + 22px + 8px;
 
@@ -692,11 +692,11 @@ export component GameModeUi inherits Rectangle {
         changed reveal => { self.show-focus(); }
         function show-focus() {
             if (Gm.focus-kind == 0) {
-                self.show(0px, 100px);
+                self.show(0px, 102px);
             } else if (Gm.focus-kind == 1) {
-                self.show(108px, 160px);
+                self.show(110px, 162px);
             } else if (Gm.focus-kind == 2 || Gm.focus-kind == 3) {
-                self.show(self.rows-y + Gm.focus-index * 108px, self.rows-y + Gm.focus-index * 108px + 100px);
+                self.show(self.rows-y + Gm.focus-index * 110px, self.rows-y + Gm.focus-index * 110px + 102px);
             }
         }
 
@@ -706,12 +706,12 @@ export component GameModeUi inherits Rectangle {
         // so it is not one more card: it is a band across the screen, joined
         // to the header.
         Rectangle {
-            x: 0; y: 0; width: root.width; height: 100px;
+            x: 0; y: 0; width: root.width; height: 102px;
             background: Pal.sheet;
-            Rectangle { x: 0; y: 99px; width: parent.width; height: 1px; background: Pal.line; }
+            Rectangle { x: 0; y: 101px; width: parent.width; height: 1px; background: Pal.line; }
         }
         Rectangle {
-            x: 16px; y: 0px; width: root.row-w; height: 100px;
+            x: 16px; y: 0px; width: root.row-w; height: 102px;
             Text {
                 x: 14px; y: 7px; width: parent.width - 14px - 250px; height: 22px;
                 text: "Everything else";
@@ -755,11 +755,11 @@ export component GameModeUi inherits Rectangle {
         }
 
         TSection {
-            x: 18px; y: 108px; width: 200px; height: 52px;
+            x: 18px; y: 110px; width: 200px; height: 52px;
             text: "Games"; font-size: 22px;
         }
         TBtn {
-            x: root.width - 16px - 160px; y: 112px; width: 160px;
+            x: root.width - 16px - 160px; y: 114px; width: 160px;
             kind: 0;
             text: "Add a game";
             has-icon: true; icon: @image-url("icons/plus.svg");
@@ -780,7 +780,7 @@ export component GameModeUi inherits Rectangle {
             }
         }
         for game[i] in Gm.games: GameRowT {
-            x: 16px; y: games-page.rows-y + i * 108px; width: root.row-w;
+            x: 16px; y: games-page.rows-y + i * 110px; width: root.row-w;
             game: game;
             index: i;
             pan-begin => { games-page.pan-begin(); }
