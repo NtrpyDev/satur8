@@ -18,8 +18,9 @@ which claims are honest today.
   `packaging/install.sh`. Since v0.4.0 this is also the install path on SteamOS
   (tested on a Steam Deck in Game Mode).
 - Debian/Ubuntu, SteamOS, and Bazzite packages are not shipped yet. On
-  Bazzite the release tarball's per-user installer is the intended path; it
-  was run in a Bazzite container, not on a Bazzite device.
+  Bazzite the release tarball's per-user installer is the intended path; the
+  v0.4.0 installer and background service were run in a Bazzite container, not
+  on a Bazzite device.
 
 Use `vX.Y.Z` for public Satur8 releases. Only use Arch-style `X.Y.Z-1` when
 talking about the Arch package build number.
