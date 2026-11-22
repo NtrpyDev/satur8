@@ -27,6 +27,11 @@ use crate::look;
 
 /// The look table path gamescope applies to SDR content.
 pub const LOOK: &str = "GAMESCOPE_COLOR_LOOK_G22";
+/// Makes gamescope composite every frame instead of scanning a window out
+/// directly. gamescope colors a directly scanned-out window only through
+/// AMD's plane color properties, so on any other GPU the look reaches the
+/// screen only in a composited frame.
+pub const COMPOSITE_FORCE: &str = "GAMESCOPE_COMPOSITE_FORCE";
 const PID: &str = "GAMESCOPE_PID";
 const SERVER_ID: &str = "GAMESCOPE_XWAYLAND_SERVER_ID";
 const FOCUSED_APP_GFX: &str = "GAMESCOPE_FOCUSED_APP_GFX";
@@ -52,6 +57,8 @@ pub trait RootProps {
     fn string(&self, name: &str) -> Result<Option<String>>;
     /// Replace a property with a STRING value.
     fn set_string(&mut self, name: &str, value: &str) -> Result<()>;
+    /// Replace a property with one CARDINAL value.
+    fn set_cardinal(&mut self, name: &str, value: u32) -> Result<()>;
     /// Remove a property.
     fn delete(&mut self, name: &str) -> Result<()>;
 }
@@ -92,6 +99,8 @@ pub struct ColorState {
     pub virtual_white: Option<(f32, f32)>,
     /// Steam's night mode: amount, hue, saturation.
     pub night_mode: Option<(f32, f32, f32)>,
+    /// `GAMESCOPE_COMPOSITE_FORCE`, `None` when absent.
+    pub composite_force: Option<u32>,
 }
 
 fn first(values: Option<Vec<u32>>) -> Option<u32> {
@@ -210,6 +219,7 @@ pub fn read_color_state(props: &dyn RootProps) -> Result<ColorState> {
         night_mode: floats(NIGHT_MODE)?
             .filter(|v| v.len() == 3)
             .map(|v| (v[0], v[1], v[2])),
+        composite_force: first(props.cardinals(COMPOSITE_FORCE)?),
     })
 }
 
@@ -409,6 +419,21 @@ impl RootProps for X11Root {
         Ok(())
     }
 
+    fn set_cardinal(&mut self, name: &str, value: u32) -> Result<()> {
+        let atom = self.atom(name)?;
+        self.conn
+            .change_property32(
+                PropMode::REPLACE,
+                self.root,
+                atom,
+                AtomEnum::CARDINAL,
+                &[value],
+            )?
+            .check()
+            .with_context(|| format!("setting {name}"))?;
+        Ok(())
+    }
+
     fn delete(&mut self, name: &str) -> Result<()> {
         let atom = self.atom(name)?;
         self.conn
@@ -439,6 +464,11 @@ impl RootProps for FakeRoot {
 
     fn set_string(&mut self, name: &str, value: &str) -> Result<()> {
         self.strings.insert(name.to_string(), value.to_string());
+        Ok(())
+    }
+
+    fn set_cardinal(&mut self, name: &str, value: u32) -> Result<()> {
+        self.cardinals.insert(name.to_string(), vec![value]);
         Ok(())
     }
 
@@ -652,6 +682,7 @@ mod tests {
             "{x} {y}"
         );
         assert_eq!(state.night_mode, None);
+        assert_eq!(state.composite_force, None);
     }
 
     #[test]

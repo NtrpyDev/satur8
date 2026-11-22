@@ -15,6 +15,7 @@
 //! compositor, has a real `Backend` in [`GamescopeBackend`] (`backend.rs`).
 
 mod backend;
+pub mod compose;
 pub mod look;
 pub mod session;
 

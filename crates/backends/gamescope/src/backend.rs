@@ -13,18 +13,24 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use satur8_core::{Backend, BackendError, CostNote, Output, Saturation};
+use satur8_core::{Backend, BackendError, CostNote, Environment, Output, Saturation};
 
+use crate::compose;
 use crate::look;
-use crate::session::{self, RootProps, X11Root, LOOK};
+use crate::session::{self, RootProps, X11Root, COMPOSITE_FORCE, LOOK};
 
 /// The saved foreign look, in the table folder.
 const FOREIGN_FILE: &str = "foreign-look";
+
+/// Present while Satur8 holds `GAMESCOPE_COMPOSITE_FORCE`, in the table folder.
+const FORCE_FILE: &str = "composite-force";
 
 /// The gamescope Game Mode backend.
 pub struct GamescopeBackend {
     display: String,
     dir: PathBuf,
+    /// Whether the look needs gamescope to composite to reach the screen.
+    force_composition: bool,
 }
 
 impl GamescopeBackend {
@@ -34,6 +40,7 @@ impl GamescopeBackend {
         Some(GamescopeBackend {
             display,
             dir: look_dir()?,
+            force_composition: compose::needs_forced_composition(Environment::detect().gpu),
         })
     }
 
@@ -76,8 +83,14 @@ impl Backend for GamescopeBackend {
         "gamescope"
     }
 
+    /// On AMD gamescope colors the game where it is shown. Elsewhere the look
+    /// needs one composite pass per frame while it is on.
     fn cost(&self) -> CostNote {
-        CostNote::ZeroCost
+        if self.force_composition {
+            CostNote::CompositorShaderPass
+        } else {
+            CostNote::ZeroCost
+        }
     }
 
     fn outputs(&self) -> Vec<Output> {
@@ -100,6 +113,14 @@ impl Backend for GamescopeBackend {
             .to_string();
         let mut root = self.root()?;
         take_over(&mut root, &self.dir, &value).map_err(|e| apply_err(format!("{e:#}")))?;
+        if self.force_composition {
+            let forces_itself = session::read_color_state(&root)
+                .ok()
+                .and_then(|state| state.pid)
+                .and_then(compose::gamescope_forces_itself);
+            force_composition(&mut root, &self.dir, forces_itself)
+                .map_err(|e| apply_err(format!("{e:#}")))?;
+        }
         prune_tables(&self.dir, &path);
         Ok(())
     }
@@ -129,6 +150,54 @@ fn give_back(root: &mut dyn RootProps, dir: &Path) -> anyhow::Result<()> {
     let saved = load_foreign(dir);
     session::clear_look(root, saved.as_deref())?;
     let _ = fs::remove_file(dir.join(FOREIGN_FILE));
+    release_composition(root, dir)
+}
+
+/// Force composition while Satur8's table is on (see [`compose`]). A value
+/// something else set is left as it is; the marker file records that Satur8
+/// set it, so a later process removes only what Satur8 set. The marker is
+/// written first, so a crash in between leaves nothing for anyone else to
+/// lose.
+///
+/// A gamescope that forces composition by its own settings (`-c`,
+/// `--force-composition`, `ENABLE_VKBASALT=1`; `forces_itself`) is left
+/// alone: any change to the property, removing it included, sets gamescope's
+/// own switch from the property and would end that. When its environment
+/// cannot be read (`None`) the property is set, and removing it later ends a
+/// forced composition that came from `ENABLE_VKBASALT=1` alone.
+fn force_composition(
+    root: &mut dyn RootProps,
+    dir: &Path,
+    forces_itself: Option<bool>,
+) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+
+    if forces_itself == Some(true) {
+        return Ok(());
+    }
+    let marker = dir.join(FORCE_FILE);
+    let ours = marker.is_file();
+    match root.cardinals(COMPOSITE_FORCE)? {
+        Some(_) if !ours => return Ok(()),
+        Some(values) if values == [1] => return Ok(()),
+        _ => {}
+    }
+    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    fs::write(&marker, "").with_context(|| format!("writing {}", marker.display()))?;
+    root.set_cardinal(COMPOSITE_FORCE, 1)
+}
+
+/// Undo [`force_composition`]: remove the property only when Satur8 set it
+/// and it still holds Satur8's value.
+fn release_composition(root: &mut dyn RootProps, dir: &Path) -> anyhow::Result<()> {
+    let marker = dir.join(FORCE_FILE);
+    if !marker.is_file() {
+        return Ok(());
+    }
+    if root.cardinals(COMPOSITE_FORCE)?.as_deref() == Some(&[1][..]) {
+        root.delete(COMPOSITE_FORCE)?;
+    }
+    let _ = fs::remove_file(&marker);
     Ok(())
 }
 
@@ -300,5 +369,77 @@ mod tests {
         take_over(&mut root, &state.0, OURS).unwrap();
         assert_eq!(state.saved(), None);
         assert!(!state.0.join(FOREIGN_FILE).exists());
+    }
+
+    fn force_of(root: &FakeRoot) -> Option<&[u32]> {
+        root.cardinals.get(COMPOSITE_FORCE).map(Vec::as_slice)
+    }
+
+    /// gamescope started with `-c`: Satur8 does not touch the property, so
+    /// taking its look off cannot end gamescope's own forced composition.
+    #[test]
+    fn a_gamescope_that_composites_by_itself_is_left_alone() {
+        let state = StateDir::new("force-self");
+        let mut root = root_with(None);
+
+        take_over(&mut root, &state.0, OURS).unwrap();
+        force_composition(&mut root, &state.0, Some(true)).unwrap();
+        assert_eq!(force_of(&root), None);
+        assert!(!state.0.join(FORCE_FILE).exists());
+
+        give_back(&mut root, &state.0).unwrap();
+        assert_eq!(force_of(&root), None);
+    }
+
+    /// `satur8 on` forces composition, a second `on` keeps it, and a later
+    /// process's `off` removes it with the look.
+    #[test]
+    fn forced_composition_comes_and_goes_with_the_look() {
+        let state = StateDir::new("force");
+        let mut root = root_with(None);
+
+        take_over(&mut root, &state.0, OURS).unwrap();
+        force_composition(&mut root, &state.0, Some(false)).unwrap();
+        take_over(&mut root, &state.0, OURS_TOO).unwrap();
+        force_composition(&mut root, &state.0, Some(false)).unwrap();
+        assert_eq!(force_of(&root), Some(&[1][..]));
+        assert!(state.0.join(FORCE_FILE).is_file());
+
+        give_back(&mut root, &state.0).unwrap();
+        assert_eq!(look_of(&root), None);
+        assert_eq!(force_of(&root), None);
+        assert!(!state.0.join(FORCE_FILE).exists());
+    }
+
+    #[test]
+    fn a_composite_force_set_by_something_else_is_left_alone() {
+        let state = StateDir::new("force-foreign");
+        let mut root = root_with(None);
+        root.cardinals.insert(COMPOSITE_FORCE.into(), vec![1]);
+
+        take_over(&mut root, &state.0, OURS).unwrap();
+        force_composition(&mut root, &state.0, Some(false)).unwrap();
+        assert!(!state.0.join(FORCE_FILE).exists());
+
+        give_back(&mut root, &state.0).unwrap();
+        assert_eq!(force_of(&root), Some(&[1][..]));
+    }
+
+    /// gamescope restarted while Satur8 held the property: the marker is
+    /// stale, the new root has no property, and the next `on` sets it again.
+    #[test]
+    fn a_stale_marker_after_a_gamescope_restart_sets_the_force_again() {
+        let state = StateDir::new("force-restart");
+        let mut root = root_with(None);
+        take_over(&mut root, &state.0, OURS).unwrap();
+        force_composition(&mut root, &state.0, Some(false)).unwrap();
+
+        let mut restarted = root_with(None);
+        take_over(&mut restarted, &state.0, OURS).unwrap();
+        force_composition(&mut restarted, &state.0, None).unwrap();
+        assert_eq!(force_of(&restarted), Some(&[1][..]));
+
+        give_back(&mut restarted, &state.0).unwrap();
+        assert_eq!(force_of(&restarted), None);
     }
 }

@@ -1334,6 +1334,7 @@ mod tests {
             sdr_gamut_wideness: Some(f32::from_bits(1056964608)),
             virtual_white: Some((f32::from_bits(1050682510), f32::from_bits(1051232957))),
             night_mode: None,
+            composite_force: None,
         }
     }
 
