@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use satur8_backend::{install_signal_handler, select_backend, RestoreGuard};
-use satur8_core::levels::{desktop_picture, profile_outputs_not_connected, profile_picture};
+use satur8_core::levels::{desktop_picture, focus_picture, profile_outputs_not_connected};
 use satur8_core::{Backend, BackendError, Levels, Note, Profile, ProfileOutputs, Profiles};
 use zbus::interface;
 
@@ -35,13 +35,31 @@ enum FocusAction {
 /// non-Steam title launched through umu shares the window class `steam_app_0`,
 /// so class alone cannot tell Tarkov from anything else launched the same way.
 /// The class remains the fallback for windows we cannot resolve a pid for.
+///
+/// A profile that is off still matches: its game is then shown with normal
+/// colors, not the general saturation. A profile that is on always wins over
+/// one that is off, whichever of the two ways found it.
 fn match_focused<'a>(
     profiles: &'a Profiles,
     window_class: &str,
     exe: Option<&str>,
 ) -> Option<&'a Profile> {
-    exe.and_then(|exe| profiles.match_exe(exe))
-        .or_else(|| profiles.match_window_class(window_class))
+    let by_exe = exe.and_then(|exe| profiles.match_exe(exe));
+    let by_class = profiles.match_window_class(window_class);
+    match (by_exe, by_class) {
+        (Some(profile), _) if profile.enabled => Some(profile),
+        (_, Some(profile)) if profile.enabled => Some(profile),
+        (by_exe, by_class) => by_exe.or(by_class),
+    }
+}
+
+/// How a profile's value reads in the log: `1.60`, or that it is off.
+fn shown_text(profile: &Profile) -> String {
+    if profile.enabled {
+        format!("{:.2}", profile.shown_saturation().get())
+    } else {
+        "off: normal colors".to_string()
+    }
 }
 
 /// The output a profile's picture is limited to: the focused output, when the
@@ -83,20 +101,21 @@ struct Current<'a> {
 /// profile that knows only the game's AppID, as one added from the app's list
 /// of installed games does, would never match it. When neither the
 /// executable nor the class finds a profile and the window's process carries
-/// a Steam AppID that a profile has, this is `steam_app_<AppID>`.
+/// a Steam AppID that a profile has, this is `steam_app_<AppID>`. The same
+/// when they find only a profile that is off and the AppID has one that is on.
 fn class_to_match(
     profiles: &Profiles,
     window_class: &str,
     exe: Option<&str>,
     app_id: Option<u32>,
 ) -> Option<String> {
-    if match_focused(profiles, window_class, exe).is_some() {
+    let direct = match_focused(profiles, window_class, exe);
+    if direct.is_some_and(|profile| profile.enabled) {
         return None;
     }
     let app_id = app_id?;
-    profiles
-        .match_steam_app_id(app_id)
-        .map(|_| format!("steam_app_{app_id}"))
+    let by_app_id = profiles.match_steam_app_id(app_id)?;
+    (direct.is_none() || by_app_id.enabled).then(|| format!("steam_app_{app_id}"))
 }
 
 fn decide_focus_action(
@@ -255,7 +274,7 @@ impl BackendState {
             .ok_or_else(|| BackendError::Unavailable("no backend is currently reachable".into()))?;
         let per_output = guard.backend().per_output();
         let desktop = desktop_picture(profiles, per_output);
-        let picture = profile_picture(profiles, profile, focused_output, per_output);
+        let picture = focus_picture(profiles, Some(profile), focused_output, per_output);
         let limited_to = limited_output(profiles, profile, focused_output, per_output);
         let not_connected = if per_output {
             profile_outputs_not_connected(profiles, profile, &guard.backend().outputs())
@@ -281,7 +300,7 @@ impl BackendState {
             .guard
             .as_mut()
             .ok_or_else(|| BackendError::Unavailable("no backend is currently reachable".into()))?;
-        let desktop = desktop_picture(profiles, guard.backend().per_output());
+        let desktop = focus_picture(profiles, None, None, guard.backend().per_output());
         guard.set_restore_to(desktop.levels);
         guard.restore_now()?;
         Ok(with_backend_reason(desktop.notes, guard.backend()))
@@ -410,10 +429,10 @@ impl Daemon {
         ) {
             FocusAction::Apply(profile) => {
                 eprintln!(
-                    "satur8-daemon: '{}' -> profile '{}' ({:.2}){}",
+                    "satur8-daemon: '{}' -> profile '{}' ({}){}",
                     exe.as_deref().unwrap_or(class),
                     profile.name,
-                    profile.saturation().get(),
+                    shown_text(&profile),
                     output.map(|o| format!(" on {o}")).unwrap_or_default()
                 );
                 self.show_profile(&profile, output);
@@ -592,34 +611,28 @@ impl Daemon {
         match (target, self.current.clone()) {
             (Some(profile), current) => {
                 let name = profile.name.clone();
-                let saturation = profile.saturation();
+                let shown = shown_text(&profile);
                 if current.as_deref() == Some(name.as_str()) {
-                    eprintln!(
-                        "satur8-daemon: reapplied active profile '{name}' ({:.2})",
-                        saturation.get()
-                    );
+                    eprintln!("satur8-daemon: reapplied active profile '{name}' ({shown})");
                 } else {
                     eprintln!(
-                        "satur8-daemon: '{}' -> profile '{name}' ({:.2}) after reload",
+                        "satur8-daemon: '{}' -> profile '{name}' ({shown}) after reload",
                         exe.as_deref().unwrap_or(&class),
-                        saturation.get()
                     );
                 }
                 self.show_profile(&profile, output.as_deref());
             }
             (None, Some(current)) => {
-                let still_enabled = self
-                    .profiles
-                    .by_name(&current)
-                    .is_some_and(|profile| profile.enabled);
-                if still_enabled {
+                // A profile that was turned off still matches, so this is a
+                // profile that was removed or no longer names this window.
+                if self.profiles.by_name(&current).is_some() {
                     eprintln!(
                         "satur8-daemon: active profile '{current}' no longer matches '{}' -> restoring default",
                         exe.as_deref().unwrap_or(&class)
                     );
                 } else {
                     eprintln!(
-                        "satur8-daemon: active profile '{current}' is disabled or missing -> restoring default"
+                        "satur8-daemon: active profile '{current}' was removed -> restoring default"
                     );
                 }
                 self.invalidate_current();
@@ -1030,13 +1043,39 @@ mod tests {
         );
     }
 
+    /// Rewritten for the off-means-normal rule: this used to pin that turning
+    /// the active profile off put the desktop back.
     #[test]
-    fn disabling_the_active_profile_restores_the_desktop() {
+    fn turning_the_active_profile_off_shows_normal_colors() {
         let (mut daemon, calls, _) = setup();
+        daemon.profiles.default_saturation = 1.3;
         daemon.react("game.class", 0);
 
         let mut updated = daemon.profiles.clone();
         updated.profiles[0].enabled = false;
+        daemon.replace_profiles(updated.clone());
+
+        // Still the game's profile, now showing 1.0, not the general 1.3.
+        assert_eq!(daemon.current.as_deref(), Some("game"));
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Apply("all", 1.0)]
+        );
+
+        // Turning it on again brings its value back, with the game in front
+        // the whole time.
+        updated.profiles[0].enabled = true;
+        daemon.replace_profiles(updated);
+        assert_eq!(calls.lock().unwrap().last(), Some(&Call::Apply("all", 1.5)));
+    }
+
+    #[test]
+    fn removing_the_active_profile_restores_the_general_value() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("game.class", 0);
+
+        let mut updated = daemon.profiles.clone();
+        updated.profiles.clear();
         daemon.replace_profiles(updated);
 
         assert_eq!(daemon.current, None);
@@ -1066,6 +1105,195 @@ mod tests {
         assert_eq!(
             *calls.lock().unwrap(),
             [Call::Apply("all", 2.0), Call::Reset]
+        );
+    }
+
+    /// General value 1.3; CS2 (730) on at 2.0; ELDEN RING (1245620) off at
+    /// 1.8; nothing for Dota 2 (570).
+    fn four_case_profiles() -> Profiles {
+        let mut profiles = steam_profiles();
+        profiles.default_saturation = 1.3;
+        profiles.profiles.push(Profile {
+            name: "ELDEN RING".into(),
+            enabled: false,
+            saturation: 1.8,
+            match_rule: MatchRule {
+                exe: None,
+                window_class: None,
+                steam_app_id: Some(1245620),
+            },
+            outputs: vec![],
+        });
+        profiles
+    }
+
+    /// The four cases in Steam Game Mode. Each starts from another app in
+    /// front, so the value asserted is the one this focus led to.
+    #[test]
+    fn game_mode_shows_the_right_value_for_each_of_the_four_cases() {
+        // The app in front before, the focused AppID, the profile the daemon
+        // holds afterwards, the value shown.
+        let cases: [(&str, u32, u32, Option<&str>, f32); 4] = [
+            ("a game whose row is on", 769, 730, Some("cs2"), 2.0),
+            (
+                "a game whose row is off",
+                730,
+                1245620,
+                Some("ELDEN RING"),
+                1.0,
+            ),
+            ("a game with no row", 730, 570, None, 1.3),
+            ("Steam's own screens", 730, 769, None, 1.3),
+        ];
+        for (what, before, app_id, profile, value) in cases {
+            let (mut daemon, calls, _) = setup_with(four_case_profiles());
+            let (class, pid) = game_mode_focus(before);
+            daemon.react(&class, pid);
+            let (class, pid) = game_mode_focus(app_id);
+            daemon.react(&class, pid);
+            assert_eq!(daemon.current.as_deref(), profile, "{what}");
+            assert_eq!(
+                calls.lock().unwrap().last(),
+                Some(&Call::Apply("all", value)),
+                "{what}"
+            );
+        }
+    }
+
+    #[test]
+    fn game_mode_moves_between_the_four_cases() {
+        let (mut daemon, calls, _) = setup_with(four_case_profiles());
+        for app_id in [730, 1245620, 570, 1245620, 769] {
+            let (class, pid) = game_mode_focus(app_id);
+            daemon.react(&class, pid);
+        }
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [
+                Call::Apply("all", 2.0), // row on
+                Call::Apply("all", 1.0), // row off: normal, not 1.3
+                Call::Apply("all", 1.3), // no row: the general value
+                Call::Apply("all", 1.0), // row off again
+                Call::Apply("all", 1.3), // back at Steam's screens
+            ]
+        );
+    }
+
+    /// The same four cases from a desktop focus source, which reports a
+    /// window class and a program name.
+    #[test]
+    fn a_desktop_shows_the_right_value_for_each_of_the_four_cases() {
+        let mut profiles = profiles();
+        profiles.default_saturation = 1.3;
+        profiles.profiles.push(Profile {
+            name: "off game".into(),
+            enabled: false,
+            saturation: 1.8,
+            match_rule: MatchRule {
+                exe: Some("offgame".into()),
+                window_class: None,
+                steam_app_id: None,
+            },
+            outputs: vec![],
+        });
+        // The window in front before, the focused window, the profile the
+        // daemon holds afterwards, the value shown.
+        let cases: [(&str, &str, &str, Option<&str>, f32); 4] = [
+            (
+                "a game whose profile is on",
+                "plasmashell",
+                "game.class",
+                Some("game"),
+                1.5,
+            ),
+            (
+                "a game whose profile is off",
+                "game.class",
+                "offgame",
+                Some("off game"),
+                1.0,
+            ),
+            (
+                "a game with no profile",
+                "game.class",
+                "other.game",
+                None,
+                1.3,
+            ),
+            ("the desktop itself", "game.class", "plasmashell", None, 1.3),
+        ];
+        for (what, before, class, profile, value) in cases {
+            let (mut daemon, calls, _) = setup_with(profiles.clone());
+            daemon.react(before, 0);
+            daemon.react(class, 0);
+            assert_eq!(daemon.current.as_deref(), profile, "{what}");
+            assert_eq!(
+                calls.lock().unwrap().last(),
+                Some(&Call::Apply("all", value)),
+                "{what}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_profile_that_is_on_wins_over_one_that_is_off_for_the_same_window() {
+        // The off one is found by program name, the on one by window class.
+        let mut profiles = profiles();
+        profiles.profiles.insert(
+            0,
+            Profile {
+                name: "old".into(),
+                enabled: false,
+                saturation: 1.8,
+                match_rule: MatchRule {
+                    exe: Some("game".into()),
+                    window_class: None,
+                    steam_app_id: None,
+                },
+                outputs: vec![],
+            },
+        );
+        assert_eq!(
+            match_focused(&profiles, "game.class", Some("game")).map(|p| p.name.as_str()),
+            Some("game")
+        );
+        // With only the off one matching, it is the match.
+        assert_eq!(
+            match_focused(&profiles, "something.else", Some("game")).map(|p| p.name.as_str()),
+            Some("old")
+        );
+    }
+
+    #[test]
+    fn a_native_steam_game_whose_only_profile_is_off_is_still_matched_by_app_id() {
+        let mut by_app_id = steam_profiles();
+        by_app_id.profiles[0].enabled = false;
+        assert_eq!(
+            class_to_match(&by_app_id, "cs2", Some("cs2"), Some(730)).as_deref(),
+            Some("steam_app_730")
+        );
+        // An off profile found by program name gives way to an on one by AppID.
+        by_app_id.profiles[0].enabled = true;
+        by_app_id.profiles.push(Profile {
+            name: "old".into(),
+            enabled: false,
+            saturation: 1.2,
+            match_rule: MatchRule {
+                exe: Some("cs2".into()),
+                window_class: None,
+                steam_app_id: None,
+            },
+            outputs: vec![],
+        });
+        assert_eq!(
+            class_to_match(&by_app_id, "cs2", Some("cs2"), Some(730)).as_deref(),
+            Some("steam_app_730")
+        );
+        // Both off: the one found directly stays.
+        by_app_id.profiles[0].enabled = false;
+        assert_eq!(
+            class_to_match(&by_app_id, "cs2", Some("cs2"), Some(730)),
+            None
         );
     }
 
@@ -1319,6 +1547,58 @@ mod tests {
             *pictures.lock().unwrap(),
             [shown(1.0, &[("HDMI-A-1", 1.5)]), Shown::Reset]
         );
+    }
+
+    /// The off-means-normal rule on a backend with a value per output: the
+    /// desktop is 1.3 with HDMI-A-1 at 0.85, and the off profile is normal on
+    /// the outputs it would change when on.
+    #[test]
+    fn a_profile_that_is_off_is_normal_on_its_own_outputs_only() {
+        // `profile_outputs`, the profile's `outputs`, focused output, shown.
+        let rows: [(ProfileOutputs, &[&str], Option<&str>, Shown); 4] = [
+            (ProfileOutputs::All, &[], Some("DP-1"), shown(1.0, &[])),
+            (
+                ProfileOutputs::All,
+                &["HDMI-A-1"],
+                Some("DP-1"),
+                shown(1.3, &[("HDMI-A-1", 1.0)]),
+            ),
+            (
+                ProfileOutputs::Focused,
+                &[],
+                Some("DP-1"),
+                shown(1.3, &[("DP-1", 1.0), ("HDMI-A-1", 0.85)]),
+            ),
+            (
+                ProfileOutputs::Focused,
+                &[],
+                Some("HDMI-A-1"),
+                shown(1.3, &[("HDMI-A-1", 1.0)]),
+            ),
+        ];
+        for (follow, outputs, focused, expected) in rows {
+            let mut profiles = profiles();
+            profiles.default_saturation = 1.3;
+            profiles.profile_outputs = follow;
+            profiles.outputs.insert(
+                "HDMI-A-1".into(),
+                OutputConfig {
+                    default_saturation: Some(0.85),
+                },
+            );
+            profiles.profiles[0].enabled = false;
+            profiles.profiles[0].outputs = outputs.iter().map(|name| name.to_string()).collect();
+            let (mut daemon, pictures) = per_output_setup(profiles);
+
+            daemon.react_on("game.class", 0, focused);
+
+            assert_eq!(daemon.current.as_deref(), Some("game"));
+            assert_eq!(
+                pictures.lock().unwrap().last(),
+                Some(&expected),
+                "{follow:?}, outputs {outputs:?}, focused {focused:?}"
+            );
+        }
     }
 
     #[test]
