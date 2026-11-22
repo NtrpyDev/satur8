@@ -72,12 +72,15 @@ public Q_SLOTS:
     Q_SCRIPTABLE bool linearLight() const;
 
     /// One output's value, by the output name `outputs()` lists. A value equal
-    /// to the base removes the entry.
+    /// to the base removes the entry. An entry for a name that is not connected
+    /// is kept on purpose: windows are matched by name when they are drawn, so
+    /// that output shows its value as soon as it is plugged in.
     Q_SCRIPTABLE void setOutputSaturation(const QString &output, double saturation);
     /// The whole picture in one call, so no frame shows half of it: the base
     /// value and output name -> value for the outputs that differ.
     Q_SCRIPTABLE void setSaturations(double base, const QVariantMap &outputs);
-    /// Output name -> value, for the outputs that differ from the base.
+    /// Output name -> value, for the outputs that differ from the base,
+    /// connected or not.
     Q_SCRIPTABLE QVariantMap outputSaturations() const;
     /// Connected output name -> "Manufacturer Model".
     Q_SCRIPTABLE QVariantMap outputs() const;

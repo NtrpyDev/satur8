@@ -363,8 +363,9 @@ fn outputs_from(listed: BTreeMap<String, String>) -> Vec<Output> {
 /// Show `levels`. An unchanged picture unloads the effect, as `apply` at 1.0
 /// does. A uniform picture goes through `setSaturation`, which every effect
 /// version has. Any other picture needs the per-output calls: one
-/// `setSaturations`, so no frame shows half of it. Outputs the effect does not
-/// list are left out.
+/// `setSaturations`, so no frame shows half of it. Entries for outputs that are
+/// not connected are sent too: the effect matches names when it draws, so
+/// such an output gets its level as soon as it is plugged in.
 fn apply_levels_via(api: &dyn EffectApi, levels: &Levels) -> Result<(), BackendError> {
     if levels.is_identity() {
         let _ = api.unload_effect();
@@ -374,19 +375,13 @@ fn apply_levels_via(api: &dyn EffectApi, levels: &Levels) -> Result<(), BackendE
     if let Some(saturation) = levels.uniform_value() {
         return api.set_one_level(saturation);
     }
-    let Some(listed) = api.effect_outputs()? else {
+    if api.effect_outputs()?.is_none() {
         return Err(BackendError::Unsupported(format!(
             "the loaded KWin effect shows one saturation on every output; {}",
             "log out and back in to load the newer effect"
         )));
-    };
-    let table: BTreeMap<String, Saturation> = levels
-        .outputs
-        .iter()
-        .filter(|(name, _)| listed.contains_key(*name))
-        .map(|(name, level)| (name.clone(), *level))
-        .collect();
-    api.set_levels(levels.base, &table)
+    }
+    api.set_levels(levels.base, &levels.outputs)
 }
 
 /// What every output shows now: unchanged when the effect is not loaded, else
@@ -685,8 +680,11 @@ mod tests {
         assert_eq!(current_levels_via(&effect), Some(levels(1.3, &[])));
     }
 
+    /// The entry is kept, so the output gets its level when it is plugged in;
+    /// until then it matches no window, and the user is told it is not
+    /// connected.
     #[test]
-    fn an_output_kwin_does_not_list_is_skipped_with_the_note() {
+    fn an_output_kwin_does_not_list_is_kept_with_the_note() {
         let effect = FakeEffect::new(true);
         let profiles = Profiles {
             profiles: vec![couch_profile(&["DP-9", "HDMI-A-1"])],
@@ -697,7 +695,10 @@ mod tests {
         apply_levels_via(&effect, &picture.levels).unwrap();
         assert_eq!(
             effect.calls().last(),
-            Some(&Call::SetLevels(1.0, vec![("HDMI-A-1".to_string(), 1.3)]))
+            Some(&Call::SetLevels(
+                1.0,
+                vec![("DP-9".to_string(), 1.3), ("HDMI-A-1".to_string(), 1.3)]
+            ))
         );
 
         let connected = outputs_from(effect.listed.clone());

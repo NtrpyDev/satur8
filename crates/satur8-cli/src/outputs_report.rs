@@ -111,7 +111,7 @@ pub fn not_connected_lines(view: &BackendView, profiles: &Profiles) -> Vec<Strin
     }
     outputs_not_connected(profiles, view.outputs)
         .into_iter()
-        .map(|name| format!("not connected now: {name}; settings for it are skipped"))
+        .map(|name| format!("not connected now: {name}"))
         .collect()
 }
 
@@ -317,7 +317,7 @@ mod tests {
                 "  DP-3     LG 27GP850  (now 1.60)",
                 "  game profiles that list no outputs change the output the game is on, \
                  or every output when that is unknown",
-                "  not connected now: HDMI-A-1; settings for it are skipped",
+                "  not connected now: HDMI-A-1",
             ]
         );
     }
@@ -387,7 +387,7 @@ mod tests {
             [
                 "  per-output settings (backend kwin):",
                 "    [ok] the kwin backend can show a different saturation on each output",
-                "    [..] not connected now: HDMI-A-1; settings for it are skipped",
+                "    [..] not connected now: HDMI-A-1",
             ]
         );
     }

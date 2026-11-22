@@ -75,7 +75,8 @@ pub enum Note {
     /// `profile_outputs` is `"focused"` but no output was reported for the
     /// focused window, so the profile changes every output.
     FocusedOutputUnknown { profile: String },
-    /// The profile names an output that is not connected, so it is skipped.
+    /// The profile names an output that is not connected. Nothing on screen
+    /// changes for it until it is.
     OutputNotConnected { profile: String, output: String },
 }
 
@@ -95,7 +96,7 @@ impl fmt::Display for Note {
             ),
             Note::OutputNotConnected { profile, output } => write!(
                 f,
-                "profile '{profile}' names output '{output}', which is not connected; it is skipped"
+                "profile '{profile}' names output '{output}', which is not connected now"
             ),
         }
     }
