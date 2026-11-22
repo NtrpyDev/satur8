@@ -112,15 +112,14 @@ impl Backend for GamescopeBackend {
             .ok_or_else(|| apply_err(format!("{} is not valid UTF-8", path.display())))?
             .to_string();
         let mut root = self.root()?;
-        take_over(&mut root, &self.dir, &value).map_err(|e| apply_err(format!("{e:#}")))?;
-        if self.force_composition {
-            let forces_itself = session::read_color_state(&root)
+        let force = self.force_composition;
+        put_on(&mut root, &self.dir, &value, force, |root| {
+            session::read_color_state(root)
                 .ok()
                 .and_then(|state| state.pid)
-                .and_then(compose::gamescope_forces_itself);
-            force_composition(&mut root, &self.dir, forces_itself)
-                .map_err(|e| apply_err(format!("{e:#}")))?;
-        }
+                .and_then(compose::gamescope_forces_itself)
+        })
+        .map_err(|e| apply_err(format!("{e:#}")))?;
         prune_tables(&self.dir, &path);
         Ok(())
     }
@@ -140,6 +139,24 @@ fn take_over(root: &mut dyn RootProps, dir: &Path, path: &str) -> anyhow::Result
         save_foreign(dir, &foreign)?;
     }
     root.set_string(LOOK, path)
+}
+
+/// Load Satur8's table `path`, and force composition when `force` (the GPU
+/// needs it, [`compose::needs_forced_composition`]). gamescope's own settings
+/// are read only then, through `forces_itself`.
+fn put_on(
+    root: &mut dyn RootProps,
+    dir: &Path,
+    path: &str,
+    force: bool,
+    forces_itself: impl FnOnce(&dyn RootProps) -> Option<bool>,
+) -> anyhow::Result<()> {
+    take_over(root, dir, path)?;
+    if force {
+        let forces_itself = forces_itself(root);
+        force_composition(root, dir, forces_itself)?;
+    }
+    Ok(())
 }
 
 /// Take Satur8's table off: put the saved foreign look back, or remove the
@@ -373,6 +390,46 @@ mod tests {
 
     fn force_of(root: &FakeRoot) -> Option<&[u32]> {
         root.cardinals.get(COMPOSITE_FORCE).map(Vec::as_slice)
+    }
+
+    /// The Steam Deck reports `gpu: AMD` (the owner's Deck, 2026-11-22): its
+    /// path stays as before, with no composite force ever set or removed.
+    #[test]
+    fn amd_in_game_mode_never_sets_composite_force() {
+        let state = StateDir::new("amd");
+        let mut root = root_with(None);
+        let force = compose::needs_forced_composition(satur8_core::Gpu::Amd);
+
+        put_on(&mut root, &state.0, OURS, force, |_| {
+            panic!("gamescope's own settings are not read on AMD")
+        })
+        .unwrap();
+        put_on(&mut root, &state.0, OURS_TOO, force, |_| None).unwrap();
+        assert_eq!(look_of(&root), Some(OURS_TOO));
+        assert_eq!(force_of(&root), None);
+        assert!(!state.0.join(FORCE_FILE).exists());
+
+        give_back(&mut root, &state.0).unwrap();
+        assert_eq!(force_of(&root), None);
+
+        // A value another program set stays as it was.
+        root.cardinals.insert(COMPOSITE_FORCE.into(), vec![0]);
+        put_on(&mut root, &state.0, OURS, force, |_| None).unwrap();
+        give_back(&mut root, &state.0).unwrap();
+        assert_eq!(force_of(&root), Some(&[0][..]));
+    }
+
+    /// The same steps on NVIDIA set it.
+    #[test]
+    fn nvidia_in_game_mode_sets_composite_force_with_the_look() {
+        let state = StateDir::new("nvidia");
+        let mut root = root_with(None);
+        let force = compose::needs_forced_composition(satur8_core::Gpu::Nvidia);
+
+        put_on(&mut root, &state.0, OURS, force, |_| Some(false)).unwrap();
+        assert_eq!(force_of(&root), Some(&[1][..]));
+        give_back(&mut root, &state.0).unwrap();
+        assert_eq!(force_of(&root), None);
     }
 
     /// gamescope started with `-c`: Satur8 does not touch the property, so
