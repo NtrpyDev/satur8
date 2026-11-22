@@ -4073,6 +4073,7 @@ dependencies = [
  "anyhow",
  "satur8-core",
  "satur8-drm-ctm",
+ "satur8-gamescope",
  "satur8-gnome",
  "satur8-hyprland",
  "satur8-kwin",
