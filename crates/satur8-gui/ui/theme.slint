@@ -1,0 +1,79 @@
+// Shared by the desktop layout (app.slint) and the Steam Game Mode layout
+// (touch.slint): the data rows Rust fills in, the palette and the type roles.
+
+export struct GameRow {
+    name: string,
+    exe: string,
+    percent: int,      // -100..+100 ; 0 = no change (saturation 1.0)
+    enabled: bool,
+    accent: color,
+    initial: string,
+    icon: image,
+    has-icon: bool,
+}
+
+// One row of the "Add game" list: a game by name.
+export struct SteamRow {
+    name: string,
+    detail: string,
+    has-profile: bool,
+    running: bool,
+}
+
+export struct HealthRowUi {
+    label: string,
+    detail: string,
+    level: int,   // 0 ok, 1 problem, 2 not applicable
+}
+
+export struct LogRow {
+    text: string,
+    time: string,
+    ok: bool,
+}
+
+// Brand palette. Dark values are the render tokens (toolkit.py:7-8).
+// Light mode has no target design; it keeps the earlier light values and
+// extends them to the new tokens.
+export global Pal {
+    in-out property <bool> dark: false;
+    out property <color> accent:      dark ? #1fe3cb : #007568;   // TEAL
+    out property <color> accent-2:    dark ? #6cf5e6 : #005e55;   // hover on solid
+    out property <color> accent-soft: dark ? #0c2d2b : #d8f3ed;   // TINT
+    out property <color> accent-soft-2: dark ? #10403c : #c6ece4; // hover on tint
+    out property <color> accent-line: dark ? #1f655c : #7cc8bc;   // TLINE
+    out property <color> on-accent:   dark ? #08211e : #ffffff;   // DARK
+    out property <color> bg:          dark ? #07080b : #eef1f6;   // BG
+    out property <color> sheet:       dark ? #0e1116 : #ffffff;   // SHEET
+    out property <color> surface:     dark ? #11151b : #ffffff;   // SURFACE
+    out property <color> raised:      dark ? #171c22 : #f3f6fb;   // LIGHT
+    out property <color> field:       dark ? #1c2229 : #cfd6e2;   // FIELD
+    out property <color> line:        dark ? #2b313a : #dde3ee;   // LINE
+    out property <color> line-soft:   dark ? #20262e : #e8ecf2;   // LESS
+    out property <color> ink:         dark ? #f3f6fb : #0a0c10;   // WHITE
+    out property <color> soft:        dark ? #c3cbd4 : #2b3442;   // SOFT
+    out property <color> muted:       dark ? #9ba6b3 : #5b6675;   // MUTED
+    out property <color> dim:         dark ? #8995a5 : #6b7685;   // DIM
+    out property <color> hover:       dark ? #1a2028 : #e6ebf3;
+    out property <color> danger:      #ff5f6e;
+    // Problem rows on the Status page.
+    out property <color> warn:        dark ? #f5b84b : #a86200;
+}
+
+// Typography tokens. To swap fonts, change the `import` lines at the top of
+// this file, these family names and weights, and `default-font-family` on
+// AppWindow. Nothing else in the UI names a font.
+// Roles: reg = body text, med = labels, bold = strong labels and buttons,
+// head = headings and the big teal values, mono = numbers, paths and times.
+export global Font {
+    out property <string> reg:  "Hanken Grotesk";
+    out property <int>    reg-weight:  400;
+    out property <string> med:  "Hanken Grotesk";
+    out property <int>    med-weight:  500;
+    out property <string> bold: "Hanken Grotesk";
+    out property <int>    bold-weight: 600;
+    out property <string> head: "Schibsted Grotesk";
+    out property <int>    head-weight: 700;
+    out property <string> mono: "JetBrains Mono";
+    out property <int>    mono-weight: 500;
+}

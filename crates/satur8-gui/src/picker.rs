@@ -1,22 +1,40 @@
-//! The "Add Steam game" picker on the Main page: which installed Steam games
-//! it lists, what each row says, the filter, the empty states, and what
-//! picking a game does to the profiles. Everything here is pure; `main.rs`
-//! reads the Steam library and the Slint file only draws what this returns.
+//! The "Add game" list: the user's games by name. Which games it lists, which
+//! of them are running, what each row says, the filter, the empty states, and
+//! what picking a row does to the profiles. Everything here is pure;
+//! `main.rs` reads the Steam library and what is running, and the Slint files
+//! only draw what this returns.
+//!
+//! The list never shows process names for Steam games. A running Steam game
+//! is found by its Steam AppID (from gamescope in Steam Game Mode, from the
+//! process environment on a desktop) and shown under its name from the Steam
+//! library, first in the list. Only a running game that is not from Steam is
+//! shown by its executable, and launchers, runtimes, wrappers and shells are
+//! never shown at all.
 
 use satur8_core::steam::SteamGame;
 use satur8_core::{MatchRule, Profile, Profiles};
 
-/// The filter field is shown when the library has more games than this,
-/// which is about as many rows as the open picker shows without scrolling.
+/// The filter field is shown when the list has more rows than this, which is
+/// about as many as the open list shows without scrolling.
 pub const FILTER_FROM: usize = 7;
 
-/// Shown when no Steam install folder exists.
-pub const NO_STEAM: &str = "No Steam library was found on this computer, so start your game and use \u{201c}Add running game\u{201d} instead.";
+/// The AppID gamescope reports for Steam's own interface.
+pub const STEAM_UI_APP: u32 = 769;
 
-/// Shown when Steam is installed but lists no games.
-pub const NO_GAMES: &str = "Steam has no games installed yet, so start your game and use \u{201c}Add running game\u{201d} instead.";
+/// Shown on a desktop when no Steam install folder exists and nothing that
+/// looks like a game is running.
+pub const NO_STEAM: &str =
+    "No Steam library was found on this computer, so start your game and open this list again.";
 
-/// What was read from the Steam library when the picker opened.
+/// Shown on a desktop when Steam is installed but lists no games and nothing
+/// that looks like a game is running.
+pub const NO_GAMES: &str =
+    "Steam has no games installed yet, so start your game and open this list again.";
+
+/// Shown in Steam Game Mode when the library lists no games.
+pub const NO_GAMES_GAME_MODE: &str = "Steam has no games installed yet.";
+
+/// What was read from the Steam library when the list opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Library {
     /// No Steam install folder exists.
@@ -25,17 +43,58 @@ pub enum Library {
     Games(Vec<SteamGame>),
 }
 
-/// One row of the picker.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Row {
-    pub app_id: u32,
-    pub name: String,
-    /// The second line: whether the game already has a profile.
-    pub detail: String,
-    pub has_profile: bool,
+impl Library {
+    fn games(&self) -> &[SteamGame] {
+        match self {
+            Library::NoSteam => &[],
+            Library::Games(games) => games,
+        }
+    }
 }
 
-/// Everything the picker shows.
+/// A distinct running program as `satur8_core::proc::running_apps` reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Proc {
+    /// The program's name, for example `cs2` or `Sushiamo.exe`.
+    pub exe: String,
+    /// The Steam AppID in the process environment, if any.
+    pub app_id: Option<u32>,
+    /// Started through Steam, Proton, umu or Wine.
+    pub is_game: bool,
+}
+
+/// What is running right now, as far as this session can tell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Running {
+    /// Steam Game Mode: the AppIDs gamescope lists as having a window
+    /// (`GAMESCOPE_FOCUSABLE_APPS`).
+    Apps(Vec<u32>),
+    /// A desktop session: the programs seen running.
+    Procs(Vec<Proc>),
+}
+
+/// What picking a row adds a profile for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// An installed Steam game, matched by its AppID.
+    Steam(u32),
+    /// A running program that is not an installed Steam game, matched by its
+    /// executable.
+    Program { exe: String, app_id: Option<u32> },
+}
+
+/// One row of the list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    pub target: Target,
+    pub name: String,
+    /// The second line: running or not, and whether it already has a profile.
+    pub detail: String,
+    pub has_profile: bool,
+    pub running: bool,
+}
+
+/// Everything the list shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct View {
     pub rows: Vec<Row>,
@@ -44,22 +103,22 @@ pub struct View {
     pub show_filter: bool,
 }
 
-/// What picking a game does.
+/// What picking a row does.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pick {
     /// The game already has this profile; show it.
     Open(usize),
     /// A profile with the game's name but no Steam AppID exists; give it the
     /// game's AppID and show it, instead of adding a second one.
-    Link(usize),
+    Link(usize, u32),
     /// Add this profile at the end.
     Create(Profile),
 }
 
-/// The profile a game already has: the enabled one that applies to it, else
-/// the first disabled one with its AppID. The same choice `satur8 games` makes
-/// (`crates/satur8-cli/src/games_cmd.rs`, `profile_for`), so the app and the
-/// command agree on which games have a profile.
+/// The profile a Steam game already has: the enabled one that applies to it,
+/// else the first disabled one with its AppID. The same choice `satur8 games`
+/// makes (`crates/satur8-cli/src/games_cmd.rs`, `profile_for`), so the app and
+/// the command agree on which games have a profile.
 pub fn profile_for(profiles: &Profiles, app_id: u32) -> Option<usize> {
     let has_id = |profile: &Profile| profile.match_rule.steam_app_id == Some(app_id);
     profiles
@@ -67,6 +126,103 @@ pub fn profile_for(profiles: &Profiles, app_id: u32) -> Option<usize> {
         .iter()
         .position(|profile| profile.enabled && has_id(profile))
         .or_else(|| profiles.profiles.iter().position(has_id))
+}
+
+/// The profile a program already has: one matched by this executable (the
+/// `.exe` and `.x86_64` endings and letter case do not matter), else one with
+/// the name a new profile for it would get.
+pub fn profile_for_program(profiles: &Profiles, exe: &str) -> Option<usize> {
+    let wanted = program_name(exe).to_lowercase();
+    let same_exe = |profile: &Profile| {
+        profile
+            .match_rule
+            .exe
+            .as_deref()
+            .is_some_and(|e| program_name(e).to_lowercase() == wanted)
+    };
+    profiles.profiles.iter().position(same_exe).or_else(|| {
+        profiles
+            .profiles
+            .iter()
+            .position(|profile| profile.name.to_lowercase() == wanted)
+    })
+}
+
+/// The name shown for a program and given to its profile: the executable
+/// without its `.exe` or `.x86_64` ending.
+pub fn program_name(exe: &str) -> &str {
+    let exe = exe.trim();
+    let lower = exe.to_ascii_lowercase();
+    for ending in [".exe", ".x86_64"] {
+        if lower.ends_with(ending) && exe.len() > ending.len() {
+            return &exe[..exe.len() - ending.len()];
+        }
+    }
+    exe
+}
+
+/// Launchers, runtimes, wrappers, shells and the session's own programs: what
+/// runs around a game and is never something to add. Compared without case.
+pub fn is_plumbing(exe: &str) -> bool {
+    const EXACT: &[&str] = &[
+        "bwrap",
+        "reaper",
+        "steam",
+        "steamwebhelper",
+        "steam-launch-wrapper",
+        "steamos-session",
+        "steamtinkerlaunch",
+        "proton",
+        "protontricks",
+        "winetricks",
+        "umu",
+        "umu-run",
+        "gamemoderun",
+        "gamemoded",
+        "mangohud",
+        "mangoapp",
+        "lutris",
+        "lutris-wrapper",
+        "heroic",
+        "legendary",
+        "gogdl",
+        "nile",
+        "bottles",
+        "env",
+        "sh",
+        "bash",
+        "dash",
+        "zsh",
+        "fish",
+        "sudo",
+        "xwayland",
+        "xorg",
+        "x",
+        "kwin_wayland",
+        "kwin_x11",
+        "plasmashell",
+        "gnome-shell",
+        "hyprland",
+    ];
+    // A name that starts with one of these, when it is not a Windows program.
+    const PREFIXES: &[&str] = &[
+        "pv-",
+        "pressure-vessel",
+        "steam-runtime-",
+        "srt-",
+        "python",
+        "wine",
+        "gamescope",
+        "systemd",
+        "dbus-",
+        "xdg-",
+        "ld-linux",
+    ];
+    let name = exe.trim().to_ascii_lowercase();
+    if name.is_empty() || EXACT.contains(&name.as_str()) {
+        return true;
+    }
+    !name.ends_with(".exe") && PREFIXES.iter().any(|prefix| name.starts_with(prefix))
 }
 
 /// `+75%`, `0%` or `-25%`.
@@ -79,34 +235,121 @@ fn percent(saturation: f32) -> String {
     }
 }
 
-/// The second line of a row.
-fn detail(game: &SteamGame, profile: Option<&Profile>) -> String {
-    let Some(profile) = profile else {
-        return "No profile yet".to_string();
+/// The second line of a row. `shown_name` is the name the row shows, so a
+/// profile under another name is named.
+fn detail(shown_name: &str, running: bool, profile: Option<&Profile>) -> String {
+    let profile_part = match profile {
+        None => "no profile yet".to_string(),
+        Some(profile) => {
+            let named = if profile.name.eq_ignore_ascii_case(shown_name) {
+                "has a profile".to_string()
+            } else {
+                format!("has a profile \u{201c}{}\u{201d}", profile.name)
+            };
+            let off = if profile.enabled { "" } else { ", disabled" };
+            format!("{named}, {}{off}", percent(profile.saturation))
+        }
     };
-    let named = if profile.name.eq_ignore_ascii_case(&game.name) {
-        "Has a profile".to_string()
+    let line = if running {
+        format!("Running now, {profile_part}")
     } else {
-        format!("Has a profile \u{201c}{}\u{201d}", profile.name)
+        profile_part
     };
-    let off = if profile.enabled { "" } else { ", disabled" };
-    format!("{named}, {}{off}", percent(profile.saturation))
+    let mut chars = line.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => line,
+    }
 }
 
-/// One row per installed game, in the library's order.
-pub fn rows(games: &[SteamGame], profiles: &Profiles) -> Vec<Row> {
-    games
-        .iter()
-        .map(|game| {
-            let profile = profile_for(profiles, game.app_id).map(|i| &profiles.profiles[i]);
-            Row {
-                app_id: game.app_id,
-                name: game.name.clone(),
-                detail: detail(game, profile),
-                has_profile: profile.is_some(),
-            }
-        })
+/// The AppIDs of installed games that are running. In Game Mode Steam's own
+/// interface and this app's own Steam shortcut are left out.
+fn running_app_ids(running: &Running, own_app_id: Option<u32>) -> Vec<u32> {
+    let ids: Vec<u32> = match running {
+        Running::Apps(ids) => ids.clone(),
+        Running::Procs(procs) => procs.iter().filter_map(|p| p.app_id).collect(),
+    };
+    ids.into_iter()
+        .filter(|id| *id != 0 && *id != STEAM_UI_APP && Some(*id) != own_app_id)
         .collect()
+}
+
+/// Running programs that are not an installed Steam game and are worth
+/// offering: never plumbing, and either a game by how it was started or, when
+/// the user typed a filter, anything the filter matches. One row per name.
+fn running_programs(running: &Running, library: &[SteamGame], query: &str) -> Vec<Proc> {
+    let Running::Procs(procs) = running else {
+        return Vec::new();
+    };
+    let typed = query.trim().chars().count() >= 2;
+    let mut seen: Vec<String> = Vec::new();
+    let mut programs = Vec::new();
+    for proc in procs {
+        let from_library = proc
+            .app_id
+            .is_some_and(|id| library.iter().any(|game| game.app_id == id));
+        if from_library || is_plumbing(&proc.exe) || !(proc.is_game || typed) {
+            continue;
+        }
+        let key = program_name(&proc.exe).to_lowercase();
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        programs.push(proc.clone());
+    }
+    programs.sort_by_key(|proc| program_name(&proc.exe).to_lowercase());
+    programs
+}
+
+/// Every row, before the filter: running Steam games, then running programs
+/// that are not from Steam, then the rest of the library, each group by name.
+pub fn rows(
+    library: &Library,
+    profiles: &Profiles,
+    running: &Running,
+    own_app_id: Option<u32>,
+    query: &str,
+) -> Vec<Row> {
+    let games = library.games();
+    let running_ids = running_app_ids(running, own_app_id);
+    let steam_row = |game: &SteamGame, running: bool| {
+        let profile = profile_for(profiles, game.app_id).map(|i| &profiles.profiles[i]);
+        Row {
+            target: Target::Steam(game.app_id),
+            name: game.name.clone(),
+            detail: detail(&game.name, running, profile),
+            has_profile: profile.is_some(),
+            running,
+        }
+    };
+    let is_running = |game: &&SteamGame| running_ids.contains(&game.app_id);
+    let mut rows: Vec<Row> = games
+        .iter()
+        .filter(is_running)
+        .map(|game| steam_row(game, true))
+        .collect();
+    for proc in running_programs(running, games, query) {
+        let name = program_name(&proc.exe).to_string();
+        let profile = profile_for_program(profiles, &proc.exe).map(|i| &profiles.profiles[i]);
+        rows.push(Row {
+            detail: detail(&name, true, profile),
+            has_profile: profile.is_some(),
+            running: true,
+            name,
+            target: Target::Program {
+                exe: proc.exe,
+                app_id: proc.app_id,
+            },
+        });
+    }
+    rows.extend(
+        games
+            .iter()
+            .filter(|game| !is_running(game))
+            .map(|game| steam_row(game, false)),
+    );
+    rows
 }
 
 /// The rows whose name contains the query, ignoring case, or whose AppID
@@ -119,38 +362,42 @@ pub fn filter(rows: &[Row], query: &str) -> Vec<Row> {
     let numeric = query.bytes().all(|b| b.is_ascii_digit());
     rows.iter()
         .filter(|row| {
-            row.name.to_lowercase().contains(&query)
-                || (numeric && row.app_id.to_string().starts_with(&query))
+            let id_matches = match &row.target {
+                Target::Steam(app_id) => numeric && app_id.to_string().starts_with(&query),
+                Target::Program { .. } => false,
+            };
+            row.name.to_lowercase().contains(&query) || id_matches
         })
         .cloned()
         .collect()
 }
 
-/// The whole picker for this library, these profiles and this filter text.
-pub fn view(library: &Library, profiles: &Profiles, query: &str) -> View {
-    let games = match library {
-        Library::NoSteam => {
-            return View {
-                rows: Vec::new(),
-                message: NO_STEAM.to_string(),
-                show_filter: false,
-            }
-        }
-        Library::Games(games) => games,
-    };
-    if games.is_empty() {
+/// The whole list for this library, these profiles, what is running and this
+/// filter text. `game_mode` picks the wording of the empty states.
+pub fn view(
+    library: &Library,
+    profiles: &Profiles,
+    running: &Running,
+    own_app_id: Option<u32>,
+    query: &str,
+    game_mode: bool,
+) -> View {
+    let all = rows(library, profiles, running, own_app_id, "");
+    if all.is_empty() && query.trim().is_empty() {
+        let message = match (library, game_mode) {
+            (_, true) => NO_GAMES_GAME_MODE,
+            (Library::NoSteam, false) => NO_STEAM,
+            (Library::Games(_), false) => NO_GAMES,
+        };
         return View {
             rows: Vec::new(),
-            message: NO_GAMES.to_string(),
+            message: message.to_string(),
             show_filter: false,
         };
     }
-    let rows = filter(&rows(games, profiles), query);
+    let rows = filter(&rows(library, profiles, running, own_app_id, query), query);
     let message = if rows.is_empty() {
-        format!(
-            "No installed game matches \u{201c}{}\u{201d}.",
-            query.trim()
-        )
+        format!("No game matches \u{201c}{}\u{201d}.", query.trim())
     } else {
         String::new()
     };
@@ -158,56 +405,76 @@ pub fn view(library: &Library, profiles: &Profiles, query: &str) -> View {
         rows,
         message,
         // Kept while text is typed, so the field never vanishes under the cursor.
-        show_filter: games.len() >= FILTER_FROM || !query.trim().is_empty(),
+        show_filter: all.len() >= FILTER_FROM || !query.trim().is_empty(),
     }
 }
 
-/// Enter in the filter field picks the game when exactly one is listed.
-pub fn enter_pick(view: &View) -> Option<u32> {
-    match view.rows.as_slice() {
-        [only] => Some(only.app_id),
-        _ => None,
-    }
+/// Enter in the filter field picks the row when exactly one is listed.
+pub fn enter_pick(rows: &[Row]) -> Option<usize> {
+    (rows.len() == 1).then_some(0)
 }
 
-/// What picking `game` does with these profiles. A new profile is named after
-/// the game, matched by its AppID only, enabled, at `saturation`.
-pub fn pick(profiles: &Profiles, game: &SteamGame, saturation: f32) -> Pick {
-    if let Some(index) = profile_for(profiles, game.app_id) {
-        return Pick::Open(index);
-    }
-    let same_name = profiles
-        .profiles
-        .iter()
-        .position(|profile| profile.name.eq_ignore_ascii_case(&game.name));
-    let name = match same_name {
-        Some(index) if profiles.profiles[index].match_rule.steam_app_id.is_none() => {
-            return Pick::Link(index);
-        }
-        // The name belongs to another game's profile; keep both apart.
-        Some(_) => format!("{} ({})", game.name, game.app_id),
-        None => game.name.clone(),
-    };
-    Pick::Create(Profile {
+/// What picking this row does with these profiles. A new profile for a Steam
+/// game is named after the game and matched by its AppID only; one for a
+/// program is named after the executable and matched by it. Both are enabled,
+/// at `saturation`.
+pub fn pick(profiles: &Profiles, row: &Row, saturation: f32) -> Pick {
+    let new_profile = |name: String, match_rule: MatchRule| Profile {
         name,
         enabled: true,
         saturation,
-        match_rule: MatchRule {
-            exe: None,
-            window_class: None,
-            steam_app_id: Some(game.app_id),
-        },
+        match_rule,
         outputs: vec![],
-    })
+    };
+    match &row.target {
+        Target::Steam(app_id) => {
+            if let Some(index) = profile_for(profiles, *app_id) {
+                return Pick::Open(index);
+            }
+            let same_name = profiles
+                .profiles
+                .iter()
+                .position(|profile| profile.name.eq_ignore_ascii_case(&row.name));
+            let name = match same_name {
+                Some(index) if profiles.profiles[index].match_rule.steam_app_id.is_none() => {
+                    return Pick::Link(index, *app_id);
+                }
+                // The name belongs to another game's profile; keep both apart.
+                Some(_) => format!("{} ({})", row.name, app_id),
+                None => row.name.clone(),
+            };
+            Pick::Create(new_profile(
+                name,
+                MatchRule {
+                    exe: None,
+                    window_class: None,
+                    steam_app_id: Some(*app_id),
+                },
+            ))
+        }
+        Target::Program { exe, app_id } => {
+            if let Some(index) = profile_for_program(profiles, exe) {
+                return Pick::Open(index);
+            }
+            Pick::Create(new_profile(
+                program_name(exe).to_string(),
+                MatchRule {
+                    exe: Some(exe.clone()),
+                    window_class: None,
+                    steam_app_id: *app_id,
+                },
+            ))
+        }
+    }
 }
 
 /// Carries out a [`Pick`]: returns the index of the profile to show and
 /// whether the profiles changed (and so need saving).
-pub fn apply(profiles: &mut Profiles, game: &SteamGame, pick: Pick) -> (usize, bool) {
+pub fn apply(profiles: &mut Profiles, pick: Pick) -> (usize, bool) {
     match pick {
         Pick::Open(index) => (index, false),
-        Pick::Link(index) => {
-            profiles.profiles[index].match_rule.steam_app_id = Some(game.app_id);
+        Pick::Link(index, app_id) => {
+            profiles.profiles[index].match_rule.steam_app_id = Some(app_id);
             (index, true)
         }
         Pick::Create(profile) => {
@@ -281,11 +548,282 @@ mod tests {
         ]
     }
 
+    /// The ten games `satur8 games` listed on the owner's Steam Deck on
+    /// 2026-11-22.
+    fn deck_library() -> Library {
+        Library::Games(vec![
+            game(2379780, "Balatro"),
+            game(1086940, "Baldur's Gate 3"),
+            game(4421010, "Bills Must Be Paid"),
+            game(1313140, "Cult of the Lamb"),
+            game(1245620, "ELDEN RING"),
+            game(1623730, "Palworld"),
+            game(2868840, "Slay the Spire 2"),
+            game(413150, "Stardew Valley"),
+            game(4555040, "Sushiamo"),
+            game(105600, "Terraria"),
+        ])
+    }
+
     fn profiles(list: Vec<Profile>) -> Profiles {
         Profiles {
             profiles: list,
             ..Profiles::default()
         }
+    }
+
+    fn proc(exe: &str, app_id: Option<u32>, is_game: bool) -> Proc {
+        Proc {
+            exe: exe.to_string(),
+            app_id,
+            is_game,
+        }
+    }
+
+    fn nothing_running() -> Running {
+        Running::Procs(Vec::new())
+    }
+
+    fn all_rows(games: Vec<SteamGame>, profiles: &Profiles) -> Vec<Row> {
+        rows(
+            &Library::Games(games),
+            profiles,
+            &nothing_running(),
+            None,
+            "",
+        )
+    }
+
+    fn names(rows: &[Row]) -> Vec<&str> {
+        rows.iter().map(|row| row.name.as_str()).collect()
+    }
+
+    /// What the owner saw in "Add running game" on his Steam Deck with
+    /// Sushiamo running (2026-11-22): the game's executable among Steam's own
+    /// runtime processes. All of them carry the game's AppID or none.
+    fn deck_processes_with_sushiamo() -> Vec<Proc> {
+        vec![
+            proc("Sushiamo.exe", Some(4555040), true),
+            proc("pv-adverb", Some(4555040), true),
+            proc("python3", Some(4555040), true),
+            proc("python3.13", Some(4555040), true),
+            proc("steam-runtime-launch-client", Some(4555040), true),
+            proc("steam-runtime-launcher-service", Some(4555040), true),
+            proc("steam-runtime-supervisor", None, false),
+            proc("srt-bwrap", Some(4555040), true),
+            proc("reaper", Some(4555040), true),
+            proc("steam-launch-wrapper", Some(4555040), true),
+            proc("proton", Some(4555040), true),
+            proc("wineserver", Some(4555040), true),
+            proc("gamescope-wl", None, false),
+            proc("gamescopereaper", None, false),
+            proc("steam", None, false),
+            proc("steamwebhelper", None, false),
+            proc("bash", None, false),
+            // This app's own container, started from its Steam shortcut.
+            proc("pv-adverb", Some(3367991943), true),
+        ]
+    }
+
+    #[test]
+    fn what_the_owner_saw_becomes_one_running_row_named_sushiamo() {
+        let running = Running::Procs(deck_processes_with_sushiamo());
+        let rows = rows(
+            &deck_library(),
+            &Profiles::default(),
+            &running,
+            Some(3367991943),
+            "",
+        );
+        let running_rows: Vec<&Row> = rows.iter().filter(|row| row.running).collect();
+        assert_eq!(running_rows.len(), 1);
+        assert_eq!(running_rows[0].name, "Sushiamo");
+        assert_eq!(running_rows[0].target, Target::Steam(4555040));
+        assert_eq!(running_rows[0].detail, "Running now, no profile yet");
+        // It is first, and the other nine installed games follow by name.
+        assert_eq!(rows[0].name, "Sushiamo");
+        assert_eq!(rows.len(), 10);
+        assert!(rows
+            .iter()
+            .all(|row| matches!(row.target, Target::Steam(_))));
+    }
+
+    #[test]
+    fn without_a_readable_library_the_game_is_still_the_only_row() {
+        let running = Running::Procs(deck_processes_with_sushiamo());
+        let rows = rows(
+            &Library::NoSteam,
+            &Profiles::default(),
+            &running,
+            Some(3367991943),
+            "",
+        );
+        assert_eq!(names(&rows), vec!["Sushiamo"]);
+        assert_eq!(
+            rows[0].target,
+            Target::Program {
+                exe: "Sushiamo.exe".into(),
+                app_id: Some(4555040),
+            }
+        );
+    }
+
+    /// Game Mode on the owner's Deck with Sushiamo and ELDEN RING running:
+    /// gamescope lists Steam (769), this app's shortcut and the two games.
+    #[test]
+    fn game_mode_lists_running_games_first_by_their_steam_names() {
+        let running = Running::Apps(vec![769, 3367991943, 4555040, 1245620]);
+        let rows = rows(
+            &deck_library(),
+            &Profiles::default(),
+            &running,
+            Some(3367991943),
+            "",
+        );
+        assert_eq!(
+            names(&rows),
+            vec![
+                "ELDEN RING",
+                "Sushiamo",
+                "Balatro",
+                "Baldur's Gate 3",
+                "Bills Must Be Paid",
+                "Cult of the Lamb",
+                "Palworld",
+                "Slay the Spire 2",
+                "Stardew Valley",
+                "Terraria",
+            ]
+        );
+        assert_eq!(
+            rows.iter().map(|row| row.running).collect::<Vec<_>>(),
+            vec![true, true, false, false, false, false, false, false, false, false]
+        );
+        assert_eq!(rows[0].detail, "Running now, no profile yet");
+        assert_eq!(rows[2].detail, "No profile yet");
+    }
+
+    #[test]
+    fn game_mode_ignores_steam_itself_and_ids_that_are_not_installed_games() {
+        // Only Steam and this app have a window; an unknown shortcut ID too.
+        let running = Running::Apps(vec![769, 3367991943, 2999999999, 0]);
+        let rows = rows(
+            &deck_library(),
+            &Profiles::default(),
+            &running,
+            Some(3367991943),
+            "",
+        );
+        assert_eq!(rows.len(), 10);
+        assert!(rows.iter().all(|row| !row.running));
+    }
+
+    #[test]
+    fn plumbing_is_never_offered() {
+        for name in [
+            "pv-adverb",
+            "PV-Adverb",
+            "pv-bwrap",
+            "pressure-vessel-wrap",
+            "python",
+            "python3",
+            "python3.13",
+            "steam-runtime-launch-client",
+            "steam-runtime-launcher-service",
+            "steam-runtime-supervisor",
+            "srt-bwrap",
+            "srt-logger",
+            "reaper",
+            "steam",
+            "steamwebhelper",
+            "steam-launch-wrapper",
+            "proton",
+            "wineserver",
+            "wine64-preloader",
+            "gamescope",
+            "gamescope-wl",
+            "gamescopereaper",
+            "mangoapp",
+            "umu-run",
+            "bash",
+            "sh",
+            "env",
+            "systemd-run",
+            "dbus-daemon",
+            "xdg-dbus-proxy",
+            "",
+        ] {
+            assert!(is_plumbing(name), "{name}");
+        }
+        for name in [
+            "Sushiamo.exe",
+            "eldenring.exe",
+            "cs2",
+            "EscapeFromTarkov.exe",
+            "hl2_linux",
+            "factorio",
+            // A Windows game may start with a word a wrapper starts with.
+            "Winelands.exe",
+            "PythonQuest.exe",
+        ] {
+            assert!(!is_plumbing(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_running_game_that_is_not_from_steam_is_shown_by_its_executable() {
+        let running = Running::Procs(vec![
+            proc("EscapeFromTarkov.exe", None, true),
+            proc("umu-run", None, true),
+            proc("bash", None, false),
+            proc("firefox", None, false),
+        ]);
+        let rows = rows(
+            &Library::Games(library()),
+            &Profiles::default(),
+            &running,
+            None,
+            "",
+        );
+        assert_eq!(rows[0].name, "EscapeFromTarkov");
+        assert_eq!(rows[0].detail, "Running now, no profile yet");
+        assert!(rows[0].running);
+        assert_eq!(
+            rows[0].target,
+            Target::Program {
+                exe: "EscapeFromTarkov.exe".into(),
+                app_id: None,
+            }
+        );
+        // The browser is not a game and nothing was typed: not listed.
+        assert_eq!(rows.len(), 1 + library().len());
+    }
+
+    #[test]
+    fn another_running_program_is_listed_only_when_its_name_is_typed() {
+        let running = Running::Procs(vec![
+            proc("factorio", None, false),
+            proc("bash", None, false),
+        ]);
+        let lib = Library::Games(library());
+        let none = view(&lib, &Profiles::default(), &running, None, "", false);
+        assert!(names(&none.rows).iter().all(|name| *name != "factorio"));
+        let typed = view(&lib, &Profiles::default(), &running, None, "fact", false);
+        assert_eq!(names(&typed.rows), vec!["factorio"]);
+        // Typing never brings plumbing in.
+        let shell = view(&lib, &Profiles::default(), &running, None, "bash", false);
+        assert!(shell.rows.is_empty());
+    }
+
+    #[test]
+    fn one_row_per_program_however_many_processes_it_has() {
+        let running = Running::Procs(vec![
+            proc("Game.exe", None, true),
+            proc("game.exe", None, true),
+            proc("Game.x86_64", None, true),
+        ]);
+        let rows = rows(&Library::NoSteam, &Profiles::default(), &running, None, "");
+        assert_eq!(names(&rows), vec!["Game"]);
     }
 
     #[test]
@@ -295,7 +833,7 @@ mod tests {
             profile("Balatro", 1.4, false, Some(2379780)),
             profile("Palworld", 0.75, true, Some(1623730)),
         ]);
-        let rows = rows(&library(), &profiles);
+        let rows = all_rows(library(), &profiles);
         let lines: Vec<(&str, &str, bool)> = rows
             .iter()
             .map(|r| (r.name.as_str(), r.detail.as_str(), r.has_profile))
@@ -314,9 +852,22 @@ mod tests {
     }
 
     #[test]
+    fn a_running_game_with_a_profile_says_both() {
+        let profiles = profiles(vec![profile("Sushiamo", 1.75, true, Some(4555040))]);
+        let rows = rows(
+            &Library::Games(library()),
+            &profiles,
+            &Running::Apps(vec![4555040]),
+            None,
+            "",
+        );
+        assert_eq!(rows[0].detail, "Running now, has a profile, +75%");
+    }
+
+    #[test]
     fn a_profile_with_another_name_is_named_in_the_row() {
         let profiles = profiles(vec![profile("Spire", 1.0, true, Some(2868840))]);
-        let rows = rows(&[game(2868840, "Slay the Spire 2")], &profiles);
+        let rows = all_rows(vec![game(2868840, "Slay the Spire 2")], &profiles);
         assert_eq!(rows[0].detail, "Has a profile \u{201c}Spire\u{201d}, 0%");
     }
 
@@ -340,13 +891,13 @@ mod tests {
         // Matched by executable only: the row cannot know it is this game.
         let mut by_exe = profile("Stardew Valley", 1.4, true, None);
         by_exe.match_rule.exe = Some("StardewValley".into());
-        let rows = rows(&library(), &profiles(vec![by_exe]));
+        let rows = all_rows(library(), &profiles(vec![by_exe]));
         assert!(rows.iter().all(|r| !r.has_profile));
     }
 
     #[test]
     fn filter_matches_part_of_a_name_ignoring_case_and_spaces_around() {
-        let rows = rows(&library(), &Profiles::default());
+        let rows = all_rows(library(), &Profiles::default());
         let names = |query: &str| -> Vec<String> {
             filter(&rows, query).into_iter().map(|r| r.name).collect()
         };
@@ -363,71 +914,106 @@ mod tests {
 
     #[test]
     fn filter_matches_the_start_of_an_app_id() {
-        let rows = rows(&library(), &Profiles::default());
-        let ids: Vec<u32> = filter(&rows, "4555")
+        let rows = all_rows(library(), &Profiles::default());
+        let ids: Vec<Target> = filter(&rows, "4555")
             .into_iter()
-            .map(|r| r.app_id)
+            .map(|r| r.target)
             .collect();
-        assert_eq!(ids, vec![4555040]);
+        assert_eq!(ids, vec![Target::Steam(4555040)]);
         // Only the start: "555" is inside 4555040 but starts no AppID.
         assert!(filter(&rows, "555").is_empty());
     }
 
     #[test]
-    fn no_steam_and_no_games_are_said_in_one_sentence() {
-        let none = view(&Library::NoSteam, &Profiles::default(), "");
+    fn nothing_to_list_is_said_in_one_sentence() {
+        let nothing = nothing_running();
+        let none = view(
+            &Library::NoSteam,
+            &Profiles::default(),
+            &nothing,
+            None,
+            "",
+            false,
+        );
         assert!(none.rows.is_empty());
         assert!(!none.show_filter);
         assert_eq!(none.message, NO_STEAM);
-        let empty = view(&Library::Games(vec![]), &Profiles::default(), "");
-        assert!(empty.rows.is_empty());
-        assert!(!empty.show_filter);
+        let empty = view(
+            &Library::Games(vec![]),
+            &Profiles::default(),
+            &nothing,
+            None,
+            "",
+            false,
+        );
         assert_eq!(empty.message, NO_GAMES);
-        for message in [NO_STEAM, NO_GAMES] {
+        let game_mode = view(
+            &Library::Games(vec![]),
+            &Profiles::default(),
+            &Running::Apps(vec![769]),
+            None,
+            "",
+            true,
+        );
+        assert_eq!(game_mode.message, NO_GAMES_GAME_MODE);
+        for message in [NO_STEAM, NO_GAMES, NO_GAMES_GAME_MODE] {
             assert_eq!(message.matches('.').count(), 1, "{message}");
             assert!(message.ends_with('.'));
-            assert!(message.contains("Add running game"));
         }
     }
 
     #[test]
     fn filter_shows_only_for_a_long_list_or_while_typing() {
+        let nothing = nothing_running();
         let short = Library::Games(library());
-        assert!(!view(&short, &Profiles::default(), "").show_filter);
-        assert!(view(&short, &Profiles::default(), "ba").show_filter);
+        let shown = |lib: &Library, query: &str| {
+            view(lib, &Profiles::default(), &nothing, None, query, false).show_filter
+        };
+        assert!(!shown(&short, ""));
+        assert!(shown(&short, "ba"));
         let mut seven = library();
         seven.push(game(570, "Dota 2"));
         assert_eq!(seven.len(), FILTER_FROM);
-        assert!(view(&Library::Games(seven), &Profiles::default(), "").show_filter);
+        assert!(shown(&Library::Games(seven), ""));
     }
 
     #[test]
     fn nothing_matching_the_filter_says_so() {
-        let v = view(&Library::Games(library()), &Profiles::default(), " zelda ");
+        let nothing = nothing_running();
+        let lib = Library::Games(library());
+        let v = view(&lib, &Profiles::default(), &nothing, None, " zelda ", false);
         assert!(v.rows.is_empty());
         assert!(v.show_filter);
-        assert_eq!(
-            v.message,
-            "No installed game matches \u{201c}zelda\u{201d}."
-        );
-        let some = view(&Library::Games(library()), &Profiles::default(), "pal");
+        assert_eq!(v.message, "No game matches \u{201c}zelda\u{201d}.");
+        let some = view(&lib, &Profiles::default(), &nothing, None, "pal", false);
         assert_eq!(some.message, "");
         assert_eq!(some.rows.len(), 1);
     }
 
     #[test]
     fn enter_picks_only_a_single_listed_game() {
+        let nothing = nothing_running();
         let lib = Library::Games(library());
-        let one = view(&lib, &Profiles::default(), "pal");
-        assert_eq!(enter_pick(&one), Some(1623730));
-        assert_eq!(enter_pick(&view(&lib, &Profiles::default(), "s")), None);
-        assert_eq!(enter_pick(&view(&lib, &Profiles::default(), "zelda")), None);
+        let of = |query: &str| view(&lib, &Profiles::default(), &nothing, None, query, false);
+        assert_eq!(enter_pick(&of("pal").rows), Some(0));
+        assert_eq!(enter_pick(&of("s").rows), None);
+        assert_eq!(enter_pick(&of("zelda").rows), None);
+    }
+
+    fn steam_row(app_id: u32, name: &str) -> Row {
+        Row {
+            target: Target::Steam(app_id),
+            name: name.to_string(),
+            detail: String::new(),
+            has_profile: false,
+            running: false,
+        }
     }
 
     #[test]
     fn picking_a_new_game_adds_a_profile_matched_by_app_id() {
         let mut profiles = profiles(vec![profile("Other", 1.2, true, Some(1))]);
-        let spire = game(2868840, "Slay the Spire 2");
+        let spire = steam_row(2868840, "Slay the Spire 2");
         let choice = pick(&profiles, &spire, 1.4);
         assert_eq!(
             choice,
@@ -443,11 +1029,28 @@ mod tests {
                 outputs: vec![],
             })
         );
-        assert_eq!(apply(&mut profiles, &spire, choice), (1, true));
+        assert_eq!(apply(&mut profiles, choice), (1, true));
         assert_eq!(profiles.profiles.len(), 2);
         assert_eq!(log_line(&profiles, 1, true, true), "Added Slay the Spire 2");
         // Picking it again opens it instead of adding a second one.
         assert_eq!(pick(&profiles, &spire, 1.4), Pick::Open(1));
+    }
+
+    /// The owner's Deck saved ELDEN RING as `eldenring` from its executable.
+    /// From the list it is the game's name from the Steam library.
+    #[test]
+    fn a_running_steam_game_is_added_under_its_steam_name() {
+        let running = Running::Apps(vec![769, 1245620]);
+        let rows = rows(&deck_library(), &Profiles::default(), &running, None, "");
+        assert_eq!(rows[0].name, "ELDEN RING");
+        match pick(&Profiles::default(), &rows[0], 1.4) {
+            Pick::Create(profile) => {
+                assert_eq!(profile.name, "ELDEN RING");
+                assert_eq!(profile.match_rule.steam_app_id, Some(1245620));
+                assert_eq!(profile.match_rule.exe, None);
+            }
+            other => panic!("expected a new profile, got {other:?}"),
+        }
     }
 
     #[test]
@@ -456,11 +1059,10 @@ mod tests {
             profile("x", 1.0, true, Some(1)),
             profile("sushiamo", 1.75, false, Some(4555040)),
         ]);
-        let sushiamo = game(4555040, "Sushiamo");
-        let choice = pick(&profiles, &sushiamo, 1.4);
+        let choice = pick(&profiles, &steam_row(4555040, "Sushiamo"), 1.4);
         assert_eq!(choice, Pick::Open(1));
         let before = profiles.clone();
-        assert_eq!(apply(&mut profiles, &sushiamo, choice), (1, false));
+        assert_eq!(apply(&mut profiles, choice), (1, false));
         assert_eq!(profiles, before);
         assert_eq!(log_line(&profiles, 1, false, false), "Opened sushiamo");
     }
@@ -470,10 +1072,9 @@ mod tests {
         let mut by_exe = profile("balatro", 1.3, true, None);
         by_exe.match_rule.exe = Some("Balatro.exe".into());
         let mut profiles = profiles(vec![by_exe]);
-        let balatro = game(2379780, "Balatro");
-        let choice = pick(&profiles, &balatro, 1.4);
-        assert_eq!(choice, Pick::Link(0));
-        assert_eq!(apply(&mut profiles, &balatro, choice), (0, true));
+        let choice = pick(&profiles, &steam_row(2379780, "Balatro"), 1.4);
+        assert_eq!(choice, Pick::Link(0, 2379780));
+        assert_eq!(apply(&mut profiles, choice), (0, true));
         assert_eq!(profiles.profiles.len(), 1);
         let rule = &profiles.profiles[0].match_rule;
         assert_eq!(rule.exe.as_deref(), Some("Balatro.exe"));
@@ -488,13 +1089,41 @@ mod tests {
     #[test]
     fn a_name_used_by_another_games_profile_gets_the_app_id_added() {
         let profiles = profiles(vec![profile("Palworld", 1.2, true, Some(99))]);
-        match pick(&profiles, &game(1623730, "Palworld"), 1.4) {
+        match pick(&profiles, &steam_row(1623730, "Palworld"), 1.4) {
             Pick::Create(p) => {
                 assert_eq!(p.name, "Palworld (1623730)");
                 assert_eq!(p.match_rule.steam_app_id, Some(1623730));
             }
             other => panic!("expected a new profile, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn picking_a_program_adds_a_profile_matched_by_its_executable() {
+        let mut profiles = Profiles::default();
+        let row = Row {
+            target: Target::Program {
+                exe: "EscapeFromTarkov.exe".into(),
+                app_id: None,
+            },
+            name: "EscapeFromTarkov".into(),
+            detail: String::new(),
+            has_profile: false,
+            running: true,
+        };
+        let choice = pick(&profiles, &row, 0.5);
+        assert_eq!(apply(&mut profiles, choice), (0, true));
+        let added = &profiles.profiles[0];
+        assert_eq!(added.name, "EscapeFromTarkov");
+        assert_eq!(added.saturation, 0.5);
+        assert_eq!(
+            added.match_rule.exe.as_deref(),
+            Some("EscapeFromTarkov.exe")
+        );
+        // Picking it again opens it; its saturation is left alone.
+        profiles.profiles[0].saturation = 1.9;
+        assert_eq!(pick(&profiles, &row, 0.5), Pick::Open(0));
+        assert_eq!(profile_for_program(&profiles, "escapefromtarkov"), Some(0));
     }
 
     #[test]

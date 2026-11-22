@@ -1,0 +1,1180 @@
+// Satur8 in a Steam gaming session (Steam Deck Game Mode): its own layout for
+// a 7 inch touch screen and the Deck's buttons, not the desktop layout made
+// smaller. Same palette, fonts, radii, header and components as app.slint,
+// sized and arranged for a thumb.
+//
+// Sizes are logical pixels. main.rs draws this layout 640 logical pixels wide
+// (src/mode.rs), which is a scale of 2 on a Deck's 1280x800 screen at about
+// 204 pixels per inch: 1 logical pixel is 0.25 mm. So the 44 pixel controls
+// below are 11 mm, the 52 pixel list rows 13 mm, the 12 pixel small text 3 mm
+// and the 28 pixel slider handle 7 mm.
+//
+// What is in focus, what the buttons do and what the prompt bar says come
+// from src/gm.rs through the Gm global; this file only draws them and reports
+// touches. Nothing here needs a pointer: no hover states, no cursor.
+
+import { HealthRowUi, LogRow, Pal, Font } from "theme.slint";
+
+export struct GmGame {
+    name: string,
+    percent: int,
+    enabled: bool,
+    initial: string,
+    icon: image,
+    has-icon: bool,
+}
+
+// One row of the add-a-game list.
+export struct GmPick {
+    name: string,
+    detail: string,
+    has-profile: bool,
+    running: bool,
+}
+
+// One entry of the prompt bar: one or two button glyphs and what they do.
+export struct GmPrompt {
+    glyph: string,
+    glyph2: string,
+    label: string,
+}
+
+// State from src/gm.rs and the events going back to it.
+export global Gm {
+    in property <int> page: 0;              // 0 Games, 1 Status, 2 About
+    in property <[GmGame]> games;
+    in property <int> rest-percent: 0;
+    // Focus (src/gm.rs, Focus): kind 0 Everything else, 1 Add a game,
+    // 2 a game's row, 3 its remove question, 4 a list row, 5 a page item.
+    in property <int> focus-kind: 1;
+    in property <int> focus-index: 0;
+    in property <int> focus-part: 0;
+    in property <bool> highlight: false;
+    in property <bool> adjusting: false;
+    in property <bool> picker-open: false;
+    in property <[GmPick]> picks;
+    in property <string> pick-message: "";
+    in property <[GmPrompt]> prompts;
+    // Changes when the row in focus should be scrolled into view.
+    in property <int> reveal: 0;
+    // Changes when the system info should be copied to the clipboard.
+    in property <int> copy: 0;
+    // Whether this window has the keyboard focus, so the pad is meant for it.
+    in-out property <bool> window-active: false;
+
+    callback touched(int, int, int);            // kind, index, part
+    callback percent(int, int, float, bool);    // 0 rest / 1 game / 2 new games, index, value, done
+    callback toggle-game(int);
+    callback ask-remove(int);
+    callback answer-remove(int, bool);
+    callback open-picker();
+    callback close-picker();
+    callback pick(int);
+    callback show-page(int);
+    callback key(string, bool) -> bool;         // key text, repeat
+}
+
+// A touch area that tells a tap from a drag and a sideways drag from an
+// up-and-down one. Up and down always scrolls the page (pan-by); sideways
+// moves a slider when `slides` is set. Nothing happens on hover.
+component Zone inherits TouchArea {
+    in property <bool> slides: false;
+    callback down();
+    callback tapped(length);    // where it was pressed, x within the zone
+    callback slide(length);     // where the finger is now, x within the zone
+    callback slide-end();
+    callback pan-begin();
+    callback pan-by(length);
+    property <length> px;
+    property <length> py;
+    property <length> tap-x;
+    property <int> mode: 0;     // 0 not decided yet, 1 slide, 2 pan
+    mouse-cursor: none;
+    pointer-event(e) => {
+        if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+            root.mode = 0;
+            root.px = self.absolute-position.x + self.mouse-x;
+            root.py = self.absolute-position.y + self.mouse-y;
+            root.tap-x = self.mouse-x;
+            root.pan-begin();
+            root.down();
+        } else if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up) {
+            if (root.mode == 0) {
+                root.tapped(root.tap-x);
+            } else if (root.mode == 1) {
+                root.slide-end();
+            }
+            root.mode = 0;
+        } else if (e.kind == PointerEventKind.cancel) {
+            if (root.mode == 1) {
+                root.slide-end();
+            }
+            root.mode = 0;
+        }
+    }
+    moved => {
+        if (self.pressed) {
+            if (root.mode == 0) {
+                // The first 6 pixels decide: mostly sideways on a slider
+                // moves it, anything else scrolls.
+                if (Math.abs(self.absolute-position.x + self.mouse-x - root.px) > 6px
+                    || Math.abs(self.absolute-position.y + self.mouse-y - root.py) > 6px) {
+                    root.mode = (root.slides
+                        && Math.abs(self.absolute-position.x + self.mouse-x - root.px)
+                            >= Math.abs(self.absolute-position.y + self.mouse-y - root.py)) ? 1 : 2;
+                }
+            }
+            if (root.mode == 1) {
+                root.slide(self.mouse-x);
+            } else if (root.mode == 2) {
+                root.pan-by(self.absolute-position.y + self.mouse-y - root.py);
+            }
+        }
+    }
+}
+
+// The highlight: an accent ring around the element in focus.
+component Ring inherits Rectangle {
+    in property <bool> on: false;
+    visible: root.on;
+    background: transparent;
+    border-width: 2px;
+    border-color: Pal.accent;
+    border-radius: 11px;
+}
+
+// A page that scrolls up and down by dragging anywhere on it.
+component Scroller inherits Rectangle {
+    in property <length> content-height;
+    in-out property <length> offset: 0px;
+    property <length> start;
+    property <length> lowest: Math.min(0px, self.height - root.content-height);
+    clip: true;
+    public function pan-begin() {
+        root.start = root.offset;
+    }
+    public function pan-by(dy: length) {
+        root.offset = Math.min(0px, Math.max(root.lowest, root.start + dy));
+    }
+    // Scroll just enough to show top..bottom, 8 pixels clear of the edges.
+    public function show(top: length, bottom: length) {
+        if (bottom + 8px > self.height - root.offset) {
+            root.offset = self.height - bottom - 8px;
+        }
+        if (top - 8px < -root.offset) {
+            root.offset = 8px - top;
+        }
+        root.offset = Math.min(0px, Math.max(root.lowest, root.offset));
+    }
+    changed lowest => {
+        root.offset = Math.min(0px, Math.max(root.lowest, root.offset));
+    }
+    Zone {
+        pan-begin => { root.pan-begin(); }
+        pan-by(dy) => { root.pan-by(dy); }
+    }
+    Rectangle {
+        x: 0; y: root.offset; width: root.width; height: Math.max(root.height, root.content-height);
+        @children
+    }
+}
+
+// Button, 44 high. Kinds as app.slint's Btn: 0 solid teal, 1 sub, 2 outline,
+// 3 tint. Pressed takes the place of hover.
+component TBtn inherits Rectangle {
+    in property <string> text;
+    in property <int> kind: 2;
+    in property <image> icon;
+    in property <bool> has-icon: false;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
+    in property <bool> focused: false;
+    callback tapped();
+    callback down();
+    callback pan-begin();
+    callback pan-by(length);
+    height: 44px;
+    border-radius: 9px;
+    opacity: root.enabled ? 1 : 0.5;
+    property <color> ink: root.danger ? Pal.danger
+        : kind == 0 ? Pal.on-accent
+        : kind == 3 ? Pal.accent
+        : kind == 1 ? Pal.ink
+        : Pal.soft;
+    background: kind == 0 ? (zone.pressed ? Pal.accent-2 : Pal.accent)
+        : kind == 1 ? (zone.pressed ? Pal.hover : Pal.raised)
+        : kind == 3 ? (zone.pressed ? Pal.accent-soft-2 : Pal.accent-soft)
+        : (zone.pressed ? Pal.hover : transparent);
+    border-width: 1px;
+    border-color: kind == 0 ? Pal.accent : kind == 3 ? Pal.accent-line : Pal.line;
+    HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        if root.has-icon: VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon; colorize: root.ink;
+                width: 16px; height: 16px;
+            }
+        }
+        if root.text != "": Text {
+            text: root.text;
+            font-family: Font.bold; font-weight: Font.bold-weight;
+            font-size: 14px;
+            color: root.ink;
+            vertical-alignment: center;
+        }
+    }
+    zone := Zone {
+        enabled: root.enabled;
+        down => { root.down(); }
+        tapped => { root.tapped(); }
+        pan-begin => { root.pan-begin(); }
+        pan-by(dy) => { root.pan-by(dy); }
+    }
+    Ring {
+        x: -4px; y: -4px; width: root.width + 8px; height: root.height + 8px;
+        border-radius: 12px;
+        on: root.focused;
+    }
+}
+
+// On/off switch, 56x30, in a 72x44 touch area.
+component TSwitch inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <bool> focused: false;
+    callback toggled();
+    callback down();
+    callback pan-begin();
+    callback pan-by(length);
+    width: 72px; height: 44px;
+    opacity: root.enabled ? 1 : 0.45;
+    Rectangle {
+        x: 8px; y: 7px; width: 56px; height: 30px; border-radius: 15px;
+        background: root.checked ? Pal.accent : Pal.field;
+        border-width: 1px;
+        border-color: root.checked ? Pal.accent : Pal.line;
+        animate background { duration: 130ms; }
+        Rectangle {
+            width: 22px; height: 22px; border-radius: 11px;
+            x: root.checked ? 30px : 4px;
+            y: 4px;
+            background: root.checked ? Pal.on-accent : Pal.soft;
+            animate x { duration: 130ms; easing: ease-out; }
+        }
+    }
+    Zone {
+        enabled: root.enabled;
+        down => { root.down(); }
+        tapped => { root.toggled(); }
+        pan-begin => { root.pan-begin(); }
+        pan-by(dy) => { root.pan-by(dy); }
+    }
+    Ring {
+        x: 2px; y: 1px; width: 68px; height: 42px;
+        border-radius: 21px;
+        on: root.focused;
+    }
+}
+
+// Slider from -100% to +100% for a thumb: an 8 pixel track, a 28 pixel
+// handle, and the whole 46 pixel band takes the touch. A tap jumps there; a
+// sideways drag from anywhere on the band moves the value; an up-and-down
+// drag scrolls the page and leaves the value alone.
+component TSlider inherits Rectangle {
+    in property <float> value;
+    in property <bool> focused: false;
+    in property <bool> adjusting: false;
+    callback changed(float);
+    callback released(float);
+    callback down();
+    callback pan-begin();
+    callback pan-by(length);
+    height: 46px;
+    property <length> pad: 16px;
+    property <length> track-w: self.width - 2 * root.pad;
+    property <length> pos: root.pad + Math.floor(root.track-w * (root.value + 100) / 200 / 1px) * 1px;
+    property <length> mid: root.pad + Math.floor(root.track-w / 2px) * 1px;
+    property <length> cy: 16px;
+    pure function at(x: length) -> float {
+        Math.round(Math.clamp((x - root.pad) / root.track-w, 0, 1) * 200 - 100)
+    }
+    border-radius: 11px;
+    background: root.adjusting ? Pal.accent-soft : transparent;
+
+    Rectangle {
+        x: root.pad; y: root.cy - 4px; width: root.track-w; height: 8px;
+        border-radius: 4px; background: Pal.field;
+    }
+    Rectangle {
+        x: Math.min(root.mid, root.pos); y: root.cy - 4px;
+        width: Math.max(2px, Math.abs(root.pos - root.mid)); height: 8px;
+        border-radius: 4px; background: Pal.accent;
+    }
+    Rectangle {
+        x: root.mid - 1px; y: root.cy - 8px; width: 2px; height: 16px;
+        background: Pal.dim;
+    }
+    Rectangle {
+        x: root.pos - 14px; y: root.cy - 14px; width: 28px; height: 28px;
+        border-radius: 14px; background: Pal.accent;
+        Rectangle {
+            x: 10px; y: 10px; width: 8px; height: 8px;
+            border-radius: 4px; background: Pal.on-accent;
+        }
+    }
+    Text {
+        x: root.pad - 8px; y: 30px; width: 60px; height: 16px;
+        text: "-100%"; font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.dim;
+        vertical-alignment: center;
+    }
+    Text {
+        x: root.mid - 30px; y: 30px; width: 60px; height: 16px;
+        text: "0%"; font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.dim;
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+    Text {
+        x: root.width - root.pad + 8px - 60px; y: 30px; width: 60px; height: 16px;
+        text: "+100%"; font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.dim;
+        horizontal-alignment: right; vertical-alignment: center;
+    }
+    Zone {
+        slides: true;
+        down => { root.down(); }
+        tapped(x) => {
+            root.changed(root.at(x));
+            root.released(root.at(x));
+        }
+        slide(x) => { root.changed(root.at(x)); }
+        slide-end => { root.released(root.value); }
+        pan-begin => { root.pan-begin(); }
+        pan-by(dy) => { root.pan-by(dy); }
+    }
+    Ring {
+        width: 100%; height: 100%;
+        on: root.focused;
+    }
+}
+
+component TSection inherits Text {
+    font-family: Font.head; font-weight: Font.head-weight;
+    color: Pal.ink;
+    letter-spacing: -0.25px;
+    vertical-alignment: center;
+}
+
+component Card inherits Rectangle {
+    background: Pal.surface;
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: Pal.line;
+}
+
+// A game's row: name, value, on/off and remove on the first line, the slider
+// across the whole second line. Remove asks first, in the row itself.
+component GameRowT inherits Card {
+    in property <GmGame> game;
+    in property <int> index;
+    callback pan-begin();
+    callback pan-by(length);
+    height: 100px;
+    property <bool> here: (Gm.focus-kind == 2 || Gm.focus-kind == 3) && Gm.focus-index == root.index;
+    property <bool> asking: Gm.focus-kind == 3 && Gm.focus-index == root.index;
+    border-color: root.here && Gm.highlight ? Pal.accent-line : Pal.line;
+
+    Rectangle {
+        x: 12px; y: 10px; width: 32px; height: 32px;
+        border-radius: 5px;
+        clip: true;
+        background: root.game.has-icon ? transparent : Pal.accent-soft;
+        border-width: root.game.has-icon ? 0px : 1px;
+        border-color: Pal.accent-line;
+        if root.game.has-icon: Image {
+            width: 100%; height: 100%;
+            source: root.game.icon;
+            image-fit: cover;
+        }
+        if !root.game.has-icon: Text {
+            width: 100%; height: 100%;
+            text: root.game.initial;
+            font-family: Font.head; font-weight: Font.head-weight; font-size: 18px; color: Pal.accent;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+    }
+
+    if !root.asking: Text {
+        x: 54px; y: 6px; width: root.width - 54px - 250px; height: 40px;
+        text: root.game.name;
+        font-family: Font.head; font-weight: Font.head-weight; font-size: 17px;
+        color: root.game.enabled ? Pal.ink : Pal.muted;
+        vertical-alignment: center; overflow: elide;
+    }
+    if !root.asking: Text {
+        x: root.width - 242px; y: 6px; width: 78px; height: 40px;
+        text: (root.game.percent > 0 ? "+" : "") + root.game.percent + "%";
+        font-family: Font.head; font-weight: Font.head-weight; font-size: 22px;
+        color: root.game.enabled ? Pal.accent : Pal.dim;
+        horizontal-alignment: right; vertical-alignment: center;
+    }
+    if !root.asking: TSwitch {
+        x: root.width - 156px; y: 4px;
+        checked: root.game.enabled;
+        focused: Gm.highlight && Gm.focus-kind == 2 && Gm.focus-index == root.index && Gm.focus-part == 1;
+        down => { Gm.touched(2, root.index, 1); }
+        toggled => { Gm.toggle-game(root.index); }
+        pan-begin => { root.pan-begin(); }
+        pan-by(dy) => { root.pan-by(dy); }
+    }
+    // 28 pixels of nothing between on/off and remove.
+    if !root.asking: TBtn {
+        x: root.width - 56px; y: 4px; width: 44px;
+        kind: 2;
+        has-icon: true; icon: @image-url("icons/x.svg");
+        focused: Gm.highlight && Gm.focus-kind == 2 && Gm.focus-index == root.index && Gm.focus-part == 2;
+        down => { Gm.touched(2, root.index, 2); }
+        tapped => { Gm.ask-remove(root.index); }
+        pan-begin => { root.pan-begin(); }
+        pan-by(dy) => { root.pan-by(dy); }
+    }
+
+    if root.asking: Text {
+        x: 54px; y: 6px; width: root.width - 54px - 226px; height: 40px;
+        text: "Remove " + root.game.name + "?";
+        font-family: Font.bold; font-weight: Font.bold-weight; font-size: 15px; color: Pal.ink;
+        vertical-alignment: center; overflow: elide;
+    }
+    if root.asking: TBtn {
+        x: root.width - 214px; y: 4px; width: 92px;
+        kind: 1;
+        text: "Keep";
+        focused: Gm.highlight && Gm.focus-part == 0;
+        down => { Gm.touched(3, root.index, 0); }
+        tapped => { Gm.answer-remove(root.index, false); }
+    }
+    if root.asking: TBtn {
+        x: root.width - 110px; y: 4px; width: 98px;
+        kind: 2; danger: true;
+        text: "Remove";
+        focused: Gm.highlight && Gm.focus-part == 1;
+        down => { Gm.touched(3, root.index, 1); }
+        tapped => { Gm.answer-remove(root.index, true); }
+    }
+
+    TSlider {
+        x: 6px; y: 50px; width: root.width - 12px;
+        value: root.game.percent;
+        focused: Gm.highlight && Gm.focus-kind == 2 && Gm.focus-index == root.index && Gm.focus-part == 0;
+        adjusting: self.focused && Gm.adjusting;
+        down => { Gm.touched(2, root.index, 0); }
+        changed(v) => { Gm.percent(1, root.index, v, false); }
+        released(v) => { Gm.percent(1, root.index, v, true); }
+        pan-begin => { root.pan-begin(); }
+        pan-by(dy) => { root.pan-by(dy); }
+    }
+}
+
+// A button glyph for the prompt bar, drawn here: a circled letter for the
+// face buttons, a rounded box for the shoulder buttons and triggers, a
+// triangle for a direction.
+component Glyph inherits Rectangle {
+    in property <string> name;
+    property <bool> arrow: root.name == "\u{25c0}" || root.name == "\u{25b6}";
+    property <bool> wide: !root.arrow && root.name != "A" && root.name != "B" && root.name != "X" && root.name != "Y";
+    width: root.wide ? 30px : 22px;
+    height: 22px;
+    border-radius: root.wide ? 6px : 11px;
+    border-width: 1px;
+    border-color: Pal.muted;
+    background: Pal.raised;
+    if !root.arrow: Text {
+        width: 100%; height: 100%;
+        text: root.name;
+        font-family: Font.bold; font-weight: Font.bold-weight; font-size: 12px; color: Pal.ink;
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+    if root.arrow: Path {
+        x: 7px; y: 6px; width: 8px; height: 10px;
+        viewbox-width: 8; viewbox-height: 10;
+        commands: root.name == "\u{25c0}" ? "M 8 0 L 0 5 L 8 10 Z" : "M 0 0 L 8 5 L 0 10 Z";
+        fill: Pal.ink;
+        stroke-width: 0px;
+    }
+}
+
+// What the Deck's buttons do right now, along the bottom of every screen.
+component PromptBar inherits Rectangle {
+    height: 36px;
+    background: Pal.sheet;
+    Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: Pal.line; }
+    HorizontalLayout {
+        x: 16px; y: 1px; width: root.width - 32px; height: 35px;
+        alignment: end;
+        spacing: 18px;
+        for p in Gm.prompts: HorizontalLayout {
+            spacing: 5px;
+            VerticalLayout {
+                alignment: center;
+                Glyph { name: p.glyph; }
+            }
+            if p.glyph2 != "": VerticalLayout {
+                alignment: center;
+                Glyph { name: p.glyph2; }
+            }
+            Text {
+                text: p.label;
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.soft;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+component TTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback tapped();
+    width: 72px; height: 48px;
+    Text {
+        width: 100%; height: 100%;
+        text: root.label;
+        font-family: root.active ? Font.bold : Font.med;
+        font-weight: root.active ? Font.bold-weight : Font.med-weight;
+        font-size: 14px;
+        color: root.active ? Pal.ink : Pal.muted;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    if root.active: Rectangle {
+        x: 10px; y: 45px; width: root.width - 20px; height: 3px;
+        border-radius: 1px;
+        background: Pal.accent;
+    }
+    Zone {
+        tapped => { root.tapped(); }
+    }
+}
+
+export component GameModeUi inherits Rectangle {
+    in property <string> backend-name;
+    in property <bool> backend-ok;
+    in property <string> version-text;
+    in property <[HealthRowUi]> health;
+    in property <bool> health-problem;
+    in property <bool> checking;
+    in property <bool> repairing;
+    in property <bool> switch-available;
+    in property <bool> switch-on;
+    in property <bool> switch-busy;
+    in property <string> switch-detail;
+    in property <bool> live-daemon;
+    in property <string> live-profile;
+    in property <string> live-saturation;
+    in property <string> live-saturation-note;
+    in property <int> new-game-percent;
+    in property <string> sysinfo-text;
+    in property <[LogRow]> activity;
+    callback check-health();
+    callback repair();
+    callback set-switching(bool);
+    callback sysinfo-copied();
+    callback report-bug();
+    callback open-link(string);
+    callback dark-mode-changed(bool);
+
+    background: Pal.bg;
+    property <length> top: 48px;
+    property <length> bar: 36px;
+    property <length> body-h: self.height - self.top - self.bar;
+    property <length> row-w: self.width - 32px;
+
+    // Covers the window: no cursor anywhere, whatever is under the finger.
+    TouchArea { mouse-cursor: none; }
+
+    // Holds the keyboard focus, so keys reach src/gm.rs (a keyboard, or a
+    // controller layout that sends keys) and so the app knows whether the
+    // window is the one in front.
+    keys := FocusScope {
+        x: 0; y: 0; width: 0px; height: 0px;
+        init => { self.focus(); }
+        changed has-focus => { Gm.window-active = self.has-focus; }
+        key-pressed(e) => {
+            return Gm.key(e.text, e.repeat) ? accept : reject;
+        }
+    }
+
+    // ================= Header =================
+    Rectangle {
+        x: 0; y: 0; width: root.width; height: root.top;
+        background: Pal.sheet;
+        Rectangle { x: 0; y: root.top - 1px; width: parent.width; height: 1px; background: Pal.line; }
+        Image {
+            x: 16px; y: 15px; width: 92px; height: 18px;
+            source: Pal.dark ? @image-url("word.png") : @image-url("word-light.png");
+            image-fit: fill;
+        }
+        Rectangle { x: 120px; y: 14px; width: 1px; height: 20px; background: Pal.line; }
+        TTab { x: 128px; label: "Games"; active: Gm.page == 0; tapped => { Gm.show-page(0); } }
+        TTab { x: 200px; label: "Status"; active: Gm.page == 1; tapped => { Gm.show-page(1); } }
+        TTab { x: 272px; label: "About"; active: Gm.page == 2; tapped => { Gm.show-page(2); } }
+
+        Rectangle {
+            y: 11px; height: 26px;
+            width: chip-text.preferred-width + 34px;
+            x: parent.width - 16px - 40px - 8px - self.width;
+            border-radius: 13px;
+            background: Pal.surface;
+            border-width: 1px;
+            border-color: Pal.line;
+            Rectangle {
+                x: 11px; y: 10px; width: 6px; height: 6px; border-radius: 3px;
+                background: root.backend-ok ? Pal.accent : Pal.danger;
+            }
+            chip-text := Text {
+                x: 23px; y: 0; height: 26px;
+                text: root.backend-ok ? (root.backend-name == "gamescope" ? "Steam Game Mode" : root.backend-name + " backend active") : "no backend in this session";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.soft;
+                vertical-alignment: center;
+            }
+        }
+        TBtn {
+            x: parent.width - 16px - 40px; y: 4px; width: 40px; height: 40px;
+            kind: 2;
+            has-icon: true;
+            icon: Pal.dark ? @image-url("icons/moon.svg") : @image-url("icons/sun.svg");
+            tapped => {
+                Pal.dark = !Pal.dark;
+                root.dark-mode-changed(Pal.dark);
+            }
+        }
+    }
+
+    // ================= Games =================
+    // Rows, top to bottom: Everything else, the Games heading with Add a
+    // game, one row per game, a note.
+    if Gm.page == 0: games-page := Scroller {
+        x: 0; y: root.top; width: root.width; height: root.body-h;
+        property <length> rows-y: 8px + 100px + 8px + 52px;
+        property <length> rows-h: Gm.games.length == 0 ? 80px : Gm.games.length * 108px - 8px;
+        property <length> note-y: self.rows-y + self.rows-h + 6px;
+        content-height: self.note-y + 22px + 8px;
+
+        // Bring the row in focus into view when the pad moves it.
+        property <int> reveal: Gm.reveal;
+        changed reveal => { self.show-focus(); }
+        function show-focus() {
+            if (Gm.focus-kind == 0) {
+                self.show(8px, 108px);
+            } else if (Gm.focus-kind == 1) {
+                self.show(116px, 168px);
+            } else if (Gm.focus-kind == 2 || Gm.focus-kind == 3) {
+                self.show(self.rows-y + Gm.focus-index * 108px, self.rows-y + Gm.focus-index * 108px + 100px);
+            }
+        }
+
+        // Everything else: what the desktop app calls Desktop vibrance. In a
+        // gaming session there is no desktop: it is Steam's own screens and
+        // every game without a row below.
+        Card {
+            x: 16px; y: 8px; width: root.row-w; height: 100px;
+            border-color: Gm.focus-kind == 0 && Gm.highlight ? Pal.accent-line : Pal.line;
+            Text {
+                x: 14px; y: 7px; width: parent.width - 14px - 250px; height: 22px;
+                text: "Everything else";
+                font-family: Font.head; font-weight: Font.head-weight; font-size: 17px; color: Pal.ink;
+                vertical-alignment: center;
+            }
+            Text {
+                x: 14px; y: 28px; width: parent.width - 14px - 250px; height: 16px;
+                text: "Steam and games without a row below";
+                font-family: Font.reg; font-weight: Font.reg-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center; overflow: elide;
+            }
+            Text {
+                x: parent.width - 242px; y: 6px; width: 78px; height: 40px;
+                text: (Gm.rest-percent > 0 ? "+" : "") + Gm.rest-percent + "%";
+                font-family: Font.head; font-weight: Font.head-weight; font-size: 22px; color: Pal.accent;
+                horizontal-alignment: right; vertical-alignment: center;
+            }
+            TBtn {
+                x: parent.width - 148px; y: 4px; width: 136px;
+                kind: 2;
+                text: "Back to 0%";
+                has-icon: true; icon: @image-url("icons/restore.svg");
+                focused: Gm.highlight && Gm.focus-kind == 0 && Gm.focus-part == 1;
+                down => { Gm.touched(0, 0, 1); }
+                tapped => { Gm.percent(0, 0, 0, true); }
+                pan-begin => { games-page.pan-begin(); }
+                pan-by(dy) => { games-page.pan-by(dy); }
+            }
+            TSlider {
+                x: 6px; y: 50px; width: parent.width - 12px;
+                value: Gm.rest-percent;
+                focused: Gm.highlight && Gm.focus-kind == 0 && Gm.focus-part == 0;
+                adjusting: self.focused && Gm.adjusting;
+                down => { Gm.touched(0, 0, 0); }
+                changed(v) => { Gm.percent(0, 0, v, false); }
+                released(v) => { Gm.percent(0, 0, v, true); }
+                pan-begin => { games-page.pan-begin(); }
+                pan-by(dy) => { games-page.pan-by(dy); }
+            }
+        }
+
+        TSection {
+            x: 18px; y: 116px; width: 200px; height: 52px;
+            text: "Games"; font-size: 22px;
+        }
+        TBtn {
+            x: root.width - 16px - 160px; y: 120px; width: 160px;
+            kind: 0;
+            text: "Add a game";
+            has-icon: true; icon: @image-url("icons/plus.svg");
+            focused: Gm.highlight && Gm.focus-kind == 1;
+            down => { Gm.touched(1, 0, 0); }
+            tapped => { Gm.open-picker(); }
+            pan-begin => { games-page.pan-begin(); }
+            pan-by(dy) => { games-page.pan-by(dy); }
+        }
+
+        if Gm.games.length == 0: Card {
+            x: 16px; y: games-page.rows-y; width: root.row-w; height: 80px;
+            Text {
+                width: 100%; height: 100%;
+                text: "No games yet.\nAdd one and set how vivid it should look.";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.muted;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+        }
+        for game[i] in Gm.games: GameRowT {
+            x: 16px; y: games-page.rows-y + i * 108px; width: root.row-w;
+            game: game;
+            index: i;
+            pan-begin => { games-page.pan-begin(); }
+            pan-by(dy) => { games-page.pan-by(dy); }
+        }
+        Text {
+            x: 18px; y: games-page.note-y; width: root.row-w - 4px; height: 22px;
+            text: "A game's setting shows while that game is on screen.";
+            font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+            vertical-alignment: center;
+        }
+    }
+
+    // ================= Status =================
+    // One column: Right now, Health, Settings, Help, Activity. Items the pad
+    // can reach, in order: Check again, Repair, the switching toggle, the
+    // new-games slider, Copy system info, Report a bug.
+    if Gm.page == 1: status-page := Scroller {
+        x: 0; y: root.top; width: root.width; height: root.body-h;
+        property <length> health-y: 8px + 92px + 8px;
+        property <length> health-h: 52px + Math.max(1, root.health.length) * 40px + 6px;
+        property <length> settings-y: self.health-y + self.health-h + 8px;
+        property <length> help-y: self.settings-y + 160px + 8px;
+        property <length> activity-y: self.help-y + 104px + 8px;
+        property <length> activity-h: 44px + Math.max(1, Math.min(6, root.activity.length)) * 28px + 6px;
+        content-height: self.activity-y + self.activity-h + 8px;
+        property <bool> busy: root.checking || root.repairing || root.switch-busy;
+
+        property <int> reveal: Gm.reveal;
+        changed reveal => {
+            if (Gm.focus-kind == 5) {
+                if (Gm.focus-index <= 1) {
+                    self.show(self.health-y, self.health-y + 52px);
+                } else if (Gm.focus-index == 2) {
+                    self.show(self.settings-y, self.settings-y + 100px);
+                } else if (Gm.focus-index == 3) {
+                    self.show(self.settings-y + 60px, self.settings-y + 160px);
+                } else {
+                    self.show(self.help-y, self.help-y + 104px);
+                }
+            }
+        }
+        property <int> copy: Gm.copy;
+        changed copy => {
+            sysinfo-input.select-all();
+            sysinfo-input.copy();
+            sysinfo-input.clear-selection();
+            keys.focus();
+            root.sysinfo-copied();
+        }
+
+        // ---------------- Right now ----------------
+        Card {
+            x: 16px; y: 8px; width: root.row-w; height: 92px;
+            background: Pal.sheet;
+            TSection {
+                x: 14px; y: 6px; width: 200px; height: 30px;
+                text: "Right now"; font-size: 17px;
+            }
+            Text {
+                x: parent.width - 14px - 150px; y: 6px; width: 150px; height: 30px;
+                text: root.live-daemon ? "live" : "service off";
+                font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.muted;
+                horizontal-alignment: right; vertical-alignment: center;
+            }
+            live-sat := Text {
+                x: 14px; y: 38px; width: self.preferred-width; height: 30px;
+                text: root.live-saturation;
+                font-family: Font.head; font-weight: Font.head-weight; font-size: 22px; color: Pal.accent;
+                vertical-alignment: center;
+            }
+            Text {
+                x: live-sat.x + live-sat.width + 10px; y: 38px;
+                width: parent.width / 2 - self.x; height: 30px;
+                text: "applied";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center;
+            }
+            Text {
+                x: parent.width / 2; y: 36px; width: parent.width / 2 - 14px; height: 16px;
+                text: "Active profile";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center;
+            }
+            Text {
+                x: parent.width / 2; y: 52px; width: parent.width / 2 - 14px; height: 20px;
+                text: root.live-daemon ? root.live-profile : "None, the service is off";
+                font-family: Font.bold; font-weight: Font.bold-weight; font-size: 14px; color: Pal.ink;
+                vertical-alignment: center; overflow: elide;
+            }
+            Text {
+                x: 14px; y: 70px; width: parent.width - 28px; height: 16px;
+                text: "While Satur8 is on screen, no game's setting shows.";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.dim;
+                vertical-alignment: center; overflow: elide;
+            }
+        }
+
+        // ---------------- Health ----------------
+        Card {
+            x: 16px; y: status-page.health-y; width: root.row-w; height: status-page.health-h;
+            TSection {
+                x: 14px; y: 4px; width: 200px; height: 44px;
+                text: "Health"; font-size: 17px;
+            }
+            TBtn {
+                x: parent.width - 8px - 132px; y: 4px; width: 132px;
+                kind: 2;
+                enabled: !status-page.busy;
+                text: root.checking ? "Checking..." : "Check again";
+                focused: Gm.highlight && Gm.focus-kind == 5 && Gm.focus-index == 0;
+                down => { Gm.touched(5, 0, 0); }
+                tapped => { root.check-health(); }
+                pan-begin => { status-page.pan-begin(); }
+                pan-by(dy) => { status-page.pan-by(dy); }
+            }
+            TBtn {
+                x: parent.width - 8px - 132px - 12px - 110px; y: 4px; width: 110px;
+                kind: root.health-problem ? 0 : 2;
+                enabled: !status-page.busy;
+                text: root.repairing ? "Repairing..." : "Repair";
+                focused: Gm.highlight && Gm.focus-kind == 5 && Gm.focus-index == 1;
+                down => { Gm.touched(5, 1, 0); }
+                tapped => { root.repair(); }
+                pan-begin => { status-page.pan-begin(); }
+                pan-by(dy) => { status-page.pan-by(dy); }
+            }
+            for item[i] in root.health: Rectangle {
+                x: 14px; y: 52px + i * 40px; width: parent.width - 28px; height: 40px;
+                Rectangle {
+                    x: 1px; y: 9px; width: 7px; height: 7px; border-radius: 3.5px;
+                    background: item.level == 0 ? Pal.accent : item.level == 1 ? Pal.warn : Pal.dim;
+                }
+                Text {
+                    x: 17px; y: 2px; width: parent.width - 17px; height: 19px;
+                    text: item.label;
+                    font-family: Font.bold; font-weight: Font.bold-weight; font-size: 13px;
+                    color: item.level == 2 ? Pal.muted : Pal.ink;
+                    vertical-alignment: center; overflow: elide;
+                }
+                Text {
+                    x: 17px; y: 20px; width: parent.width - 17px; height: 17px;
+                    text: item.detail;
+                    font-family: Font.med; font-weight: Font.med-weight; font-size: 12px;
+                    color: item.level == 1 ? Pal.warn : Pal.muted;
+                    vertical-alignment: center; overflow: elide;
+                }
+            }
+            if root.health.length == 0: Text {
+                x: 14px; y: 52px; width: parent.width - 28px; height: 40px;
+                text: "Checking...";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center;
+            }
+        }
+
+        // ---------------- Settings ----------------
+        Card {
+            x: 16px; y: status-page.settings-y; width: root.row-w; height: 160px;
+            background: Pal.sheet;
+            Text {
+                x: 14px; y: 8px; width: parent.width - 14px - 90px; height: 22px;
+                text: "Automatic per-game switching";
+                font-family: Font.bold; font-weight: Font.bold-weight; font-size: 14px;
+                color: root.switch-available ? Pal.ink : Pal.muted;
+                vertical-alignment: center;
+            }
+            Text {
+                x: 14px; y: 30px; width: parent.width - 14px - 90px; height: 18px;
+                text: root.switch-busy ? "Applying..." : root.switch-detail;
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center; overflow: elide;
+            }
+            TSwitch {
+                x: parent.width - 8px - 72px; y: 6px;
+                checked: root.switch-on;
+                enabled: root.switch-available && !status-page.busy;
+                focused: Gm.highlight && Gm.focus-kind == 5 && Gm.focus-index == 2;
+                down => { Gm.touched(5, 2, 0); }
+                toggled => { root.set-switching(!root.switch-on); }
+                pan-begin => { status-page.pan-begin(); }
+                pan-by(dy) => { status-page.pan-by(dy); }
+            }
+            Rectangle { x: 14px; y: 58px; width: parent.width - 28px; height: 1px; background: Pal.line-soft; }
+            Text {
+                x: 14px; y: 64px; width: parent.width - 14px - 100px; height: 22px;
+                text: "Starting saturation for new games";
+                font-family: Font.bold; font-weight: Font.bold-weight; font-size: 14px; color: Pal.ink;
+                vertical-alignment: center;
+            }
+            Text {
+                x: parent.width - 14px - 80px; y: 62px; width: 80px; height: 26px;
+                text: (root.new-game-percent > 0 ? "+" : "") + root.new-game-percent + "%";
+                font-family: Font.head; font-weight: Font.head-weight; font-size: 20px; color: Pal.accent;
+                horizontal-alignment: right; vertical-alignment: center;
+            }
+            TSlider {
+                x: 6px; y: 100px; width: parent.width - 12px;
+                value: root.new-game-percent;
+                focused: Gm.highlight && Gm.focus-kind == 5 && Gm.focus-index == 3;
+                adjusting: self.focused && Gm.adjusting;
+                down => { Gm.touched(5, 3, 0); }
+                changed(v) => { Gm.percent(2, 0, v, false); }
+                released(v) => { Gm.percent(2, 0, v, true); }
+                pan-begin => { status-page.pan-begin(); }
+                pan-by(dy) => { status-page.pan-by(dy); }
+            }
+        }
+
+        // ---------------- Help ----------------
+        Card {
+            x: 16px; y: status-page.help-y; width: root.row-w; height: 104px;
+            background: Pal.sheet;
+            Text {
+                x: 14px; y: 8px; width: parent.width - 28px; height: 34px;
+                text: "System info is your Satur8 version, session, GPU and the checks above. Nothing is sent.";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                wrap: word-wrap;
+            }
+            sysinfo-input := TextInput {
+                x: 0; y: 0; width: 1px; height: 1px;
+                opacity: 0;
+                read-only: true;
+                text: root.sysinfo-text;
+            }
+            copy-btn := TBtn {
+                x: 14px; y: 50px; width: (parent.width - 28px - 12px) / 2;
+                kind: 1;
+                text: "Copy system info";
+                enabled: root.sysinfo-text != "";
+                focused: Gm.highlight && Gm.focus-kind == 5 && Gm.focus-index == 4;
+                down => { Gm.touched(5, 4, 0); }
+                tapped => {
+                    sysinfo-input.select-all();
+                    sysinfo-input.copy();
+                    sysinfo-input.clear-selection();
+                    keys.focus();
+                    root.sysinfo-copied();
+                }
+                pan-begin => { status-page.pan-begin(); }
+                pan-by(dy) => { status-page.pan-by(dy); }
+            }
+            TBtn {
+                x: copy-btn.x + copy-btn.width + 12px; y: 50px; width: copy-btn.width;
+                kind: 2;
+                text: "Report a bug";
+                has-icon: true; icon: @image-url("icons/external.svg");
+                focused: Gm.highlight && Gm.focus-kind == 5 && Gm.focus-index == 5;
+                down => { Gm.touched(5, 5, 0); }
+                tapped => { root.report-bug(); }
+                pan-begin => { status-page.pan-begin(); }
+                pan-by(dy) => { status-page.pan-by(dy); }
+            }
+        }
+
+        // ---------------- Activity ----------------
+        Card {
+            x: 16px; y: status-page.activity-y; width: root.row-w; height: status-page.activity-h;
+            background: Pal.sheet;
+            TSection {
+                x: 14px; y: 4px; width: 200px; height: 36px;
+                text: "Activity"; font-size: 17px;
+            }
+            if root.activity.length == 0: Text {
+                x: 14px; y: 44px; width: parent.width - 28px; height: 28px;
+                text: "No activity yet.";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center;
+            }
+            for entry[i] in root.activity: Rectangle {
+                visible: i < 6;
+                x: 14px; y: 44px + Math.min(i, 5) * 28px; width: parent.width - 28px; height: 28px;
+                Rectangle {
+                    x: 1px; y: 11px; width: 6px; height: 6px; border-radius: 3px;
+                    background: entry.ok ? Pal.accent : Pal.dim;
+                }
+                Text {
+                    x: 17px; y: 0; width: parent.width - 100px; height: 28px;
+                    text: entry.text;
+                    font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.soft;
+                    vertical-alignment: center; overflow: elide;
+                }
+                Text {
+                    x: parent.width - 80px; y: 0; width: 80px; height: 28px;
+                    text: entry.time;
+                    font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.muted;
+                    horizontal-alignment: right; vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    // ================= About =================
+    if Gm.page == 2: about-page := Scroller {
+        x: 0; y: root.top; width: root.width; height: root.body-h;
+        property <length> links-y: 8px + 150px + 8px;
+        content-height: self.links-y + 60px + 8px;
+        Card {
+            x: 16px; y: 8px; width: root.row-w; height: 150px;
+            Image {
+                x: 16px; y: 16px; width: 144px; height: 28px;
+                source: Pal.dark ? @image-url("word.png") : @image-url("word-light.png");
+                image-fit: fill;
+            }
+            Text {
+                x: parent.width - 16px - 120px; y: 16px; width: 120px; height: 28px;
+                text: root.version-text;
+                font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.muted;
+                horizontal-alignment: right; vertical-alignment: center;
+            }
+            Text {
+                x: 16px; y: 54px; width: parent.width - 32px; height: 90px;
+                text: "Per-game digital vibrance for Linux. Satur8 changes the display's colors after the game has drawn them; it does not read or change the game. In Steam Game Mode each game's setting shows while that game is on screen, and Steam's own screens use Everything else.";
+                font-family: Font.reg; font-weight: Font.reg-weight; font-size: 13px; color: Pal.soft;
+                wrap: word-wrap;
+            }
+        }
+        Card {
+            x: 16px; y: about-page.links-y; width: root.row-w; height: 60px;
+            background: Pal.sheet;
+            property <length> w: (self.width - 16px - 24px) / 3;
+            TBtn {
+                x: 8px; y: 8px; width: parent.w;
+                kind: 3;
+                text: "satur8.app";
+                focused: Gm.highlight && Gm.focus-kind == 5 && Gm.focus-index == 0;
+                down => { Gm.touched(5, 0, 0); }
+                tapped => { root.open-link("https://satur8.app"); }
+            }
+            TBtn {
+                x: 8px + parent.w + 12px; y: 8px; width: parent.w;
+                kind: 2;
+                text: "X  @NtrpyDev";
+                focused: Gm.highlight && Gm.focus-kind == 5 && Gm.focus-index == 1;
+                down => { Gm.touched(5, 1, 0); }
+                tapped => { root.open-link("https://x.com/NtrpyDev"); }
+            }
+            TBtn {
+                x: 8px + 2 * (parent.w + 12px); y: 8px; width: parent.w;
+                kind: 2;
+                text: "GitHub";
+                focused: Gm.highlight && Gm.focus-kind == 5 && Gm.focus-index == 2;
+                down => { Gm.touched(5, 2, 0); }
+                tapped => { root.open-link("https://github.com/NtrpyDev/satur8"); }
+            }
+        }
+    }
+
+    // ================= Add a game =================
+    // The user's games by name, over the whole page: running ones first. A
+    // row is 52 pixels high; the list scrolls by dragging.
+    if Gm.picker-open: Rectangle {
+        x: 0; y: root.top; width: root.width; height: root.body-h;
+        background: Pal.bg;
+        // Swallows touches so nothing under the list reacts.
+        TouchArea { mouse-cursor: none; }
+        TSection {
+            x: 18px; y: 4px; width: 300px; height: 48px;
+            text: "Your games"; font-size: 20px;
+        }
+        TBtn {
+            x: parent.width - 16px - 110px; y: 6px; width: 110px;
+            kind: 2;
+            text: "Close";
+            tapped => { Gm.close-picker(); }
+        }
+        if Gm.picks.length == 0: Text {
+            x: 32px; y: 60px; width: parent.width - 64px; height: 80px;
+            text: Gm.pick-message;
+            font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.muted;
+            horizontal-alignment: center; vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        pick-list := Scroller {
+            x: 0; y: 56px; width: parent.width; height: parent.height - 56px;
+            content-height: Gm.picks.length * 52px + 8px;
+            property <int> reveal: Gm.reveal;
+            changed reveal => {
+                if (Gm.focus-kind == 4) {
+                    self.show(Gm.focus-index * 52px, Gm.focus-index * 52px + 52px);
+                }
+            }
+            Card {
+                x: 16px; y: 0; width: root.row-w; height: Gm.picks.length * 52px;
+                visible: Gm.picks.length > 0;
+                background: Pal.sheet;
+            }
+            for row[i] in Gm.picks: Rectangle {
+                x: 16px; y: i * 52px; width: root.row-w; height: 52px;
+                border-radius: 9px;
+                background: row-zone.pressed ? Pal.raised : transparent;
+                Rectangle {
+                    x: 16px; y: 22px; width: 8px; height: 8px; border-radius: 4px;
+                    background: row.running || row.has-profile ? Pal.accent : Pal.dim;
+                }
+                Text {
+                    x: 36px; y: 6px; width: parent.width - 52px; height: 22px;
+                    text: row.name;
+                    font-family: Font.bold; font-weight: Font.bold-weight; font-size: 15px; color: Pal.ink;
+                    vertical-alignment: center; overflow: elide;
+                }
+                Text {
+                    x: 36px; y: 28px; width: parent.width - 52px; height: 18px;
+                    text: row.detail;
+                    font-family: Font.med; font-weight: Font.med-weight; font-size: 12px;
+                    color: row.running ? Pal.accent : Pal.muted;
+                    vertical-alignment: center; overflow: elide;
+                }
+                if i < Gm.picks.length - 1: Rectangle {
+                    x: 14px; y: 51px; width: parent.width - 28px; height: 1px;
+                    background: Pal.line-soft;
+                }
+                row-zone := Zone {
+                    down => { Gm.touched(4, i, 0); }
+                    tapped => { Gm.pick(i); }
+                    pan-begin => { pick-list.pan-begin(); }
+                    pan-by(dy) => { pick-list.pan-by(dy); }
+                }
+                Ring {
+                    x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px;
+                    border-radius: 9px;
+                    on: Gm.highlight && Gm.focus-kind == 4 && Gm.focus-index == i;
+                }
+            }
+        }
+    }
+
+    PromptBar {
+        x: 0; y: root.height - root.bar; width: root.width;
+    }
+}

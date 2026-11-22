@@ -10,14 +10,14 @@
 //! gamescope shrinks the picture to fit, but touches are not shrunk with it,
 //! so only the top left of the window can be reached.
 
-/// The layout width the app is drawn at in a gaming session, in logical
-/// pixels. It is the window's `min-width` in `ui/app.slint`: the narrowest
-/// width the three-column Main page holds, which makes everything as large as
-/// the layout allows on a small screen.
-pub const LAYOUT_WIDTH: f32 = 1024.0;
+/// The width the Game Mode layout (`ui/touch.slint`) is drawn at, in logical
+/// pixels. On a Steam Deck's 1280x800 screen that is a scale of 2: about 204
+/// pixels per inch, so one logical pixel is a quarter of a millimeter and a
+/// 44 pixel control is 11 mm.
+pub const LAYOUT_WIDTH: f32 = 640.0;
 
-/// The window's `min-height` in `ui/app.slint`, in logical pixels.
-pub const LAYOUT_MIN_HEIGHT: f32 = 560.0;
+/// The least height that layout needs, in logical pixels: its `min-height`.
+pub const LAYOUT_MIN_HEIGHT: f32 = 360.0;
 
 /// Whether this process runs in a gamescope session: Steam Game Mode, or a
 /// program started inside a nested gamescope. `var` reads an environment
@@ -45,9 +45,10 @@ pub struct Sizing {
 /// The window for a gamescope session whose output is `output` device pixels.
 ///
 /// The window is always the output's size. The scale is the one at which the
-/// layout is [`LAYOUT_WIDTH`] wide, lowered when the output is so wide for
-/// its height that [`LAYOUT_MIN_HEIGHT`] would not fit. It is rounded down to
-/// a hundredth so the window's minimum size never rounds past the output.
+/// Game Mode layout is [`LAYOUT_WIDTH`] wide, lowered when the output is so
+/// wide for its height that [`LAYOUT_MIN_HEIGHT`] would not fit. It is
+/// rounded down to a hundredth so the window's minimum size never rounds past
+/// the output.
 ///
 /// The scale the display reports plays no part. In a gaming session it
 /// describes the panel (about 2.08 on a Steam Deck, 1.0 on a television), not
@@ -143,23 +144,25 @@ mod tests {
     /// design it does not change the result.
     #[test]
     fn the_layout_fills_the_output() {
-        let cases: [((u32, u32), f32, (f32, f32)); 8] = [
+        type Case = ((u32, u32), f32, (f32, f32));
+        let cases: [Case; 9] = [
             // Steam Deck, reports about 2.08.
-            ((1280, 800), 1.25, (1024.0, 640.0)),
+            ((1280, 800), 2.0, (640.0, 400.0)),
             // Television at 1080p, reports 1.0 or 2.0.
-            ((1920, 1080), 1.87, (1026.7, 577.5)),
+            ((1920, 1080), 3.0, (640.0, 360.0)),
             // Television at 4K, reports 2.0.
-            ((3840, 2160), 3.75, (1024.0, 576.0)),
+            ((3840, 2160), 6.0, (640.0, 360.0)),
             // Docked Deck at its default game resolution on a 16:9 screen.
-            ((1280, 720), 1.25, (1024.0, 576.0)),
-            // Smaller than the layout: shrink until the width fits.
-            ((800, 600), 0.78, (1025.6, 769.2)),
+            ((1280, 720), 2.0, (640.0, 360.0)),
+            // A small output: the layout still gets its 640 pixels.
+            ((800, 600), 1.25, (640.0, 480.0)),
+            ((640, 480), 1.0, (640.0, 480.0)),
             // Wide for its height: the minimum height decides.
-            ((2560, 1080), 1.92, (1333.3, 562.5)),
-            ((3440, 1440), 2.57, (1338.5, 560.3)),
+            ((2560, 1080), 3.0, (853.3, 360.0)),
+            ((3440, 1440), 4.0, (860.0, 360.0)),
             // 1366x768 does not divide evenly; rounding down keeps the
-            // minimum width (1024 x 1.33 = 1361.9) inside the output.
-            ((1366, 768), 1.33, (1027.1, 577.4)),
+            // minimum size (640 x 2.13 = 1363.2) inside the output.
+            ((1366, 768), 2.13, (641.3, 360.6)),
         ];
         for (output, scale, layout) in cases {
             let sizing = window_sizing(Some(output), false).unwrap();
@@ -173,6 +176,12 @@ mod tests {
             assert!(LAYOUT_WIDTH * picked <= output.0 as f32, "{output:?}");
             assert!(LAYOUT_MIN_HEIGHT * picked <= output.1 as f32, "{output:?}");
         }
+    }
+
+    #[test]
+    fn an_output_smaller_than_the_layout_shrinks_it_to_fit() {
+        let sizing = window_sizing(Some((480, 320)), false).unwrap();
+        assert_eq!(sizing.scale, Some(0.75));
     }
 
     #[test]
@@ -196,8 +205,8 @@ mod tests {
 
     #[test]
     fn scale_is_written_with_two_decimals() {
-        assert_eq!(scale_text(1.25), "1.25");
-        assert_eq!(scale_text(3.75), "3.75");
-        assert_eq!(scale_text(0.78), "0.78");
+        assert_eq!(scale_text(2.0), "2.00");
+        assert_eq!(scale_text(2.13), "2.13");
+        assert_eq!(scale_text(0.75), "0.75");
     }
 }

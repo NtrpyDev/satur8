@@ -2,20 +2,27 @@
 //!
 //! Main page: the desktop vibrance strip and per-game cards with the game's
 //! real Steam icon, a saturation slider and an enable toggle; games are added
-//! from the running programs or from the installed Steam games. Status page:
-//! health checks, repair, per-game switching and an activity log. About page.
-//! Reads/writes the same `profiles.toml` the CLI and daemon use.
+//! by name from one list of the installed Steam games and what is running.
+//! Status page: health checks, repair, per-game switching and an activity
+//! log. About page. Reads/writes the same `profiles.toml` the CLI and daemon
+//! use.
+//!
+//! In a Steam gaming session (Steam Deck Game Mode) the same app shows its
+//! own layout for a touch screen and the Deck's buttons (`ui/touch.slint`,
+//! `gm.rs`, `pad.rs`), at a size that fits the screen (`mode.rs`).
 //!
 //! Game art comes from the user's *local* Steam cache - nothing is bundled.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod gm;
 mod mode;
+mod pad;
 mod picker;
 mod status;
 mod steam;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,9 +30,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use satur8_backend::{all_outputs, select_backend, RestoreGuard};
 use satur8_core::levels::desktop_picture;
 use satur8_core::proc;
-use satur8_core::{Backend, Levels, MatchRule, Profile, Profiles, Saturation};
+use satur8_core::{Backend, Levels, Profile, Profiles, Saturation};
 use serde::{Deserialize, Serialize};
-use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
 slint::include_modules!();
 
@@ -99,10 +106,60 @@ thread_local! {
     static LAST_FACTS: RefCell<Option<status::Facts>> = const { RefCell::new(None) };
 }
 
+/// Everything the window's callbacks act on. One of these lives for the whole
+/// run, on the UI thread; the desktop layout and the Game Mode layout both
+/// drive it.
+struct App {
+    ui: slint::Weak<AppWindow>,
+    /// A gamescope session: the Game Mode layout is shown.
+    touch: bool,
+    /// The backend is gamescope's: Steam Game Mode, where what is running
+    /// comes from gamescope and not from the process list.
+    game_mode: bool,
+    /// The AppID Steam gave this app's own library shortcut, if it was
+    /// started from one.
+    own_app_id: Option<u32>,
+    state: RefCell<State>,
+    games: Rc<VecModel<GameRow>>,
+    activity: Rc<VecModel<LogRow>>,
+    gui_config: RefCell<GuiConfig>,
+    // The "Add game" list: what was read when it opened, and what it shows.
+    library: RefCell<picker::Library>,
+    running: RefCell<picker::Running>,
+    query: RefCell<String>,
+    rows: RefCell<Vec<picker::Row>>,
+    steam_rows: Rc<VecModel<SteamRow>>,
+    // Game Mode.
+    gm: RefCell<gm::State>,
+    gm_games: Rc<VecModel<GmGame>>,
+    gm_picks: Rc<VecModel<GmPick>>,
+    gm_prompts: Rc<VecModel<GmPrompt>>,
+    /// Saves a slider change made with the pad once the changes stop.
+    save_timer: slint::Timer,
+    /// How often the key held on the keyboard has repeated.
+    key_repeat: Cell<u32>,
+    input_debug: bool,
+}
+
+thread_local! {
+    /// The app, for closures that arrive from other threads through the
+    /// event loop (the gamepad reader) and for timers. UI thread only.
+    static APP: RefCell<Option<Rc<App>>> = const { RefCell::new(None) };
+}
+
+fn with_app(run: impl FnOnce(&App)) {
+    let app = APP.with(|app| app.borrow().clone());
+    if let Some(app) = app {
+        run(&app);
+    }
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     // Before the window exists: Slint reads the scale when it creates it.
-    let sizing = gamescope_sizing();
+    let touch = mode::in_gamescope_session(|name| std::env::var(name).ok());
+    let sizing = if touch { gamescope_sizing() } else { None };
     let ui = AppWindow::new()?;
+    ui.set_touch(touch);
     if let Some(sizing) = sizing {
         fit_window(&ui, sizing);
     }
@@ -113,9 +170,9 @@ fn main() -> Result<(), slint::PlatformError> {
         eprintln!("satur8-gui: could not set the app ID {APP_ID}: {error}");
     }
     ui.set_version_text(format!("v{}", env!("CARGO_PKG_VERSION")).into());
-    let gui_config = Rc::new(RefCell::new(load_gui_config()));
-    ui.global::<Pal>().set_dark(gui_config.borrow().dark_mode);
-    ui.set_new_game_percent(sat_to_percent(gui_config.borrow().new_game_saturation()));
+    let gui_config = load_gui_config();
+    ui.global::<Pal>().set_dark(gui_config.dark_mode);
+    ui.set_new_game_percent(sat_to_percent(gui_config.new_game_saturation()));
 
     let profiles = load_profiles(Profiles::default());
     let backend = match select_backend() {
@@ -128,51 +185,59 @@ fn main() -> Result<(), slint::PlatformError> {
             None
         }
     };
+    let backend_name = backend.as_ref().map(|b| b.backend().name().to_string());
     ui.set_backend_ok(backend.is_some());
-    ui.set_backend_name(
-        backend
-            .as_ref()
-            .map(|b| b.backend().name().to_string())
-            .unwrap_or_else(|| "no".into())
-            .into(),
-    );
-
-    let state = Rc::new(RefCell::new(State { backend, profiles }));
-
-    // Games
-    let games = Rc::new(VecModel::<GameRow>::default());
-    rebuild_games(&games, &state.borrow().profiles);
-    ui.set_games(ModelRc::from(games.clone()));
-
-    // Running apps (with Steam AppIDs)
-    let apps = Rc::new(RefCell::new(proc::running_apps()));
-    let running = Rc::new(VecModel::<SharedString>::from(running_strings(
-        &apps.borrow(),
-    )));
-    ui.set_running(ModelRc::from(running.clone()));
+    ui.set_backend_name(backend_name.clone().unwrap_or_else(|| "no".into()).into());
 
     // Activity
     let activity = Rc::new(VecModel::<LogRow>::default());
     log(&activity, true, "Started Satur8");
-    match state
-        .borrow()
-        .backend
-        .as_ref()
-        .map(|b| b.backend().name().to_string())
-    {
+    match &backend_name {
         Some(name) => log(&activity, false, &format!("{name} backend active")),
         None => log(&activity, false, "No supported backend in this session"),
     }
     ui.set_activity(ModelRc::from(activity.clone()));
+    ui.set_default_percent(sat_to_percent(profiles.default_saturation));
 
-    ui.set_default_percent(sat_to_percent(state.borrow().profiles.default_saturation));
+    let input_debug = std::env::var_os("SATUR8_GUI_INPUT_DEBUG").is_some_and(|v| !v.is_empty())
+        || config_dir().join("input-debug").exists();
+    let app = Rc::new(App {
+        ui: ui.as_weak(),
+        touch,
+        game_mode: backend_name.as_deref() == Some("gamescope"),
+        own_app_id: std::env::var("SteamAppId")
+            .ok()
+            .and_then(|id| id.trim().parse().ok())
+            .filter(|id| *id != 0),
+        state: RefCell::new(State { backend, profiles }),
+        games: Rc::new(VecModel::default()),
+        activity,
+        gui_config: RefCell::new(gui_config),
+        library: RefCell::new(picker::Library::Games(Vec::new())),
+        running: RefCell::new(picker::Running::Procs(Vec::new())),
+        query: RefCell::new(String::new()),
+        rows: RefCell::new(Vec::new()),
+        steam_rows: Rc::new(VecModel::default()),
+        gm: RefCell::new(gm::State::new(&gm::Layout::default())),
+        gm_games: Rc::new(VecModel::default()),
+        gm_picks: Rc::new(VecModel::default()),
+        gm_prompts: Rc::new(VecModel::default()),
+        save_timer: slint::Timer::default(),
+        key_repeat: Cell::new(0),
+        input_debug,
+    });
+    APP.with(|slot| *slot.borrow_mut() = Some(app.clone()));
+    ui.set_games(ModelRc::from(app.games.clone()));
+    ui.set_steam_rows(ModelRc::from(app.steam_rows.clone()));
+    app.rebuild();
 
     // Off-screen screenshot helper: jump straight to a page
     // (0 = Main, 1 = Status, 2 = About).
-    if let Ok(n) = std::env::var("VIBRANCE_GUI_NAV") {
-        if let Ok(n) = n.parse::<i32>() {
-            ui.set_nav(n);
-        }
+    let start_page = std::env::var("VIBRANCE_GUI_NAV")
+        .ok()
+        .and_then(|n| n.parse::<i32>().ok());
+    if let Some(page) = start_page {
+        ui.set_nav(page);
     }
     if let Ok(value) = std::env::var("SATUR8_GUI_DARK") {
         ui.global::<Pal>()
@@ -180,13 +245,12 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // ---------------- callbacks ----------------
-    ui.on_dark_mode_changed({
-        let gui_config = gui_config.clone();
-        move |dark_mode| {
-            let mut config = gui_config.borrow_mut();
+    ui.on_dark_mode_changed(|dark_mode| {
+        with_app(|app| {
+            let mut config = app.gui_config.borrow_mut();
             config.dark_mode = dark_mode;
             save_gui_config(&config);
-        }
+        })
     });
 
     // ---------------- Status page ----------------
@@ -232,38 +296,13 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         }
     });
-    ui.on_new_game_changed({
-        let w = ui.as_weak();
-        move |percent| {
-            if let Some(ui) = w.upgrade() {
-                ui.set_new_game_percent(percent.round() as i32);
-            }
-        }
+    ui.on_new_game_changed(|percent| with_app(|app| app.set_new_game(percent, false)));
+    ui.on_new_game_released(|percent| with_app(|app| app.set_new_game(percent, true)));
+    ui.on_sysinfo_copied(|| {
+        with_app(|app| log(&app.activity, true, "Copied system info to the clipboard"))
     });
-    ui.on_new_game_released({
-        let gui_config = gui_config.clone();
-        let activity = activity.clone();
-        move |percent| {
-            let Some(sat) = percent_to_sat(percent.round()) else {
-                return;
-            };
-            let mut config = gui_config.borrow_mut();
-            config.new_game_saturation = sat;
-            save_gui_config(&config);
-            log(
-                &activity,
-                false,
-                &format!("New games now start at {:+.0}%", (sat - 1.0) * 100.0),
-            );
-        }
-    });
-    ui.on_sysinfo_copied({
-        let activity = activity.clone();
-        move || log(&activity, true, "Copied system info to the clipboard")
-    });
-    ui.on_report_bug({
-        let activity = activity.clone();
-        move || {
+    ui.on_report_bug(|| {
+        with_app(|app| {
             let info = LAST_FACTS.with(|facts| {
                 facts.borrow().as_ref().map(|facts| {
                     status::system_info_for_this_machine(facts, &status::health_rows(facts))
@@ -275,301 +314,68 @@ fn main() -> Result<(), slint::PlatformError> {
                 Some(_) => {
                     open_url(&status::bug_report_url());
                     log(
-                        &activity,
+                        &app.activity,
                         true,
                         "Opened a new bug report in your browser; paste the copied system info into it",
                     );
                 }
                 None => log(
-                    &activity,
+                    &app.activity,
                     false,
                     "Still checking; try Report a bug again in a moment",
                 ),
             }
-        }
+        })
     });
     ui.on_open_link(|url| {
         open_url(url.as_str());
     });
-    ui.on_default_changed({
-        let state = state.clone();
-        let w = ui.as_weak();
-        move |percent| {
-            let Some(sat) = percent_to_sat(percent) else {
-                eprintln!("satur8-gui: ignored non-finite default saturation input");
-                return;
-            };
-            // Runs on every slider move: apply live, keep the value in memory.
-            // profiles.toml is written once, in on_default_released.
-            {
-                let mut st = state.borrow_mut();
-                st.profiles.default_saturation = sat;
-                let st = &mut *st;
-                let profiles = &st.profiles;
-                if let Some(b) = st.backend.as_mut() {
-                    let desktop = desktop_picture(profiles, b.backend().per_output()).levels;
-                    b.set_restore_to(desktop.clone());
-                    if show_desktop(b.backend_mut(), &desktop).is_ok() {
-                        b.disarm();
-                    }
-                }
+    // Runs on every slider move: apply live, keep the value in memory.
+    // profiles.toml is written once, at the end of the drag (or by the
+    // Restore button).
+    ui.on_default_changed(|percent| with_app(|app| app.set_rest(percent, false)));
+    ui.on_default_released(|percent| with_app(|app| app.set_rest(percent, true)));
+    ui.on_percent_changed(|i, percent| with_app(|app| app.set_game(i as usize, percent, true)));
+    ui.on_toggle_enabled(|i, enabled| with_app(|app| app.set_enabled(i as usize, enabled)));
+    ui.on_remove(|i| with_app(|app| app.remove(i as usize)));
+
+    // ---------------- "Add game" list ----------------
+    // The library and what is running are read when the list opens and on
+    // its Refresh button, never on a timer.
+    ui.on_steam_picker_opened(|| with_app(|app| app.open_list()));
+    ui.on_steam_refresh(|| with_app(|app| app.read_list()));
+    ui.on_steam_filter_changed(|text| {
+        with_app(|app| {
+            *app.query.borrow_mut() = text.to_string();
+            app.show_list();
+        })
+    });
+    ui.on_pick_steam(|index| {
+        with_app(|app| {
+            if let Ok(index) = usize::try_from(index) {
+                app.pick(index);
             }
-            if let Some(ui) = w.upgrade() {
-                ui.set_default_percent(percent.round() as i32);
+        })
+    });
+    // Enter in the filter field; true closes the list.
+    ui.on_steam_filter_accepted(|| {
+        let mut picked = false;
+        with_app(|app| {
+            let only = picker::enter_pick(&app.rows.borrow());
+            if let Some(index) = only {
+                app.pick(index);
+                picked = true;
             }
-        }
+        });
+        picked
     });
 
-    // End of a desktop-slider drag (or the Restore button): save once.
-    ui.on_default_released({
-        let state = state.clone();
-        move |percent| {
-            let Some(sat) = percent_to_sat(percent) else {
-                eprintln!("satur8-gui: ignored non-finite default saturation input");
-                return;
-            };
-            let mut st = state.borrow_mut();
-            st.profiles.default_saturation = sat;
-            save(&st.profiles);
-        }
-    });
+    ui.on_clear_activity(|| with_app(|app| app.activity.set_vec(Vec::<LogRow>::new())));
 
-    ui.on_percent_changed({
-        let state = state.clone();
-        let games = games.clone();
-        move |i, percent| {
-            let Some(sat) = percent_to_sat(percent) else {
-                eprintln!("satur8-gui: ignored non-finite profile saturation input");
-                return;
-            };
-            {
-                let mut st = state.borrow_mut();
-                if let Some(p) = st.profiles.profiles.get_mut(i as usize) {
-                    p.saturation = sat;
-                }
-                save(&st.profiles);
-            }
-            if let Some(mut row) = games.row_data(i as usize) {
-                row.percent = percent.round() as i32;
-                games.set_row_data(i as usize, row);
-            }
-        }
-    });
-
-    ui.on_toggle_enabled({
-        let state = state.clone();
-        let activity = activity.clone();
-        move |i, enabled| {
-            let name = {
-                let mut st = state.borrow_mut();
-                let Some(profile) = st.profiles.profiles.get_mut(i as usize) else {
-                    return;
-                };
-                profile.enabled = enabled;
-                let name = profile.name.clone();
-                save(&st.profiles);
-                name
-            };
-            log(
-                &activity,
-                false,
-                &format!("{} {}", name, if enabled { "enabled" } else { "disabled" }),
-            );
-        }
-    });
-
-    ui.on_remove({
-        let state = state.clone();
-        let games = games.clone();
-        let activity = activity.clone();
-        let w = ui.as_weak();
-        move |i| {
-            // Indices shift, so the card the Steam picker marked is no longer known.
-            if let Some(ui) = w.upgrade() {
-                ui.set_picked_index(-1);
-            }
-            let name;
-            {
-                let mut st = state.borrow_mut();
-                let i = i as usize;
-                name = st
-                    .profiles
-                    .profiles
-                    .get(i)
-                    .map(|p| p.name.clone())
-                    .unwrap_or_default();
-                if i < st.profiles.profiles.len() {
-                    st.profiles.profiles.remove(i);
-                }
-                save(&st.profiles);
-            }
-            rebuild_games(&games, &state.borrow().profiles);
-            log(&activity, false, &format!("Removed {name}"));
-        }
-    });
-
-    ui.on_add_running({
-        let state = state.clone();
-        let games = games.clone();
-        let apps = apps.clone();
-        let activity = activity.clone();
-        let gui_config = gui_config.clone();
-        let w = ui.as_weak();
-        move |i| {
-            if let Some(ui) = w.upgrade() {
-                ui.set_picked_index(-1);
-            }
-            let app = apps
-                .borrow()
-                .get(i as usize)
-                .map(|a| (a.exe.clone(), a.app_id));
-            let Some((exe, app_id)) = app else { return };
-            {
-                let mut st = state.borrow_mut();
-                let saturation = gui_config.borrow().new_game_saturation();
-                add_or_update(&mut st.profiles, &exe, app_id, saturation);
-                save(&st.profiles);
-            }
-            rebuild_games(&games, &state.borrow().profiles);
-            log(&activity, true, &format!("Added {exe}"));
-        }
-    });
-
-    ui.on_refresh_running({
-        let apps = apps.clone();
-        let running = running.clone();
-        move || {
-            *apps.borrow_mut() = proc::running_apps();
-            running.set_vec(running_strings(&apps.borrow()));
-        }
-    });
-
-    // ---------------- "Add Steam game" picker ----------------
-    // The library is read when the picker opens and on its Refresh button,
-    // never on a timer.
-    let library = Rc::new(RefCell::new(picker::Library::Games(Vec::new())));
-    let steam_query = Rc::new(RefCell::new(String::new()));
-    let steam_rows = Rc::new(VecModel::<SteamRow>::default());
-    ui.set_steam_rows(ModelRc::from(steam_rows.clone()));
-    let show_picker = {
-        let w = ui.as_weak();
-        let state = state.clone();
-        let library = library.clone();
-        let steam_query = steam_query.clone();
-        let steam_rows = steam_rows.clone();
-        move || {
-            let view = picker::view(
-                &library.borrow(),
-                &state.borrow().profiles,
-                &steam_query.borrow(),
-            );
-            steam_rows.set_vec(steam_rows_ui(&view));
-            if let Some(ui) = w.upgrade() {
-                ui.set_steam_message(view.message.into());
-                ui.set_steam_filter_shown(view.show_filter);
-            }
-        }
-    };
-    let show_picker = Rc::new(show_picker);
-    ui.on_steam_picker_opened({
-        let w = ui.as_weak();
-        let library = library.clone();
-        let steam_query = steam_query.clone();
-        let show_picker = show_picker.clone();
-        move || {
-            // The filter field starts empty each time the picker opens.
-            steam_query.borrow_mut().clear();
-            *library.borrow_mut() = read_steam_library();
-            if let Some(ui) = w.upgrade() {
-                ui.set_picked_index(-1);
-            }
-            show_picker();
-        }
-    });
-    ui.on_steam_refresh({
-        let library = library.clone();
-        let show_picker = show_picker.clone();
-        move || {
-            *library.borrow_mut() = read_steam_library();
-            show_picker();
-        }
-    });
-    ui.on_steam_filter_changed({
-        let steam_query = steam_query.clone();
-        let show_picker = show_picker.clone();
-        move |text| {
-            *steam_query.borrow_mut() = text.to_string();
-            show_picker();
-        }
-    });
-    let pick_steam = {
-        let w = ui.as_weak();
-        let state = state.clone();
-        let games = games.clone();
-        let library = library.clone();
-        let activity = activity.clone();
-        let gui_config = gui_config.clone();
-        move |app_id: u32| {
-            let game = match &*library.borrow() {
-                picker::Library::Games(list) => list.iter().find(|g| g.app_id == app_id).cloned(),
-                picker::Library::NoSteam => None,
-            };
-            let Some(game) = game else { return };
-            let (index, text, ok) = {
-                let mut st = state.borrow_mut();
-                let saturation = gui_config.borrow().new_game_saturation();
-                let choice = picker::pick(&st.profiles, &game, saturation);
-                let created = matches!(choice, picker::Pick::Create(_));
-                let (index, changed) = picker::apply(&mut st.profiles, &game, choice);
-                if changed {
-                    save(&st.profiles);
-                }
-                let text = picker::log_line(&st.profiles, index, changed, created);
-                (index, text, changed)
-            };
-            rebuild_games(&games, &state.borrow().profiles);
-            log(&activity, ok, &text);
-            if let Some(ui) = w.upgrade() {
-                ui.set_picked_index(index as i32);
-                ui.set_picked_serial(ui.get_picked_serial().wrapping_add(1));
-            }
-        }
-    };
-    let pick_steam = Rc::new(pick_steam);
-    ui.on_pick_steam({
-        let pick_steam = pick_steam.clone();
-        move |app_id| {
-            if let Ok(app_id) = u32::try_from(app_id) {
-                pick_steam(app_id);
-            }
-        }
-    });
-    ui.on_steam_filter_accepted({
-        let state = state.clone();
-        let library = library.clone();
-        let steam_query = steam_query.clone();
-        let pick_steam = pick_steam.clone();
-        move || {
-            let view = picker::view(
-                &library.borrow(),
-                &state.borrow().profiles,
-                &steam_query.borrow(),
-            );
-            // True closes the picker.
-            match picker::enter_pick(&view) {
-                Some(app_id) => {
-                    pick_steam(app_id);
-                    true
-                }
-                None => false,
-            }
-        }
-    });
-
-    ui.on_clear_activity({
-        let activity = activity.clone();
-        move || activity.set_vec(Vec::<LogRow>::new())
-    });
+    // ---------------- Steam Game Mode ----------------
+    if touch {
+        app.start_game_mode(&ui, start_page);
+    }
 
     // Closing hides the window while the tray is running; otherwise it quits.
     ui.window().on_close_requested({
@@ -584,6 +390,621 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     ui.run()
+}
+
+impl App {
+    /// Draw the games again from the profiles, in both layouts.
+    fn rebuild(&self) {
+        rebuild_games(&self.games, &self.state.borrow().profiles);
+        self.gm_games.set_vec(
+            self.games
+                .iter()
+                .map(|row| GmGame {
+                    name: row.name,
+                    percent: row.percent,
+                    enabled: row.enabled,
+                    initial: row.initial,
+                    icon: row.icon,
+                    has_icon: row.has_icon,
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    fn save(&self) {
+        self.save_timer.stop();
+        save(&self.state.borrow().profiles);
+    }
+
+    /// Save once the changes stop: a slider held down on the pad changes many
+    /// times a second.
+    fn save_soon(&self) {
+        self.save_timer.start(
+            slint::TimerMode::SingleShot,
+            std::time::Duration::from_millis(400),
+            || with_app(|app| app.save()),
+        );
+    }
+
+    /// The saturation of everything without a profile ("Desktop vibrance";
+    /// "Everything else" in Game Mode): show it on screen now, and save it
+    /// when the change is `done`.
+    fn set_rest(&self, percent: f32, done: bool) {
+        let Some(sat) = percent_to_sat(percent) else {
+            eprintln!("satur8-gui: ignored non-finite default saturation input");
+            return;
+        };
+        {
+            let mut st = self.state.borrow_mut();
+            st.profiles.default_saturation = sat;
+            let st = &mut *st;
+            let profiles = &st.profiles;
+            if let Some(b) = st.backend.as_mut() {
+                let desktop = desktop_picture(profiles, b.backend().per_output()).levels;
+                b.set_restore_to(desktop.clone());
+                if show_desktop(b.backend_mut(), &desktop).is_ok() {
+                    b.disarm();
+                }
+            }
+        }
+        if let Some(ui) = self.ui.upgrade() {
+            ui.set_default_percent(percent.round() as i32);
+            ui.global::<Gm>().set_rest_percent(percent.round() as i32);
+        }
+        if done {
+            self.save();
+        } else if self.touch {
+            self.save_soon();
+        }
+    }
+
+    /// A game's saturation. The desktop layout saves every change; Game Mode
+    /// saves when the change is `done` or has stopped.
+    fn set_game(&self, index: usize, percent: f32, done: bool) {
+        let Some(sat) = percent_to_sat(percent) else {
+            eprintln!("satur8-gui: ignored non-finite profile saturation input");
+            return;
+        };
+        {
+            let mut st = self.state.borrow_mut();
+            let Some(profile) = st.profiles.profiles.get_mut(index) else {
+                return;
+            };
+            profile.saturation = sat;
+        }
+        let percent = percent.round() as i32;
+        if let Some(mut row) = self.games.row_data(index) {
+            row.percent = percent;
+            self.games.set_row_data(index, row);
+        }
+        if let Some(mut row) = self.gm_games.row_data(index) {
+            row.percent = percent;
+            self.gm_games.set_row_data(index, row);
+        }
+        if done {
+            self.save();
+        } else {
+            self.save_soon();
+        }
+    }
+
+    /// Status page > Settings > "Starting saturation for new games".
+    fn set_new_game(&self, percent: f32, done: bool) {
+        if let Some(ui) = self.ui.upgrade() {
+            ui.set_new_game_percent(percent.round() as i32);
+        }
+        if !done {
+            return;
+        }
+        let Some(sat) = percent_to_sat(percent.round()) else {
+            return;
+        };
+        let mut config = self.gui_config.borrow_mut();
+        if config.new_game_saturation == sat {
+            return;
+        }
+        config.new_game_saturation = sat;
+        save_gui_config(&config);
+        log(
+            &self.activity,
+            false,
+            &format!("New games now start at {:+.0}%", (sat - 1.0) * 100.0),
+        );
+    }
+
+    fn set_enabled(&self, index: usize, enabled: bool) {
+        let name = {
+            let mut st = self.state.borrow_mut();
+            let Some(profile) = st.profiles.profiles.get_mut(index) else {
+                return;
+            };
+            profile.enabled = enabled;
+            profile.name.clone()
+        };
+        self.save();
+        if let Some(mut row) = self.gm_games.row_data(index) {
+            row.enabled = enabled;
+            self.gm_games.set_row_data(index, row);
+        }
+        if self.touch {
+            // The desktop card keeps its own switch state; a rebuild there
+            // would only redraw it.
+            if let Some(mut row) = self.games.row_data(index) {
+                row.enabled = enabled;
+                self.games.set_row_data(index, row);
+            }
+        }
+        log(
+            &self.activity,
+            false,
+            &format!("{} {}", name, if enabled { "enabled" } else { "disabled" }),
+        );
+    }
+
+    fn remove(&self, index: usize) {
+        // Indices shift, so the card the list marked is no longer known.
+        if let Some(ui) = self.ui.upgrade() {
+            ui.set_picked_index(-1);
+        }
+        let name = {
+            let mut st = self.state.borrow_mut();
+            if index >= st.profiles.profiles.len() {
+                return;
+            }
+            st.profiles.profiles.remove(index).name
+        };
+        self.save();
+        self.rebuild();
+        log(&self.activity, false, &format!("Removed {name}"));
+    }
+
+    /// The "Add game" list opens: start with an empty filter and read the
+    /// library and what is running.
+    fn open_list(&self) {
+        self.query.borrow_mut().clear();
+        if let Some(ui) = self.ui.upgrade() {
+            ui.set_picked_index(-1);
+        }
+        self.read_list();
+    }
+
+    fn read_list(&self) {
+        *self.library.borrow_mut() = read_steam_library();
+        *self.running.borrow_mut() = read_running(self.game_mode);
+        self.show_list();
+    }
+
+    fn show_list(&self) {
+        let view = picker::view(
+            &self.library.borrow(),
+            &self.state.borrow().profiles,
+            &self.running.borrow(),
+            self.own_app_id,
+            &self.query.borrow(),
+            self.game_mode,
+        );
+        self.steam_rows.set_vec(
+            view.rows
+                .iter()
+                .map(|row| SteamRow {
+                    name: row.name.clone().into(),
+                    detail: row.detail.clone().into(),
+                    has_profile: row.has_profile,
+                    running: row.running,
+                })
+                .collect::<Vec<_>>(),
+        );
+        self.gm_picks.set_vec(
+            view.rows
+                .iter()
+                .map(|row| GmPick {
+                    name: row.name.clone().into(),
+                    detail: row.detail.clone().into(),
+                    has_profile: row.has_profile,
+                    running: row.running,
+                })
+                .collect::<Vec<_>>(),
+        );
+        if let Some(ui) = self.ui.upgrade() {
+            ui.set_steam_message(view.message.clone().into());
+            ui.set_steam_filter_shown(view.show_filter);
+            ui.global::<Gm>().set_pick_message(view.message.into());
+        }
+        *self.rows.borrow_mut() = view.rows;
+    }
+
+    /// A row of the list was picked: add its profile, or open the one it
+    /// has, and show it. Returns the profile's index.
+    fn pick(&self, row: usize) -> Option<usize> {
+        let row = self.rows.borrow().get(row).cloned()?;
+        let (index, text, changed) = {
+            let mut st = self.state.borrow_mut();
+            let saturation = self.gui_config.borrow().new_game_saturation();
+            let choice = picker::pick(&st.profiles, &row, saturation);
+            let created = matches!(choice, picker::Pick::Create(_));
+            let (index, changed) = picker::apply(&mut st.profiles, choice);
+            let text = picker::log_line(&st.profiles, index, changed, created);
+            (index, text, changed)
+        };
+        if changed {
+            self.save();
+        }
+        self.rebuild();
+        log(&self.activity, changed, &text);
+        if let Some(ui) = self.ui.upgrade() {
+            ui.set_picked_index(index as i32);
+            ui.set_picked_serial(ui.get_picked_serial().wrapping_add(1));
+        }
+        Some(index)
+    }
+
+    // ---------------------------------------------------------- Game Mode
+
+    /// Wire the Game Mode layout: its state, its touches, the keyboard and
+    /// the gamepad.
+    fn start_game_mode(&self, ui: &AppWindow, start_page: Option<i32>) {
+        let gm_ui = ui.global::<Gm>();
+        gm_ui.set_games(ModelRc::from(self.gm_games.clone()));
+        gm_ui.set_picks(ModelRc::from(self.gm_picks.clone()));
+        gm_ui.set_prompts(ModelRc::from(self.gm_prompts.clone()));
+        gm_ui.set_rest_percent(ui.get_default_percent());
+        *self.gm.borrow_mut() = gm::State::new(&self.gm_layout());
+        if let Some(page) = start_page {
+            self.gm_show_page(gm::Page::from_index(page), false);
+        }
+
+        gm_ui.on_touched(|kind, index, part| {
+            with_app(|app| {
+                if let Some(focus) = focus_from_ui(kind, index, part) {
+                    app.gm.borrow_mut().touched(focus);
+                    app.gm_sync(false);
+                }
+            })
+        });
+        gm_ui.on_percent(|slider, index, value, done| {
+            with_app(|app| {
+                let slider = match slider {
+                    0 => gm::Slider::Rest,
+                    1 => gm::Slider::Game(index.max(0) as usize),
+                    _ => gm::Slider::NewGame,
+                };
+                app.gm_set_percent(slider, value.round() as i32, done);
+            })
+        });
+        gm_ui.on_toggle_game(|index| with_app(|app| app.gm_toggle(index.max(0) as usize)));
+        gm_ui.on_ask_remove(|index| {
+            with_app(|app| {
+                app.gm
+                    .borrow_mut()
+                    .touched(gm::Focus::Confirm(index.max(0) as usize, false));
+                app.gm_sync(false);
+            })
+        });
+        gm_ui.on_answer_remove(|index, remove| {
+            with_app(|app| {
+                let index = index.max(0) as usize;
+                if remove {
+                    app.gm_remove(index);
+                } else {
+                    app.gm
+                        .borrow_mut()
+                        .touched(gm::Focus::Game(index, gm::Part::Remove));
+                }
+                app.gm_sync(false);
+            })
+        });
+        gm_ui.on_open_picker(|| {
+            with_app(|app| {
+                app.open_list();
+                app.gm.borrow_mut().picker_opened_by_touch();
+                app.gm_sync(true);
+            })
+        });
+        gm_ui.on_close_picker(|| {
+            with_app(|app| {
+                app.gm.borrow_mut().picker_closed();
+                app.gm.borrow_mut().highlight = false;
+                app.gm_sync(false);
+            })
+        });
+        gm_ui.on_pick(|row| {
+            with_app(|app| {
+                app.gm.borrow_mut().highlight = false;
+                app.gm_pick(row.max(0) as usize);
+            })
+        });
+        gm_ui.on_show_page(|page| {
+            with_app(|app| app.gm_show_page(gm::Page::from_index(page), true))
+        });
+        gm_ui.on_key(|text, repeat| {
+            let mut handled = false;
+            with_app(|app| {
+                if let Some(button) = gm::button_for_key(text.as_str()) {
+                    let count = if repeat { app.key_repeat.get() + 1 } else { 0 };
+                    app.key_repeat.set(count);
+                    app.gm_press(gm::Press {
+                        button,
+                        repeat: count,
+                    });
+                    handled = true;
+                }
+            });
+            handled
+        });
+        self.gm_sync(false);
+
+        // The gamepad: Steam shows the Deck's controls as one.
+        let log_path = std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
+            })
+            .map(|state| state.join("satur8/input-debug.log"));
+        let debug = self.input_debug;
+        pad::spawn(pad::DebugLog::new(debug, log_path), move |press| {
+            let _ = slint::invoke_from_event_loop(move || {
+                with_app(|app| {
+                    // The pad is one device for the whole session: act on it
+                    // only while this window is the one in front.
+                    let active = app
+                        .ui
+                        .upgrade()
+                        .is_some_and(|ui| ui.global::<Gm>().get_window_active());
+                    if active {
+                        app.gm_press(press);
+                    } else if debug {
+                        eprintln!(
+                            "satur8-gui input: {press:?} ignored, the window is not in front"
+                        );
+                    }
+                })
+            });
+        });
+    }
+
+    /// What the Game Mode screen holds, for the focus model.
+    fn gm_layout(&self) -> gm::Layout {
+        let st = self.state.borrow();
+        let ui = self.ui.upgrade();
+        let busy = ui
+            .as_ref()
+            .is_some_and(|ui| ui.get_checking() || ui.get_repairing() || ui.get_switch_busy());
+        let button = |enabled: bool| gm::Item::Button { enabled };
+        gm::Layout {
+            rest_percent: sat_to_percent(st.profiles.default_saturation),
+            games: st
+                .profiles
+                .profiles
+                .iter()
+                .map(|p| (sat_to_percent(p.saturation), p.enabled))
+                .collect(),
+            picks: self.rows.borrow().len(),
+            status: vec![
+                button(!busy),
+                button(!busy),
+                gm::Item::Toggle {
+                    enabled: !busy && ui.as_ref().is_some_and(|ui| ui.get_switch_available()),
+                },
+                gm::Item::Slider,
+                button(
+                    ui.as_ref()
+                        .is_some_and(|ui| !ui.get_sysinfo_text().is_empty()),
+                ),
+                button(true),
+            ],
+            about: vec![button(true); 3],
+            new_game_percent: ui.as_ref().map_or(0, |ui| ui.get_new_game_percent()),
+        }
+    }
+
+    /// Hand the Game Mode state to the layout. `reveal` scrolls the row in
+    /// focus into view.
+    fn gm_sync(&self, reveal: bool) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let layout = self.gm_layout();
+        self.gm.borrow_mut().settle(&layout);
+        let state = self.gm.borrow().clone();
+        let gm_ui = ui.global::<Gm>();
+        let (kind, index, part) = focus_to_ui(state.focus);
+        gm_ui.set_page(state.page.index());
+        gm_ui.set_focus_kind(kind);
+        gm_ui.set_focus_index(index);
+        gm_ui.set_focus_part(part);
+        gm_ui.set_highlight(state.highlight);
+        gm_ui.set_adjusting(state.adjusting.is_some());
+        gm_ui.set_picker_open(state.picker_open);
+        self.gm_prompts.set_vec(
+            gm::prompts(&state, &layout)
+                .into_iter()
+                .map(|prompt| GmPrompt {
+                    glyph: prompt.glyphs.first().copied().unwrap_or_default().into(),
+                    glyph2: prompt.glyphs.get(1).copied().unwrap_or_default().into(),
+                    label: prompt.label.into(),
+                })
+                .collect::<Vec<_>>(),
+        );
+        if reveal {
+            gm_ui.set_reveal(gm_ui.get_reveal().wrapping_add(1));
+        }
+    }
+
+    /// A button press, from the pad or the keyboard.
+    fn gm_press(&self, press: gm::Press) {
+        let layout = self.gm_layout();
+        let effects = gm::press(&mut self.gm.borrow_mut(), &layout, press);
+        if self.input_debug {
+            eprintln!(
+                "satur8-gui input: {press:?} -> {:?} {effects:?}",
+                self.gm.borrow().focus
+            );
+        }
+        for effect in effects {
+            self.gm_run(effect);
+        }
+        self.gm_sync(true);
+    }
+
+    fn gm_run(&self, effect: gm::Effect) {
+        match effect {
+            gm::Effect::Percent {
+                slider,
+                value,
+                done,
+            } => self.gm_set_percent(slider, value, done),
+            gm::Effect::ToggleGame(index) => self.gm_toggle(index),
+            gm::Effect::RemoveGame(index) => self.gm_remove(index),
+            gm::Effect::OpenPicker => self.open_list(),
+            gm::Effect::ClosePicker => {}
+            gm::Effect::PickRow(row) => self.gm_pick(row),
+            gm::Effect::ShowPage(page) => {
+                STATUS_VISIBLE.store(page == gm::Page::Status, Ordering::Release);
+                if let Some(ui) = self.ui.upgrade() {
+                    ui.set_nav(page.index());
+                }
+            }
+            gm::Effect::PressItem(item) => self.gm_press_item(item),
+        }
+    }
+
+    fn gm_set_percent(&self, slider: gm::Slider, value: i32, done: bool) {
+        match slider {
+            gm::Slider::Rest => self.set_rest(value as f32, done),
+            gm::Slider::Game(index) => self.set_game(index, value as f32, done),
+            gm::Slider::NewGame => self.set_new_game(value as f32, done),
+        }
+    }
+
+    fn gm_toggle(&self, index: usize) {
+        let enabled = self
+            .state
+            .borrow()
+            .profiles
+            .profiles
+            .get(index)
+            .map(|profile| profile.enabled);
+        if let Some(enabled) = enabled {
+            self.set_enabled(index, !enabled);
+            self.gm_sync(false);
+        }
+    }
+
+    fn gm_remove(&self, index: usize) {
+        self.remove(index);
+        let remaining = self.state.borrow().profiles.profiles.len();
+        self.gm.borrow_mut().removed(index, remaining);
+    }
+
+    fn gm_pick(&self, row: usize) {
+        if let Some(index) = self.pick(row) {
+            let percent = self
+                .state
+                .borrow()
+                .profiles
+                .profiles
+                .get(index)
+                .map_or(0, |profile| sat_to_percent(profile.saturation));
+            self.gm.borrow_mut().picked(index, percent);
+        } else {
+            self.gm.borrow_mut().picker_closed();
+        }
+        self.gm_sync(true);
+    }
+
+    /// Open a page. `by_touch` hides the highlight.
+    fn gm_show_page(&self, page: gm::Page, by_touch: bool) {
+        let layout = self.gm_layout();
+        {
+            let mut state = self.gm.borrow_mut();
+            let highlight = state.highlight;
+            state.page_touched(page, &layout);
+            state.highlight = highlight && !by_touch;
+        }
+        self.gm_run(gm::Effect::ShowPage(page));
+        self.gm_sync(false);
+    }
+
+    /// A on a Status or About item.
+    fn gm_press_item(&self, item: usize) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let page = self.gm.borrow().page;
+        match (page, item) {
+            (gm::Page::Status, 0) => ui.invoke_check_health(),
+            (gm::Page::Status, 1) => ui.invoke_repair(),
+            (gm::Page::Status, 2) => ui.invoke_set_switching(!ui.get_switch_on()),
+            (gm::Page::Status, 4) => {
+                let gm_ui = ui.global::<Gm>();
+                gm_ui.set_copy(gm_ui.get_copy().wrapping_add(1));
+            }
+            (gm::Page::Status, 5) => ui.invoke_report_bug(),
+            (gm::Page::About, 0) => open_url("https://satur8.app"),
+            (gm::Page::About, 1) => open_url("https://x.com/NtrpyDev"),
+            (gm::Page::About, 2) => open_url("https://github.com/NtrpyDev/satur8"),
+            _ => {}
+        }
+    }
+}
+
+/// The focus as the three numbers `ui/touch.slint` draws from.
+fn focus_to_ui(focus: gm::Focus) -> (i32, i32, i32) {
+    use gm::{Focus, Part, RestPart};
+    match focus {
+        Focus::Rest(RestPart::Slider) => (0, 0, 0),
+        Focus::Rest(RestPart::Reset) => (0, 0, 1),
+        Focus::AddGame => (1, 0, 0),
+        Focus::Game(index, part) => (
+            2,
+            index as i32,
+            match part {
+                Part::Slider => 0,
+                Part::Toggle => 1,
+                Part::Remove => 2,
+            },
+        ),
+        Focus::Confirm(index, remove) => (3, index as i32, i32::from(remove)),
+        Focus::Pick(index) => (4, index as i32, 0),
+        Focus::Item(index) => (5, index as i32, 0),
+    }
+}
+
+/// The other way round, for a touch the layout reports.
+fn focus_from_ui(kind: i32, index: i32, part: i32) -> Option<gm::Focus> {
+    use gm::{Focus, Part, RestPart};
+    let index = usize::try_from(index).ok()?;
+    Some(match (kind, part) {
+        (0, 0) => Focus::Rest(RestPart::Slider),
+        (0, _) => Focus::Rest(RestPart::Reset),
+        (1, _) => Focus::AddGame,
+        (2, 0) => Focus::Game(index, Part::Slider),
+        (2, 1) => Focus::Game(index, Part::Toggle),
+        (2, _) => Focus::Game(index, Part::Remove),
+        (3, part) => Focus::Confirm(index, part == 1),
+        (4, _) => Focus::Pick(index),
+        (5, _) => Focus::Item(index),
+        _ => return None,
+    })
+}
+
+/// What is running right now. In Steam Game Mode gamescope says which apps
+/// have a window; on a desktop the process list does.
+fn read_running(game_mode: bool) -> picker::Running {
+    if game_mode {
+        let apps = satur8_gamescope::session::find_session()
+            .and_then(|(_, root)| satur8_gamescope::session::running_apps(&root).ok())
+            .unwrap_or_default();
+        picker::Running::Apps(apps)
+    } else {
+        picker::Running::Procs(
+            proc::running_apps()
+                .into_iter()
+                .map(|app| picker::Proc {
+                    exe: app.exe,
+                    app_id: app.app_id,
+                    is_game: app.is_game,
+                })
+                .collect(),
+        )
+    }
 }
 
 /// In a gamescope session (Steam Game Mode), fit the window to the output:
@@ -1026,54 +1447,6 @@ fn read_steam_library() -> picker::Library {
     }
 }
 
-fn steam_rows_ui(view: &picker::View) -> Vec<SteamRow> {
-    view.rows
-        .iter()
-        .filter_map(|row| {
-            Some(SteamRow {
-                app_id: i32::try_from(row.app_id).ok()?,
-                name: row.name.clone().into(),
-                detail: row.detail.clone().into(),
-                has_profile: row.has_profile,
-            })
-        })
-        .collect()
-}
-
-fn running_strings(apps: &[proc::RunningApp]) -> Vec<SharedString> {
-    apps.iter().map(|a| a.exe.clone().into()).collect()
-}
-
-fn add_or_update(profiles: &mut Profiles, exe: &str, app_id: Option<u32>, saturation: f32) {
-    let name = exe
-        .trim_end_matches(".exe")
-        .trim_end_matches(".x86_64")
-        .to_string();
-    if let Some(p) = profiles
-        .profiles
-        .iter_mut()
-        .find(|p| p.match_rule.exe.as_deref() == Some(exe) || p.name == name)
-    {
-        p.saturation = saturation;
-        p.match_rule.exe = Some(exe.to_string());
-        if app_id.is_some() {
-            p.match_rule.steam_app_id = app_id;
-        }
-        return;
-    }
-    profiles.profiles.push(Profile {
-        name,
-        enabled: true,
-        saturation,
-        match_rule: MatchRule {
-            exe: Some(exe.to_string()),
-            window_class: None,
-            steam_app_id: app_id,
-        },
-        outputs: vec![],
-    });
-}
-
 fn config_dir() -> PathBuf {
     if let Ok(x) = std::env::var("XDG_CONFIG_HOME") {
         if !x.is_empty() {
@@ -1138,8 +1511,17 @@ fn save_gui_config(config: &GuiConfig) {
     }
 }
 
+/// Open an address in the browser. The child is waited for on a thread of
+/// its own, so it does not stay behind as a zombie.
 fn open_url(url: &str) {
-    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    match std::process::Command::new("xdg-open").arg(url).spawn() {
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(error) => eprintln!("satur8-gui: could not open {url}: {error}"),
+    }
 }
 
 fn reload_daemon_profiles() {
@@ -1253,13 +1635,5 @@ mod tests {
             new_game_saturation: f32::NAN,
         };
         assert_eq!(broken.new_game_saturation(), 1.4);
-    }
-
-    #[test]
-    fn added_game_uses_the_given_saturation() {
-        let mut profiles = Profiles::default();
-        add_or_update(&mut profiles, "EscapeFromTarkov.exe", None, 0.5);
-        assert_eq!(profiles.profiles[0].saturation, 0.5);
-        assert_eq!(profiles.profiles[0].name, "EscapeFromTarkov");
     }
 }

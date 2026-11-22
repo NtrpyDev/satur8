@@ -7,82 +7,9 @@ import "fonts/HankenGrotesk-Medium.ttf";
 import "fonts/HankenGrotesk-SemiBold.ttf";
 import "fonts/JetBrainsMono-Medium.ttf";
 
-export struct GameRow {
-    name: string,
-    exe: string,
-    percent: int,      // -100..+100 ; 0 = no change (saturation 1.0)
-    enabled: bool,
-    accent: color,
-    initial: string,
-    icon: image,
-    has-icon: bool,
-}
-
-// One installed Steam game in the "Add Steam game" picker.
-export struct SteamRow {
-    app-id: int,
-    name: string,
-    detail: string,
-    has-profile: bool,
-}
-
-export struct HealthRowUi {
-    label: string,
-    detail: string,
-    level: int,   // 0 ok, 1 problem, 2 not applicable
-}
-
-export struct LogRow {
-    text: string,
-    time: string,
-    ok: bool,
-}
-
-// Brand palette. Dark values are the render tokens (toolkit.py:7-8).
-// Light mode has no target design; it keeps the earlier light values and
-// extends them to the new tokens.
-export global Pal {
-    in-out property <bool> dark: false;
-    out property <color> accent:      dark ? #1fe3cb : #007568;   // TEAL
-    out property <color> accent-2:    dark ? #6cf5e6 : #005e55;   // hover on solid
-    out property <color> accent-soft: dark ? #0c2d2b : #d8f3ed;   // TINT
-    out property <color> accent-soft-2: dark ? #10403c : #c6ece4; // hover on tint
-    out property <color> accent-line: dark ? #1f655c : #7cc8bc;   // TLINE
-    out property <color> on-accent:   dark ? #08211e : #ffffff;   // DARK
-    out property <color> bg:          dark ? #07080b : #eef1f6;   // BG
-    out property <color> sheet:       dark ? #0e1116 : #ffffff;   // SHEET
-    out property <color> surface:     dark ? #11151b : #ffffff;   // SURFACE
-    out property <color> raised:      dark ? #171c22 : #f3f6fb;   // LIGHT
-    out property <color> field:       dark ? #1c2229 : #cfd6e2;   // FIELD
-    out property <color> line:        dark ? #2b313a : #dde3ee;   // LINE
-    out property <color> line-soft:   dark ? #20262e : #e8ecf2;   // LESS
-    out property <color> ink:         dark ? #f3f6fb : #0a0c10;   // WHITE
-    out property <color> soft:        dark ? #c3cbd4 : #2b3442;   // SOFT
-    out property <color> muted:       dark ? #9ba6b3 : #5b6675;   // MUTED
-    out property <color> dim:         dark ? #8995a5 : #6b7685;   // DIM
-    out property <color> hover:       dark ? #1a2028 : #e6ebf3;
-    out property <color> danger:      #ff5f6e;
-    // Problem rows on the Status page.
-    out property <color> warn:        dark ? #f5b84b : #a86200;
-}
-
-// Typography tokens. To swap fonts, change the `import` lines at the top of
-// this file, these family names and weights, and `default-font-family` on
-// AppWindow. Nothing else in the UI names a font.
-// Roles: reg = body text, med = labels, bold = strong labels and buttons,
-// head = headings and the big teal values, mono = numbers, paths and times.
-export global Font {
-    out property <string> reg:  "Hanken Grotesk";
-    out property <int>    reg-weight:  400;
-    out property <string> med:  "Hanken Grotesk";
-    out property <int>    med-weight:  500;
-    out property <string> bold: "Hanken Grotesk";
-    out property <int>    bold-weight: 600;
-    out property <string> head: "Schibsted Grotesk";
-    out property <int>    head-weight: 700;
-    out property <string> mono: "JetBrains Mono";
-    out property <int>    mono-weight: 500;
-}
+import { GameRow, SteamRow, HealthRowUi, LogRow, Pal, Font } from "theme.slint";
+import { Gm, GameModeUi, GmGame, GmPick, GmPrompt } from "touch.slint";
+export { GameRow, SteamRow, HealthRowUi, LogRow, Pal, Font, Gm, GmGame, GmPick, GmPrompt }
 
 // Button styles from toolkit.py:78-92.
 // kind: 0 solid teal, 1 sub, 2 flat (outline), 3 tint, 4 bare.
@@ -403,13 +330,15 @@ export component AppWindow inherits Window {
     in property <length> open-height: 700px;
     preferred-width: root.open-width;
     preferred-height: root.open-height;
-    // Also the layout width in a Steam gaming session (src/mode.rs).
-    min-width: 1024px;
-    min-height: 560px;
+    // A Steam gaming session gets its own layout (touch.slint), drawn 640
+    // logical pixels wide (src/mode.rs). main.rs sets this before the window
+    // is shown.
+    in property <bool> touch: false;
+    min-width: root.touch ? 640px : 1040px;
+    min-height: root.touch ? 360px : 560px;
     background: Pal.bg;
 
     in-out property <[GameRow]> games;
-    in-out property <[string]> running;
     in-out property <[LogRow]> activity;
     in-out property <string> backend-name: "none";
     in-out property <bool> backend-ok: false;
@@ -451,11 +380,9 @@ export component AppWindow inherits Window {
     callback percent-changed(int, float);
     callback toggle-enabled(int, bool);
     callback remove(int);
-    callback add-running(int);
-    callback refresh-running();
 
-    // "Add Steam game" picker. Rust reads the library when it opens (and on
-    // Refresh) and fills these; the page only draws them.
+    // The "Add game" list. Rust reads the Steam library and what is running
+    // when it opens (and on Refresh) and fills these; the page only draws them.
     in-out property <[SteamRow]> steam-rows;
     in-out property <string> steam-message: "";
     in-out property <bool> steam-filter-shown: false;
@@ -468,7 +395,7 @@ export component AppWindow inherits Window {
     callback steam-filter-changed(string);
     // Enter in the filter field; true when it picked a game.
     callback steam-filter-accepted() -> bool;
-    callback pick-steam(int);
+    callback pick-steam(int);      // the row's index in steam-rows
     callback clear-activity();
     callback dark-mode-changed(bool);
     callback open-link(string);
@@ -491,7 +418,7 @@ export component AppWindow inherits Window {
     property <length> note-y: root.grid-y + root.grid-h + 10px;
 
     // ================= Top bar (toolkit.py:137-145) =================
-    Rectangle {
+    if !root.touch: Rectangle {
         x: 0; y: 0; width: root.width; height: 65px;
         background: Pal.sheet;
         Rectangle { x: 0; y: 64px; width: parent.width; height: 1px; background: Pal.line; }
@@ -547,7 +474,7 @@ export component AppWindow inherits Window {
     }
 
     // ================= Main: desktop strip + game cards =================
-    if root.nav == 0: main-page := Flickable {
+    if !root.touch && root.nav == 0: main-page := Flickable {
         x: 0; y: 65px; width: root.width; height: root.page-h;
         viewport-height: Math.max(self.height, root.note-y + 19px + 28px);
 
@@ -621,17 +548,9 @@ export component AppWindow inherits Window {
             text: "Games"; font-size: 28px;
         }
         add-btn := Btn {
-            x: parent.width - 209px; y: root.games-y; width: 179px; height: 37px;
+            x: parent.width - 30px - 145px; y: root.games-y; width: 145px; height: 37px;
             kind: 0;
-            text: "Add running game";
-            has-icon: true; icon: @image-url("icons/plus.svg");
-            has-trailing: true; trailing: @image-url("icons/down.svg");
-            clicked => { running-popup.show(); }
-        }
-        steam-btn := Btn {
-            x: add-btn.x - 10px - self.width; y: root.games-y; height: 37px;
-            kind: 2;
-            text: "Add Steam game";
+            text: "Add game";
             has-icon: true; icon: @image-url("icons/plus.svg");
             has-trailing: true; trailing: @image-url("icons/down.svg");
             clicked => {
@@ -640,56 +559,11 @@ export component AppWindow inherits Window {
             }
         }
 
-        // "Add running game" list. No render exists for the open state; it
-        // reuses the page tokens and components.
-        running-popup := PopupWindow {
-            x: add-btn.x + add-btn.width - 280px;
-            y: add-btn.y + add-btn.height + 6px;
-            width: 280px;
-            height: 320px;
-            Rectangle {
-                background: Pal.sheet;
-                border-radius: 11px;
-                border-width: 1px;
-                border-color: Pal.line;
-                Section {
-                    x: 16px; y: 10px; width: 170px; height: 31px;
-                    text: "Running programs"; font-size: 16px;
-                }
-                Btn {
-                    x: parent.width - 86px; y: 12px; width: 70px; height: 27px;
-                    kind: 2; border-radius: 6px; font-size: 12px;
-                    text: "Refresh";
-                    clicked => { root.refresh-running(); }
-                }
-                Rectangle { x: 16px; y: 49px; width: parent.width - 32px; height: 1px; background: Pal.line; }
-                Flickable {
-                    x: 8px; y: 54px; width: parent.width - 16px; height: parent.height - 62px;
-                    viewport-height: Math.max(self.height, root.running.length * 32px);
-                    for r[i] in root.running: Rectangle {
-                        x: 0; y: i * 32px; width: parent.width; height: 32px;
-                        border-radius: 6px;
-                        background: rt.has-hover ? Pal.raised : transparent;
-                        rt := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.add-running(i); running-popup.close(); }
-                        }
-                        Text {
-                            x: 8px; y: 0; width: parent.width - 16px; height: parent.height;
-                            text: r;
-                            font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.soft;
-                            vertical-alignment: center; overflow: elide;
-                        }
-                    }
-                }
-            }
-        }
-
-        // "Add Steam game" picker: the installed Steam games, a filter field
-        // when the list is long, and one plain sentence when there is nothing
-        // to list. Built from the "Running programs" list above; the rows use
-        // the Status page's two-line row (dot, bold name, muted detail) at a
-        // touch height of 48px. Escape or a click outside closes it.
+        // The "Add game" list: the user's games by name, running ones first
+        // (src/picker.rs), a filter field when the list is long, and one
+        // plain sentence when there is nothing to list. The rows use the
+        // Status page's two-line row (dot, bold name, muted detail) at a
+        // height of 48px. Escape or a click outside closes it.
         property <length> steam-row-h: 48px;
         property <length> steam-list-y: root.steam-filter-shown ? 102px : 54px;
         property <length> steam-top: add-btn.y + add-btn.height + 6px;
@@ -713,7 +587,7 @@ export component AppWindow inherits Window {
                 border-color: Pal.line;
                 Section {
                     x: 16px; y: 10px; width: parent.width - 118px; height: 31px;
-                    text: "Installed Steam games"; font-size: 16px;
+                    text: "Your games"; font-size: 16px;
                 }
                 Btn {
                     x: parent.width - 86px; y: 12px; width: 70px; height: 27px;
@@ -784,7 +658,7 @@ export component AppWindow inherits Window {
                         row-touch := TouchArea {
                             mouse-cursor: pointer;
                             clicked => {
-                                root.pick-steam(game.app-id);
+                                root.pick-steam(i);
                                 steam-popup.close();
                             }
                         }
@@ -793,7 +667,7 @@ export component AppWindow inherits Window {
                             focus-gained => { steam-list.show-row(i); }
                             key-pressed(event) => {
                                 if (event.text == Key.Return || event.text == " ") {
-                                    root.pick-steam(game.app-id);
+                                    root.pick-steam(i);
                                     steam-popup.close();
                                     return accept;
                                 }
@@ -802,7 +676,7 @@ export component AppWindow inherits Window {
                         }
                         Rectangle {
                             x: 9px; y: 14px; width: 7px; height: 7px; border-radius: 3.5px;
-                            background: game.has-profile ? Pal.accent : Pal.dim;
+                            background: game.running || game.has-profile ? Pal.accent : Pal.dim;
                         }
                         Text {
                             x: 25px; y: 5px; width: parent.width - 33px; height: 20px;
@@ -813,7 +687,8 @@ export component AppWindow inherits Window {
                         Text {
                             x: 25px; y: 24px; width: parent.width - 33px; height: 17px;
                             text: game.detail;
-                            font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                            font-family: Font.med; font-weight: Font.med-weight; font-size: 12px;
+                            color: game.running ? Pal.accent : Pal.muted;
                             vertical-alignment: center; overflow: elide;
                         }
                         if i < root.steam-rows.length - 1: Rectangle {
@@ -831,7 +706,7 @@ export component AppWindow inherits Window {
             border-radius: 11px; border-width: 1px; border-color: Pal.line;
             Text {
                 width: 100%; height: 100%;
-                text: "No games yet.\nClick “Add Steam game” or “Add running game”, pick your game, and set its satur8.";
+                text: "No games yet.\nClick “Add game”, pick your game, and set its satur8.";
                 font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.muted;
                 horizontal-alignment: center; vertical-alignment: center;
             }
@@ -854,7 +729,7 @@ export component AppWindow inherits Window {
         }
         Text {
             x: 52px; y: root.note-y; width: 879px; height: 19px;
-            text: "Profiles are matched by the game's executable name, or by its Steam app ID when added from Steam.";
+            text: "Steam games are matched by their Steam app ID, other games by their executable name.";
             font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
             vertical-alignment: center;
         }
@@ -864,7 +739,7 @@ export component AppWindow inherits Window {
     // Health (first), Right now, Settings, Help, and a compact Activity log.
     // Two columns share the render's 16px gutter; the page scrolls when the
     // window is shorter than the content.
-    if root.nav == 1: status-page := Flickable {
+    if !root.touch && root.nav == 1: status-page := Flickable {
         x: 0; y: 65px; width: root.width; height: root.page-h;
         property <length> left-w: Math.floor((self.width - 76px) * 0.58 / 1px) * 1px;
         property <length> right-x: 46px + self.left-w;
@@ -1191,7 +1066,7 @@ export component AppWindow inherits Window {
     // ================= About (directions.py:52-65) =================
     // Render layout, with the old Desktop page's "Auto-apply per game" card
     // added as a third card in the middle row. Cards grow if text wraps.
-    if root.nav == 2: about-page := Flickable {
+    if !root.touch && root.nav == 2: about-page := Flickable {
         x: 0; y: 65px; width: root.width; height: root.page-h;
         property <length> col-w: Math.floor((self.width - 60px - 32px) / 3 / 1px) * 1px;
         property <length> cards-y: intro-card.y + intro-card.height + 16px;
@@ -1311,5 +1186,34 @@ export component AppWindow inherits Window {
                 clicked => { root.open-link("https://satur8.app"); }
             }
         }
+    }
+    // ================= Steam Game Mode =================
+    if root.touch: GameModeUi {
+        x: 0; y: 0; width: root.width; height: root.height;
+        backend-name: root.backend-name;
+        backend-ok: root.backend-ok;
+        version-text: root.version-text;
+        health: root.health;
+        health-problem: root.health-problem;
+        checking: root.checking;
+        repairing: root.repairing;
+        switch-available: root.switch-available;
+        switch-on: root.switch-on;
+        switch-busy: root.switch-busy;
+        switch-detail: root.switch-detail;
+        live-daemon: root.live-daemon;
+        live-profile: root.live-profile;
+        live-saturation: root.live-saturation;
+        live-saturation-note: root.live-saturation-note;
+        new-game-percent: root.new-game-percent;
+        sysinfo-text: root.sysinfo-text;
+        activity: root.activity;
+        check-health => { root.check-health(); }
+        repair => { root.repair(); }
+        set-switching(on) => { root.set-switching(on); }
+        sysinfo-copied => { root.sysinfo-copied(); }
+        report-bug => { root.report-bug(); }
+        open-link(url) => { root.open-link(url); }
+        dark-mode-changed(dark) => { root.dark-mode-changed(dark); }
     }
 }
