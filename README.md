@@ -35,7 +35,7 @@ It is built for Linux gaming setups that want the punchy color controls common o
 
 ### Fedora (COPR)
 
-The Fedora package is live on [COPR](https://copr.fedorainfracloud.org/coprs/ntrpydev/satur8/), built for Fedora 43 and 44.
+The Fedora package is live on [COPR](https://copr.fedorainfracloud.org/coprs/ntrpydev/satur8/), built for Fedora 43, 44 and 45.
 
 ```sh
 sudo dnf copr enable ntrpydev/satur8
@@ -65,7 +65,11 @@ cd satur8-*-linux-x86_64
 packaging/install.sh
 ```
 
+The release tarball needs glibc 2.35 or newer, which Ubuntu 22.04 and later systems have. The v0.4.1 programs were checked by starting each of them in containers of Ubuntu 22.04, Debian 12, Ubuntu 24.04, openSUSE Leap 16.0 and Fedora 43, the desktop app under a virtual display.
+
 The installer needs no root. On KDE Plasma it places the KWin effect in your home directory and adds that directory to KWin's plugin search path, which KWin reads at login, so log out and back in once after the first install.
+
+KWin only loads an effect built for its exact version, so the tarball carries prebuilt effects, each built in that system's own packages: SteamOS 3.9 (KWin 6.7.3), SteamOS 3.10 (KWin 6.8.2), and Fedora 44 and 45 (KWin 6.8.3). The installer uses the one built for your system and KWin version. If there is none, it builds one when `cmake`, a C++ compiler and the Qt 6 and KWin development files are installed. Otherwise it may use an effect built for another system with the same KWin version when your Qt is new enough, and says so; if nothing fits, it skips the effect, tells you why, and installs everything else. `packaging/install.sh --pick-effect` prints what it would choose without changing anything. Nothing is downloaded. KWin 6.5 and older are not covered.
 
 To use the effect without logging out, install it to the system plugin directory instead (uses `sudo`):
 
@@ -87,10 +91,10 @@ On a Steam Deck, see [Steam Deck](#steam-deck).
 
 Satur8 has not been run on a Bazzite device. Use the release tarball above without `--system`: the installer writes only to your home folder, which Bazzite keeps across updates, and it needs no root. `--system` is refused on Bazzite and other image-based systems.
 
-- Steam Game Mode (the `bazzite-deck` images) uses the same gamescope color and focus features as the Steam Deck. The v0.4.0 installer and background service were run against Bazzite's own gamescope build (3.17.0-ogc1, in Bazzite stable 45.20261117.1) in a container, not on a Bazzite device: the service found gamescope, loaded a profile's table when that app took focus, and removed it at the home window and when stopped. Setup is the same as on the [Steam Deck](#steam-deck).
-- KDE Plasma Desktop Mode uses the KWin effect bundled in the tarball when it matches your KWin version. Bazzite has no build tools for rebuilding it, so after a KWin update the effect stays off until you install a Satur8 release built for that KWin.
+- Steam Game Mode (the `bazzite-deck` images) uses the same gamescope color and focus features as the Steam Deck. The installer and background service, in v0.4.0 and again in v0.4.1, were run against Bazzite's own gamescope build (3.17.0-ogc1, in Bazzite stable 45.20261117.1) in a container, not on a Bazzite device: the service found gamescope, loaded a profile's table when that app took focus, and removed it at the home window and when stopped. Setup is the same as on the [Steam Deck](#steam-deck).
+- KDE Plasma Desktop Mode gets the bundled effect built in Fedora 45's own packages for KWin 6.8.3 (`fedora45-6.8.3`), which Bazzite stable uses. In the Bazzite container the installer picked it and installed it per user; it has not been run on a Bazzite desktop. Bazzite has no build tools, so after a KWin update the effect stays off until you install a newer Satur8 release that includes that KWin version. In the container, a KWin one patch newer made the installer skip the effect with the reason and install everything else.
 - The GNOME images run GNOME 51, which the Satur8 GNOME Shell extension does not list yet.
-- A Fedora 45 build target (what current Bazzite is based on) was added to the COPR project on 2026-11-22. Installing that package on Bazzite by layering it with `rpm-ostree` has not been tested, and Bazzite's documentation treats layering as a last resort.
+- The COPR package is built for Fedora 45, which current Bazzite is based on. Installing it on Bazzite by layering it with `rpm-ostree` has not been tested, and Bazzite's documentation treats layering as a last resort.
 
 ## Quick start
 
@@ -134,7 +138,7 @@ In Steam Game Mode, use the focus daemon instead; see [Steam Deck](#steam-deck).
 
 ## Steam Deck
 
-Satur8 switches saturation per game in Steam Game Mode. This was tested on a Steam Deck OLED with SteamOS 3.9.5 and gamescope 3.16.30.1. The Deck's Desktop Mode does not work yet; see [Desktop Mode](#desktop-mode).
+Satur8 switches saturation per game in Steam Game Mode, and in the Deck's Desktop Mode through KDE Plasma; see [Desktop Mode](#desktop-mode). Both were tested on a Steam Deck OLED with SteamOS 3.9.5, gamescope 3.16.30.1 and KWin 6.7.3.
 
 Satur8 applies the color through gamescope's look table, so Steam's own Color Vibrancy and Color Temperature settings keep working on top of it. Satur8 never changes them.
 
@@ -148,7 +152,7 @@ cd satur8-*-linux-x86_64
 packaging/install.sh --enable-daemon
 ```
 
-Without `--enable-daemon`, the installer prints the command that turns the service on. Everything is installed in your home folder, so it survives SteamOS updates. `--system` is refused on SteamOS. If the installer says the KWin effect was not installed, Game Mode still works without it.
+Without `--enable-daemon`, the installer prints the command that turns the service on. Everything is installed in your home folder, so it survives SteamOS updates. `--system` is refused on SteamOS. On SteamOS 3.9 the installer prints `Using bundled KWin effect for ABI 6.7.3 (steamos-6.7.3)`; that effect is what Desktop Mode uses. If the installer says the KWin effect was not installed, Game Mode still works without it.
 
 The commands are installed to `~/.local/bin`. An SSH login on SteamOS does not have that folder on its PATH, so over SSH a plain `satur8` gives "command not found"; the installer prints a hint about this. The examples below use the full path, `~/.local/bin/satur8`, which works everywhere. (Konsole in Desktop Mode was not checked.)
 
@@ -197,7 +201,7 @@ Over SSH while the Deck is in Game Mode:
 
 It reports `Steam Game Mode (gamescope on :0)`, whether a Satur8 table is loaded and at what saturation, the focused app's AppID, whether the background service is running, and Steam's own color settings, which Satur8 leaves alone. `~/.local/bin/satur8 status` shows the same. `~/.local/bin/satur8 on`, `set` and `off` also work in Game Mode, including over SSH.
 
-Run these checks in Game Mode only. An SSH shell has none of the desktop session's settings, so in Desktop Mode `doctor` over SSH prints a report that does not apply to the desktop.
+Over SSH, run these checks in Game Mode only. An SSH shell has none of the desktop session's settings, so in Desktop Mode `doctor` over SSH prints a report that does not apply to the desktop.
 
 ### The launch option
 
@@ -205,7 +209,30 @@ The `satur8 run --via gamescope-native -- %command%` launch option still works a
 
 ### Desktop Mode
 
-Satur8 does not work in the Deck's Desktop Mode yet. Desktop Mode runs KDE Plasma (KWin 6.7.3 on the tested Deck), and KWin only loads Satur8's effect when it was built for that exact KWin version. The effect bundled in the release tarball is built for a different KWin, and SteamOS has no build tools (no `cmake`) to rebuild it, so the service starts in Desktop Mode but cannot apply anything there. Game Mode is not affected and works again when you switch back.
+Desktop Mode runs KDE Plasma, which applies Satur8 through its KWin effect. KWin only loads an effect built for its exact version, and SteamOS has no build tools, so the release tarball carries effects built against Valve's own packages: `steamos-6.7.3` for SteamOS 3.9 (the Stable channel) and `steamos-6.8.2` for SteamOS 3.10 (Preview and Main). The installer picks the one for your Deck.
+
+After installing, switch to Desktop Mode once. KWin then loads the effect; no logout is needed beyond that switch. `~/.local/bin/satur8 on 2.0` and `~/.local/bin/satur8 off` then change the whole desktop.
+
+For per-game switching in Desktop Mode, turn on the KWin focus script once while the Deck is in Desktop Mode. These are the commands the installer prints:
+
+```sh
+systemctl --user enable --now satur8-daemon
+kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
+qdbus6 org.kde.KWin /KWin reconfigure
+```
+
+A profile then applies while its window has focus, and the desktop comes back when you switch to another window. Desktop programs match by `--exe` or `--window-class`.
+
+After a SteamOS update that changes KWin, the service runs `satur8 repair` at the next session start. It installs the matching effect from the set that came with Satur8, with no network. For a KWin newer than every effect in the set, the effect stays off in Desktop Mode until a newer Satur8 release includes it; Game Mode is not affected.
+
+Desktop Mode is Verified on a Steam Deck OLED with SteamOS 3.9.5 and KWin 6.7.3, measured with a camera on the screen:
+
+- On a full-screen color-bar image, mean saturation was 0.73 with Satur8 off, 0.93 after `satur8 on 2.0`, and 0.73 again after `satur8 off`.
+- With a profile at 2.0 for the image viewer, its focused window read 0.93 and another focused window 0.73, following focus back and forth. Removing the profile brought back 0.73.
+- With the right effect loaded, the effect file was replaced by one built for another KWin. `satur8 doctor` reported it, and `satur8 repair` installed the 6.7.3 effect from the set while KWin kept running.
+- Switching between Game Mode and Desktop Mode several times left Steam's color settings unchanged.
+
+The `steamos-6.8.2` effect for SteamOS 3.10 is included but has not been run on a device.
 
 ### Uninstall from the Deck
 
@@ -220,9 +247,10 @@ This stops the service, removes Satur8's table, and removes the commands, the se
 ### Not tested yet
 
 - A cold boot of the Deck straight into Game Mode.
-- HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged.
+- HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged. A game presenting SDR does get the look: ELDEN RING through Proton, presenting SDR on the tested Deck, turned grayscale in gamescope's own screenshot.
 - An external display.
-- The desktop app (`satur8-gui`) on the Deck.
+- The desktop app (`satur8-gui`) on the Deck beyond starting it: it starts in Desktop Mode and shows the KWin backend active, but it was not clicked through.
+- The `steamos-6.8.2` effect on a Deck running SteamOS 3.10.
 - A Bazzite device (see [Bazzite](#bazzite)) and other systems that run a gamescope session.
 - gamescope versions other than 3.16.30.1.
 
@@ -311,10 +339,10 @@ Inspect the environment and backend:
 satur8 status       # environment, chosen backend, and current state
 satur8 doctor       # diagnose backend availability
 satur8 outputs      # list the outputs the active backend can target
-satur8 repair       # rebuild the KWin effect if the running KWin rejects it
+satur8 repair       # put back a KWin effect that fits the running KWin
 ```
 
-KWin only loads an effect built for its exact version, so a KWin update used to break Satur8 until you reinstalled it. The focus daemon now runs `satur8 repair` at every login: when KWin rejects the effect, it rebuilds it from the installed source in a few seconds. That needs `cmake`, a C++ compiler, and the Qt 6 and KWin development files. `satur8 doctor` shows which KWin version each installed copy of the effect was built for.
+KWin only loads an effect built for its exact version, so a KWin update used to break Satur8 until you reinstalled it. The focus daemon now runs `satur8 repair` at every login. It first installs the matching effect from the set of prebuilt effects that came with Satur8 (copied to `~/.local/share/satur8/kwin-effects`), with no network; only when the set has none does it rebuild the effect from the installed source, which needs `cmake`, a C++ compiler, and the Qt 6 and KWin development files. It also checks the effect file on disk, so a wrong file is replaced even while KWin still uses a copy it loaded earlier, and it says plainly what it will do on a system that cannot build. `satur8 doctor` shows which KWin version each installed copy of the effect was built for and where the effect came from.
 
 Manage per-game profiles:
 
