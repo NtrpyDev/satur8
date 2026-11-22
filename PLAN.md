@@ -154,8 +154,9 @@ compositor. We ship our own minimal, single-purpose **saturation** effect
   `steamos-6.7.3` (SteamOS 3.9), `steamos-6.8.2` (SteamOS 3.10), and
   `fedora44-6.8.3` and `fedora45-6.8.3`. When two targets give the same key,
   the first in the list wins, so the effect is built against the oldest Qt that
-  KWin version meets. The effect source builds against KWin 6.7 and 6.8; KWin
-  6.5 and older use a different `drawWindow` signature and are not covered.
+  KWin version meets. The effect is built and tested for KWin 6.7 and 6.8;
+  KWin 6.5 and older use a different `drawWindow` signature and are not
+  covered.
 - *The picker order.* The installer (`packaging/install.sh`, which prints its
   choice with `--pick-effect`) and `satur8 repair` decide the same way: the
   set's effect for this family and KWin version; else a local build when the
@@ -170,8 +171,9 @@ compositor. We ship our own minimal, single-purpose **saturation** effect
   with no network and no build tools. Repair also checks the per-user effect
   file on disk against the running KWin, so a wrong file is replaced even while
   KWin still uses the copy it loaded earlier. The new file is copied beside the
-  destination and renamed over it, never written in place, because KWin keeps
-  the loaded file mapped. `satur8 doctor` names where the loaded effect came
+  destination and renamed over it, never written in place: the running KWin
+  may have that file loaded, and on a Steam Deck overwriting a loaded effect
+  crashed KWin. `satur8 doctor` names where the loaded effect came
   from, and the desktop app's Status page follows the same decision.
 
 ### B2. DRM CTM backend - **zero-cost, the ideal**
