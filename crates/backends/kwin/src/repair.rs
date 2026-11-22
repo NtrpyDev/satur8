@@ -169,7 +169,12 @@ pub fn repair_advice(step: Step, family: &Family) -> String {
 /// [`repair_advice`] for this machine as it is now, for a KWin that rejects
 /// the effect.
 pub fn advice_here() -> String {
-    repair_advice(decide(&inspect(false)), &system_family())
+    advice_for(&inspect(false))
+}
+
+/// [`repair_advice`] for `state` on this machine's system family.
+pub fn advice_for(state: &EffectState) -> String {
+    repair_advice(decide(state), &system_family())
 }
 
 /// The kind of system, as far as prebuilt effects go. Effects are built per
@@ -315,8 +320,13 @@ pub struct EffectState {
     pub user: Option<String>,
     /// Whether the per-user effect was built from this Satur8 version's source.
     pub user_source_current: bool,
-    /// Whether the running KWin says it can load the effect.
+    /// Whether the running KWin says it can load the effect. KWin keeps
+    /// answering yes for an effect it loaded earlier even after the file on
+    /// disk was replaced, so this alone does not prove the file is right.
     pub supported: bool,
+    /// Version of the running KWin, from its support information; `None` when
+    /// it could not be read.
+    pub running: Option<String>,
     /// The installed set's effect for the installed KWin, if it has one.
     pub set_match: Option<SetPick>,
     /// The installed set entry the per-user effect is an exact copy of.
@@ -345,17 +355,30 @@ pub enum Step {
     CannotRepair,
 }
 
+/// The KWin version of the per-user effect file when that file is for neither
+/// the running KWin nor the installed one. KWin can still report the effect
+/// as supported then, because it keeps the plugin it loaded earlier in memory;
+/// the wrong file only fails at the next session start. `None` when the file
+/// is right, absent, or the running version is unknown.
+pub fn stale_user_file(state: &EffectState) -> Option<&str> {
+    let user = state.user.as_deref()?;
+    let running = state.running.as_deref()?;
+    (user != running && state.headers.as_deref() != Some(user)).then_some(user)
+}
+
 /// Pure decision: given what is installed and what KWin says, what to do next.
 /// When a new effect is needed: the set's effect built for this system, then
 /// a local build, then the set's effect built for another system, else
-/// nothing can be done here.
+/// nothing can be done here. A per-user file for another KWin
+/// ([`stale_user_file`]) is handled like a rejected effect even while KWin
+/// says it is supported.
 pub fn decide(state: &EffectState) -> Step {
     let matches_headers =
         |abi: &Option<String>| abi.is_some() && state.headers.is_some() && *abi == state.headers;
     let system_ok = matches_headers(&state.system);
     let user_ok = matches_headers(&state.user) && state.user_source_current;
 
-    if state.supported {
+    if state.supported && stale_user_file(state).is_none() {
         // KWin is happy. The only thing worth fixing is an old per-user build
         // shadowing a newer system copy of the same KWin version, which is safe
         // to swap because the running compositor accepts either file.
@@ -460,6 +483,15 @@ pub fn abi_in_version_output(text: &str) -> Option<String> {
     let numeric = version.chars().all(|c| c.is_ascii_digit() || c == '.');
     let dotted = version.contains('.') && !version.starts_with('.') && !version.ends_with('.');
     (numeric && dotted).then(|| version.to_string())
+}
+
+/// Extract the running KWin's version from its support information
+/// (`org.kde.KWin /KWin supportInformation`), the line `KWin version: 6.8.3`.
+pub fn abi_in_support_information(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let version = line.trim().strip_prefix("KWin version:")?.trim();
+        (!version.is_empty()).then(|| version.to_string())
+    })
 }
 
 /// The version of the installed KWin binary, which the next login runs.
@@ -708,6 +740,8 @@ pub fn inspect(supported: bool) -> EffectState {
             && stamp.as_deref().map(str::trim) == Some(SOURCE_VERSION),
         user,
         supported,
+        // Needs the live KWin connection; the callers that have one fill it in.
+        running: None,
         set_match,
         user_from_set,
         can_build: build_blocker().is_none(),
@@ -744,8 +778,15 @@ pub fn repair() -> Result<RepairOutcome, String> {
         );
     };
     let supported = |kwin: &KwinBackend| kwin.is_supported().unwrap_or(false);
+    // KWin's own answer is not enough: it keeps an effect it loaded earlier,
+    // so the file on disk is also checked against the running version.
+    let running = kwin.running_version();
+    let look = |kwin: &KwinBackend| EffectState {
+        running: running.clone(),
+        ..inspect(supported(kwin))
+    };
 
-    let mut state = inspect(supported(&kwin));
+    let mut state = look(&kwin);
     let mut step = decide(&state);
 
     if step == Step::DropUserCopy {
@@ -756,7 +797,7 @@ pub fn repair() -> Result<RepairOutcome, String> {
         if let Some(stamp) = user_stamp_path() {
             let _ = fs::remove_file(stamp);
         }
-        state = inspect(supported(&kwin));
+        state = look(&kwin);
         step = decide(&state);
     }
 
@@ -839,8 +880,14 @@ fn place_user_plugin(plugin: &Path) -> Result<(), String> {
     let dest = user_plugin_path().ok_or("HOME is not set")?;
     let dir = dest.parent().ok_or("bad plugin path")?;
     fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
-    // Copy next to the destination, then rename over it.
+    // Copy next to the destination, then rename over it. Never write into the
+    // destination in place: the running KWin may have that very file loaded,
+    // and on a Steam Deck overwriting a loaded effect crashed KWin (a null
+    // call inside EffectLoader::isEffectSupported). The rename gives the path
+    // a new file while KWin keeps the old one it has open. A leftover staged
+    // file is removed first so even it is a fresh file.
     let staged = dir.join(format!(".{PLUGIN_FILE}.new"));
+    let _ = fs::remove_file(&staged);
     fs::copy(plugin, &staged).map_err(|e| format!("could not write {}: {e}", staged.display()))?;
     fs::rename(&staged, &dest).map_err(|e| format!("could not install {}: {e}", dest.display()))?;
 
@@ -1476,5 +1523,111 @@ mod tests {
                 "{step:?}"
             );
         }
+    }
+
+    // ---------------------- KWin says supported, but the file on disk is wrong
+
+    #[test]
+    fn reads_the_running_version_out_of_support_information() {
+        let text = "KWin Support Information:\n\nVersion\n=======\nKWin version: 6.7.3\nQt Version: 6.11.1\n";
+        assert_eq!(abi_in_support_information(text), v("6.7.3"));
+        assert_eq!(abi_in_support_information("KWin version:\n"), None);
+        assert_eq!(abi_in_support_information(""), None);
+    }
+
+    /// The Deck, measured: the right effect is loaded in the running KWin
+    /// 6.7.3, then the per-user file is replaced by one for KWin 6.7.9. KWin
+    /// keeps answering supported from memory.
+    fn deck_with_a_wrong_file_on_disk() -> EffectState {
+        EffectState {
+            headers: v("6.7.3"),
+            running: v("6.7.3"),
+            user: v("6.7.9"),
+            supported: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_wrong_per_user_file_kwin_still_accepts_is_replaced_from_the_set() {
+        let state = EffectState {
+            set_match: own("steamos-6.7.3"),
+            ..deck_with_a_wrong_file_on_disk()
+        };
+        assert_eq!(stale_user_file(&state), Some("6.7.9"));
+        assert_eq!(decide(&state), Step::InstallFromSet);
+    }
+
+    #[test]
+    fn a_wrong_per_user_file_follows_the_rejected_effect_order() {
+        let build = EffectState {
+            can_build: true,
+            ..deck_with_a_wrong_file_on_disk()
+        };
+        assert_eq!(decide(&build), Step::Build);
+        let system = EffectState {
+            system: v("6.7.3"),
+            ..deck_with_a_wrong_file_on_disk()
+        };
+        assert_eq!(decide(&system), Step::DropUserCopy);
+        assert_eq!(
+            decide(&deck_with_a_wrong_file_on_disk()),
+            Step::CannotRepair
+        );
+    }
+
+    #[test]
+    fn a_matching_per_user_file_kwin_accepts_is_left_alone() {
+        let state = EffectState {
+            user: v("6.7.3"),
+            user_source_current: true,
+            set_match: own("steamos-6.7.3"),
+            can_build: true,
+            ..deck_with_a_wrong_file_on_disk()
+        };
+        assert_eq!(stale_user_file(&state), None);
+        assert_eq!(decide(&state), Step::Healthy);
+    }
+
+    #[test]
+    fn a_system_effect_with_no_per_user_file_kwin_accepts_is_left_alone() {
+        let state = EffectState {
+            headers: v("6.7.3"),
+            running: v("6.7.3"),
+            system: v("6.7.3"),
+            supported: true,
+            set_match: own("steamos-6.7.3"),
+            can_build: true,
+            ..Default::default()
+        };
+        assert_eq!(stale_user_file(&state), None);
+        assert_eq!(decide(&state), Step::Healthy);
+    }
+
+    #[test]
+    fn a_per_user_file_for_the_running_or_the_installed_kwin_is_not_stale() {
+        // A KWin update is pending: running 6.8.2, installed 6.8.3.
+        let for_running = EffectState {
+            headers: v("6.8.3"),
+            running: v("6.8.2"),
+            user: v("6.8.2"),
+            supported: true,
+            set_match: own("fedora45-6.8.3"),
+            ..Default::default()
+        };
+        assert_eq!(decide(&for_running), Step::Healthy);
+        let for_installed = EffectState {
+            user: v("6.8.3"),
+            ..for_running.clone()
+        };
+        assert_eq!(stale_user_file(&for_installed), None);
+        assert_eq!(decide(&for_installed), Step::Healthy);
+        // Without the running version KWin's answer is all there is.
+        let unknown = EffectState {
+            running: None,
+            ..deck_with_a_wrong_file_on_disk()
+        };
+        assert_eq!(stale_user_file(&unknown), None);
+        assert_eq!(decide(&unknown), Step::Healthy);
     }
 }

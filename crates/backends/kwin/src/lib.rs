@@ -52,6 +52,23 @@ impl KwinBackend {
         Some(backend)
     }
 
+    /// The running KWin's version, from its support information; `None` when
+    /// KWin does not answer or the text has no version line.
+    pub fn running_version(&self) -> Option<String> {
+        let reply = self
+            .conn
+            .call_method(
+                Some(KWIN_SERVICE),
+                "/KWin",
+                Some("org.kde.KWin"),
+                "supportInformation",
+                &(),
+            )
+            .ok()?;
+        let text = reply.body().deserialize::<String>().ok()?;
+        repair::abi_in_support_information(&text)
+    }
+
     /// Whether our effect is currently loaded in KWin.
     pub fn is_loaded(&self) -> Result<bool, BackendError> {
         let reply = self

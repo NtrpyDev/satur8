@@ -317,9 +317,15 @@ fn cmd_doctor() -> Result<()> {
             println!("  [ok] KWin reachable over D-Bus");
             match kwin.is_supported() {
                 Ok(true) => {
-                    println!("  [ok] satur8 effect matches the running KWin ABI");
-                    let state = satur8_kwin::repair::inspect(true);
-                    println!("       effect origin: {}", effect_origin(&state));
+                    let state = satur8_kwin::repair::EffectState {
+                        running: kwin.running_version(),
+                        ..satur8_kwin::repair::inspect(true)
+                    };
+                    let step = satur8_kwin::repair::decide(&state);
+                    let advice = satur8_kwin::repair::advice_for(&state);
+                    for line in supported_effect_lines(&state, step, &advice) {
+                        println!("{line}");
+                    }
                 }
                 Ok(false) => {
                     let state = satur8_kwin::repair::inspect(false);
@@ -405,6 +411,40 @@ fn effect_origin(state: &satur8_kwin::repair::EffectState) -> String {
         ),
         (None, _, None) => "no effect file found".to_string(),
     }
+}
+
+/// Doctor's lines when KWin says it supports the effect. KWin keeps answering
+/// yes for an effect it loaded earlier, so a per-user file on disk for another
+/// KWin is reported the way `satur8 repair` treats it (`step`, `advice`).
+fn supported_effect_lines(
+    state: &satur8_kwin::repair::EffectState,
+    step: satur8_kwin::repair::Step,
+    advice: &str,
+) -> Vec<String> {
+    use satur8_kwin::repair::Step;
+    let Some(on_disk) = satur8_kwin::repair::stale_user_file(state) else {
+        return vec![
+            "  [ok] satur8 effect matches the running KWin ABI".to_string(),
+            format!("       effect origin: {}", effect_origin(state)),
+        ];
+    };
+    let running = state.running.as_deref().unwrap_or("unknown");
+    let fix = match step {
+        Step::InstallFromSet | Step::Build => "; `satur8 repair` will replace it",
+        Step::DropUserCopy => "; `satur8 repair` will remove it",
+        _ => "",
+    };
+    vec![
+        format!(
+            "  [!!] the per-user effect file on disk is for KWin {on_disk}, not the running \
+             KWin {running}{fix}."
+        ),
+        "       KWin still uses the copy it loaded earlier; the file on disk fails at the next \
+         session start."
+            .to_string(),
+        format!("       effect origin: {}", effect_origin(state)),
+        format!("       Next step: {advice}."),
+    ]
 }
 
 fn print_profiles_summary() -> Result<()> {
@@ -718,6 +758,42 @@ mod tests {
             effect_origin(&EffectState::default()),
             "no effect file found"
         );
+    }
+
+    #[test]
+    fn doctor_reports_a_wrong_file_on_disk_even_when_kwin_says_supported() {
+        use satur8_kwin::repair::{EffectState, Step};
+        let v = |s: &str| Some(s.to_string());
+        let wrong = EffectState {
+            headers: v("6.7.3"),
+            running: v("6.7.3"),
+            user: v("6.7.9"),
+            supported: true,
+            ..EffectState::default()
+        };
+        let advice =
+            "run `satur8 repair` to install the matching effect from the set that came with Satur8";
+        let lines = supported_effect_lines(&wrong, Step::InstallFromSet, advice);
+        assert_eq!(
+            lines[0],
+            "  [!!] the per-user effect file on disk is for KWin 6.7.9, not the running KWin \
+             6.7.3; `satur8 repair` will replace it."
+        );
+        assert!(lines
+            .iter()
+            .all(|line| !line.contains("matches the running KWin")));
+        assert_eq!(lines[3], format!("       Next step: {advice}."));
+
+        let right = EffectState {
+            user: v("6.7.3"),
+            ..wrong
+        };
+        let lines = supported_effect_lines(&right, Step::Healthy, "run `satur8 repair`");
+        assert_eq!(
+            lines[0],
+            "  [ok] satur8 effect matches the running KWin ABI"
+        );
+        assert_eq!(lines.len(), 2);
     }
 
     /// Over SSH on the Deck no desktop backend is reachable, so the probe runs.
