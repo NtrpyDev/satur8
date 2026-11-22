@@ -13,6 +13,7 @@
 //! so it is not a `Backend` impl - it's a run strategy used by `satur8 run`.
 
 pub mod look;
+pub mod session;
 
 use std::io::Write;
 use std::path::PathBuf;
