@@ -59,10 +59,13 @@ pub fn file_name(saturation: Saturation) -> String {
     format!("{FILE_PREFIX}{:04}{FILE_SUFFIX}", milli(saturation))
 }
 
-/// The saturation encoded in a look path written by Satur8, or `None` when
-/// the path (or bare file name) is not one of ours.
-pub fn saturation_from_path(path: &str) -> Option<Saturation> {
-    let name = path.rsplit('/').next()?;
+/// The folders every Satur8 table sits in, below the user's state folder.
+pub const DIR_SUFFIX: &str = "satur8/gamescope";
+
+/// The saturation encoded in a table's bare file name, or `None` when the
+/// name is not one Satur8 writes. Only for names read from Satur8's own
+/// folder; use [`saturation_from_path`] for a path someone else may have set.
+pub fn saturation_from_file_name(name: &str) -> Option<Saturation> {
     let digits = name.strip_prefix(FILE_PREFIX)?.strip_suffix(FILE_SUFFIX)?;
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
@@ -72,6 +75,19 @@ pub fn saturation_from_path(path: &str) -> Option<Saturation> {
         return None;
     }
     Some(Saturation::new(milli as f32 / 1000.0))
+}
+
+/// The saturation encoded in a look path written by Satur8, or `None` when
+/// the path is not one of ours. The file must sit directly in a
+/// `satur8/gamescope` folder: another program's table that only shares the
+/// file name stays foreign, so it is saved and put back, never removed.
+pub fn saturation_from_path(path: &str) -> Option<Saturation> {
+    let (dir, name) = path.rsplit_once('/')?;
+    let parent = dir.strip_suffix(DIR_SUFFIX)?;
+    if !parent.ends_with('/') {
+        return None;
+    }
+    saturation_from_file_name(name)
 }
 
 #[cfg(test)]
@@ -154,6 +170,25 @@ mod tests {
             "look-g22-s1750.cube.tmp",
         ] {
             assert_eq!(saturation_from_path(path), None, "{path}");
+            assert_eq!(saturation_from_file_name(path), None, "{path}");
         }
+    }
+
+    #[test]
+    fn a_table_with_our_file_name_outside_our_folder_is_foreign() {
+        for path in [
+            "look-g22-s1750.cube",
+            "/look-g22-s1750.cube",
+            "/home/deck/looks/look-g22-s1750.cube",
+            "/home/deck/.local/state/satur8/look-g22-s1750.cube",
+            "/home/deck/.local/state/notsatur8/gamescope/look-g22-s1750.cube",
+            "/home/deck/.local/state/satur8/gamescope/old/look-g22-s1750.cube",
+            "satur8/gamescope/look-g22-s1750.cube",
+        ] {
+            assert_eq!(saturation_from_path(path), None, "{path}");
+        }
+        let ours = "/home/deck/.local/state/satur8/gamescope/look-g22-s1750.cube";
+        assert!(saturation_from_path(ours).is_some());
+        assert!(saturation_from_file_name("look-g22-s1750.cube").is_some());
     }
 }

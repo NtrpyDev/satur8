@@ -24,6 +24,10 @@ GitHub release notes for that tag.
   ID to satur8, so the desktop matches the window to satur8.desktop, and every
   install path (the tarball's installer, the Arch package and the Fedora
   package) installs the icon that entry names.
+- In Steam Game Mode, a color table set by another program is no longer taken
+  for one of Satur8's just because its file name matches. Only a table in
+  Satur8's own folder counts as ours, so the other program's table is saved
+  and put back when Satur8 lets go, instead of being removed.
 
 ## v0.4.1 - 2026-11-22
 
