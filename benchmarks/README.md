@@ -8,6 +8,18 @@ Benchmark datasets live in timestamped directories. Each dataset should keep:
 - `raw-console/` - raw pasted benchmark output used to create each row.
 - `telemetry-*.txt` - optional system snapshots captured during the session.
 
+## Datasets in this folder
+
+- `cs2-kwin-20260626-144823/`: the complete CS2 run from 2026-06-26, with seven
+  alternating OFF/ON scored pairs, the KWin effect at saturation 1.75. Its
+  `summary.json` holds the medians and the interpretation: the measured cost is
+  within run-to-run noise.
+- `cs2-kwin-restart-20260626-163915/`, `cs2-kwin-restart-20260626-164012/` and
+  `cs2-kwin-restart-20260626-164530/`: three attempts of the restart-per-run
+  harness from the same day. Each holds only what was written before its first
+  run (the session file, a telemetry snapshot, a Satur8 state capture and
+  screenshots) and no scored runs.
+
 ## CS2 KWin Cost Protocol
 
 Use one unscored OFF warm-up, then seven alternating scored pairs:
