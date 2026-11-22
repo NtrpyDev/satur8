@@ -16,7 +16,7 @@ optdepends=('kwin: KDE Plasma Wayland backend (saturation effect)'
             'nvidia-settings: NVIDIA X11 Digital Vibrance backend')
 makedepends=('rust' 'cmake' 'kwin' 'extra-cmake-modules' 'qt6-base' 'kcoreaddons' 'kconfig')
 source=("$pkgname-v$pkgver-source.tar.gz::$url/releases/download/v$pkgver/$pkgname-v$pkgver-source.tar.gz")
-sha256sums=('b27c72a4eb73f524c4198be8675d15a478bc6a5bf6fa09b9a90cb4ca447cf02a')
+sha256sums=('7c0fe581722c680c1387a28dcbb749e8f14b35f313c0943e668d62a599b18fa1')
 
 build() {
     cd "$pkgname-$pkgver"
