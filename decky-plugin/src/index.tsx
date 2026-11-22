@@ -5,11 +5,14 @@
 
 import {
   ButtonItem,
+  ConfirmModal,
+  DialogButton,
   Field,
   Navigation,
   PanelSection,
   PanelSectionRow,
   ProgressBarWithInfo,
+  showModal,
   staticClasses,
 } from "@decky/ui";
 import { callable, definePlugin } from "@decky/api";
@@ -20,6 +23,8 @@ interface Status {
   latest: string | null;
   summary: string;
   button: string | null;
+  reinstall: string | null;
+  reinstall_question: string;
   busy: boolean;
   step: number;
   steps: string[];
@@ -110,6 +115,22 @@ function Content() {
     await refresh();
   };
 
+  // The repair path: the same checked download and installer, asked for
+  // once more before it starts.
+  const askReinstall = () => {
+    showModal(
+      <ConfirmModal
+        strTitle="Reinstall Satur8"
+        strDescription={status.reinstall_question}
+        strOKButtonText="Reinstall"
+        strCancelButtonText="Cancel"
+        onOK={() => {
+          install().catch((error) => setNote(String(error)));
+        }}
+      />,
+    );
+  };
+
   const open = () => {
     const entry = libraryEntry(status.app_name);
     if (entry === null) {
@@ -164,6 +185,17 @@ function Content() {
           <ButtonItem layout="below" onClick={open}>
             Open Satur8
           </ButtonItem>
+        </PanelSectionRow>
+      )}
+
+      {!status.busy && status.reinstall !== null && (
+        <PanelSectionRow>
+          <DialogButton
+            style={{ minWidth: 0, padding: "6px 10px", fontSize: "12px" }}
+            onClick={askReinstall}
+          >
+            {status.reinstall}
+          </DialogButton>
         </PanelSectionRow>
       )}
 
