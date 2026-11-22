@@ -273,9 +273,16 @@ Not blocking the packaging spine; picked up as time allows.
       nobody touching the Deck, the service was running in Game Mode about ten
       seconds after boot, Steam's color settings were unchanged, and a game
       then got its table.
-- [ ] Steam Deck: find out why gamescope sometimes aborts while Game Mode
-      shuts down for the switch to Desktop Mode (2 of 14 session ends during
-      testing, both after a Satur8 table had been used; cause not established).
+- [x] Steam Deck: find out why gamescope sometimes aborts while Game Mode
+      shuts down for the switch to Desktop Mode. Done 2026-11-22: it happens
+      without Satur8 (a session that never had a Satur8 table aborted the same
+      way; 1 of 8 without a table, 2 of 6 with one). Every abort has the same
+      signature: two threads of gamescope 3.16.30.1 use the session's D-Bus
+      connection at once during shutdown. Nothing to change in Satur8.
+- [ ] Steam Deck: gamescope 3.16.30.1 does not close the table file after
+      loading it, so each table load leaves one file open in gamescope. Measure
+      whether a very long session with many focus changes can run into
+      gamescope's open-file limit.
 - [ ] Steam Deck: run the `steamos-6.8.2` effect on a Deck with SteamOS 3.10.
       So far it was run headless only: in a KWin 6.8.2 session built from
       Valve's SteamOS 3.10 packages it changed window colors by the same

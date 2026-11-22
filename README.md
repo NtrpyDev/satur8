@@ -244,13 +244,16 @@ packaging/install.sh --uninstall
 
 This stops the service, removes Satur8's table, and removes the commands, the service and the table folder. It was checked on the Deck with a game running and its table loaded: the picture went back to normal. Your profiles in `~/.config/satur8/profiles.toml` are kept, so they come back if you reinstall.
 
+### Known: gamescope can abort when Game Mode ends
+
+On the tested Deck, gamescope sometimes aborts while Game Mode shuts down for the switch to Desktop Mode. The switch still completes. This happens without Satur8: in repeated trials a session that never had a Satur8 table aborted the same way (1 of 8 sessions without a table, 2 of 6 with one, too few to say whether a table changes the odds). All the aborts have one signature, two threads of gamescope 3.16.30.1 using the session's D-Bus connection at the same time during shutdown, and Satur8's Game Mode code does not use that connection. No abort was seen while a game was running.
+
 ### Not tested yet
 
 - HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged. A game presenting SDR does get the look: ELDEN RING through Proton, presenting SDR on the tested Deck, turned grayscale in gamescope's own screenshot.
 - An external display.
 - The desktop app (`satur8-gui`) on the Deck beyond starting it: it starts in Desktop Mode and shows the KWin backend active, but it was not clicked through.
 - The `steamos-6.8.2` effect on a Deck running SteamOS 3.10 (it was only run headless, see above).
-- Why gamescope sometimes aborts while Game Mode shuts down for the switch to Desktop Mode. It was seen in 2 of 14 session ends during testing, both after a Satur8 table had been used; the switch still completed. Whether Satur8's table has any part in it is not established.
 - A Bazzite device (see [Bazzite](#bazzite)) and other systems that run a gamescope session.
 - gamescope versions other than 3.16.30.1.
 

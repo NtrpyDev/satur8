@@ -56,10 +56,13 @@ A different saturation on each monitor on KDE Plasma, and a desktop saturation t
   `fedora45-6.8.3` effects were seen changing window colors correctly in
   headless KWin 6.8.2 and 6.8.3 sessions with software rendering; before, they
   had only been built and loaded.
-- Known and not explained: on the Deck, gamescope aborted while Game Mode shut
-  down for the switch to Desktop Mode in 2 of 14 session ends during testing,
-  both after a Satur8 table had been used. The switch still completed. Whether
-  Satur8's table has any part in it is not established.
+- Looked into, with no code change: on the Deck, gamescope sometimes aborts
+  while Game Mode shuts down for the switch to Desktop Mode. The switch still
+  completes. It happens without Satur8: a session that never had a Satur8
+  table aborted the same way (1 of 8 sessions without a table, 2 of 6 with
+  one). Every abort has one signature, two threads of gamescope 3.16.30.1
+  using the session's D-Bus connection at once during shutdown, which Satur8's
+  Game Mode code does not touch.
 
 ## v0.4.1 - 2026-11-22
 
