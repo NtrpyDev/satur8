@@ -394,21 +394,33 @@ fn cmd_doctor() -> Result<()> {
             for l in lines {
                 println!("    {l}");
             }
-            match envr.session {
-                satur8_core::SessionType::Tty => {
-                    println!("    -> usable now: no display server owns DRM master")
-                }
-                other => println!(
-                    "    -> on {other} the display server owns DRM master; CTM is reached \
-                     through its backend (KWin here), not directly"
-                ),
-            }
+            println!("    -> {}", ctm_route_note(envr.session, envr.desktop));
         }
         Err(e) => println!("  DRM CTM: not available ({e})"),
     }
 
     println!();
     print_profiles_summary()
+}
+
+/// How the DRM CTM is reached in this session, for `satur8 doctor`: only a
+/// bare console owns DRM master; otherwise the display server does.
+fn ctm_route_note(session: SessionType, desktop: Desktop) -> String {
+    match (session, desktop) {
+        (SessionType::Tty, _) => "usable now: no display server owns DRM master".to_string(),
+        (SessionType::Wayland, Desktop::Kde) => format!(
+            "on {session} the display server owns DRM master; CTM is reached through its \
+             backend (KWin here), not directly"
+        ),
+        (SessionType::Wayland, Desktop::Gnome) => format!(
+            "on {session} GNOME Shell owns DRM master; Satur8 does not reach CTM there and \
+             uses the GNOME Shell extension's shader instead"
+        ),
+        (other, _) => format!(
+            "on {other} the display server owns DRM master; CTM is only reachable through \
+             it, not directly"
+        ),
+    }
 }
 
 /// Where the effect KWin loads came from, for `satur8 doctor`. KWin searches
@@ -847,6 +859,31 @@ mod tests {
             "  [ok] satur8 effect matches the running KWin ABI"
         );
         assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn ctm_note_names_the_compositor_that_owns_the_display() {
+        assert_eq!(
+            ctm_route_note(SessionType::Wayland, Desktop::Kde),
+            "on Wayland the display server owns DRM master; CTM is reached through its \
+             backend (KWin here), not directly"
+        );
+        let gnome = ctm_route_note(SessionType::Wayland, Desktop::Gnome);
+        assert!(gnome.contains("GNOME Shell owns DRM master"));
+        assert!(!gnome.contains("KWin"));
+        for (session, desktop) in [
+            (SessionType::Wayland, Desktop::Hyprland),
+            (SessionType::X11, Desktop::Gnome),
+            (SessionType::X11, Desktop::Kde),
+            (SessionType::Unknown, Desktop::Other),
+        ] {
+            let note = ctm_route_note(session, desktop);
+            assert!(!note.contains("KWin") && !note.contains("GNOME"), "{note}");
+        }
+        assert_eq!(
+            ctm_route_note(SessionType::Tty, Desktop::Other),
+            "usable now: no display server owns DRM master"
+        );
     }
 
     fn no_kwin() -> Option<()> {
