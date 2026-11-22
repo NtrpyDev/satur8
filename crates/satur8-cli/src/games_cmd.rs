@@ -94,8 +94,10 @@ fn games_table(games: &[SteamGame], profiles: &Profiles) -> String {
         .join("\n")
 }
 
-/// A JSON array of `{ "app_id", "name", "profile", "saturation" }` objects,
-/// one per line. `profile` and `saturation` are `null` for a game without one.
+/// A JSON array of `{ "app_id", "name", "profile", "saturation", "enabled" }`
+/// objects, one per line. `profile`, `saturation` and `enabled` are `null` for
+/// a game without a profile; `enabled` is `false` for a disabled one, which the
+/// table marks `(disabled)`.
 fn games_json(games: &[SteamGame], profiles: &Profiles) -> String {
     if games.is_empty() {
         return "[]".to_string();
@@ -105,13 +107,14 @@ fn games_json(games: &[SteamGame], profiles: &Profiles) -> String {
         .map(|game| {
             let profile = profile_for(profiles, game.app_id);
             format!(
-                "  {{\"app_id\": {}, \"name\": {}, \"profile\": {}, \"saturation\": {}}}",
+                "  {{\"app_id\": {}, \"name\": {}, \"profile\": {}, \"saturation\": {}, \"enabled\": {}}}",
                 game.app_id,
                 json_string(&game.name),
                 profile.map_or_else(|| "null".to_string(), |p| json_string(&p.name)),
                 profile
                     .filter(|p| p.saturation.is_finite())
-                    .map_or_else(|| "null".to_string(), |p| p.saturation.to_string())
+                    .map_or_else(|| "null".to_string(), |p| p.saturation.to_string()),
+                profile.map_or_else(|| "null".to_string(), |p| p.enabled.to_string())
             )
         })
         .collect();
@@ -253,17 +256,17 @@ mod tests {
     }
 
     #[test]
-    fn json_lists_profile_and_saturation_or_null() {
+    fn json_lists_profile_saturation_and_enabled_or_null() {
         assert_eq!(
             render(&games()[1..3], &profiles(), true),
             "[\n  \
-             {\"app_id\": 2868840, \"name\": \"Slay the Spire 2\", \"profile\": \"spire\", \"saturation\": 1.4},\n  \
-             {\"app_id\": 4555040, \"name\": \"Sushiamo\", \"profile\": \"sushiamo\", \"saturation\": 1.75}\n\
+             {\"app_id\": 2868840, \"name\": \"Slay the Spire 2\", \"profile\": \"spire\", \"saturation\": 1.4, \"enabled\": false},\n  \
+             {\"app_id\": 4555040, \"name\": \"Sushiamo\", \"profile\": \"sushiamo\", \"saturation\": 1.75, \"enabled\": true}\n\
              ]"
         );
         assert_eq!(
             render(&games()[3..], &profiles(), true),
-            "[\n  {\"app_id\": 105600, \"name\": \"Terraria\", \"profile\": null, \"saturation\": null}\n]"
+            "[\n  {\"app_id\": 105600, \"name\": \"Terraria\", \"profile\": null, \"saturation\": null, \"enabled\": null}\n]"
         );
     }
 
