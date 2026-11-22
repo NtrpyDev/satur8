@@ -3,7 +3,8 @@ name: ci
 # The ground truth for every change: does Satur8 still build, pass its tests,
 # build the KWin effects, and install? No AI here. Runs on pull requests from
 # anyone, including forks, and needs no secrets. The release tarball is built
-# and tested by build-tarball.yml, the same workflow release.yml uses.
+# and tested by build-tarball.yml, and the Decky plugin ZIP by
+# build-decky-plugin.yml, the same workflows release.yml uses.
 
 on:
   pull_request:
@@ -54,3 +55,7 @@ jobs:
   tarball:
     name: release tarball
     uses: ./.github/workflows/build-tarball.yml
+
+  decky-plugin:
+    name: decky plugin
+    uses: ./.github/workflows/build-decky-plugin.yml
