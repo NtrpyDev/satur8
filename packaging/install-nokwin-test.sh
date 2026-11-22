@@ -53,6 +53,11 @@ done
 [ ! -e "$HOME/.local/lib/qt6/plugins/kwin/effects/plugins/satur8.so" ] || { echo "FAIL: an effect was installed with no KWin present"; exit 1; }
 [ ! -e "$HOME/.local/share/satur8/kwin-effects" ] || { echo "FAIL: the KWin effect set was copied with no KWin present"; exit 1; }
 [ -f "$HOME/.config/systemd/user/satur8-daemon.service" ] || { echo "FAIL: the daemon unit was not installed"; exit 1; }
+# The launcher entry names the app by its full path, so it works where
+# ~/.local/bin is not on the PATH of the session (SteamOS) and Steam can read it.
+entry="$HOME/.local/share/applications/satur8.desktop"
+grep -qx "Exec=$HOME/.local/bin/satur8-gui" "$entry" || { echo "FAIL: the launcher entry does not name $HOME/.local/bin/satur8-gui: $(grep "^Exec=" "$entry")"; exit 1; }
+[ -x "$HOME/.local/bin/satur8-gui" ] || { echo "FAIL: the launcher entry points at a program that is not there"; exit 1; }
 icon="$HOME/.local/share/icons/hicolor/256x256/apps/satur8.png"
 [ -f "$icon" ] || { echo "FAIL: the app icon was not installed at $icon"; exit 1; }
 [ "$(sha256sum < "$icon")" = "$(sha256sum < assets/icons/hicolor/256x256/apps/satur8.png)" ] || { echo "FAIL: the installed app icon is not the one in the archive"; exit 1; }

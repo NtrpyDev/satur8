@@ -5,6 +5,15 @@ GitHub release notes for that tag.
 
 ## Unreleased
 
+- Fix the app not opening from the application launcher on the Steam Deck:
+  the launcher said "Could not find the program 'satur8-gui'", because
+  SteamOS does not search `~/.local/bin`. The installer now writes the
+  launcher entry with the app's full path. Steam's "Add to Steam" can read the
+  entry now too, so the app can be added to the Steam library.
+- Fix the installer on Bazzite and Fedora, which have `qdbus-qt6` and no
+  `qdbus6`: the command it prints for turning on per-game switching failed
+  there, and its steps that unload the KWin effect were skipped. It now uses
+  whichever of the two exists. Found on a real Bazzite install.
 - The app's icon is now the rainbow 8 from the Satur8 logo instead of the
   green S8 tile, in the window, the taskbar and the application launcher.
 - Checked, with no code change: the DRM/KMS path, the last backend that had

@@ -148,6 +148,17 @@ refresh_icon_cache() { # refresh_icon_cache <hicolor dir> [sudo]
     fi
 }
 
+# Qt 6's D-Bus command-line tool. Arch and SteamOS name it qdbus6; Fedora and
+# Bazzite ship it as qdbus-qt6 (package qt6-qttools) with no qdbus6. Empty
+# when neither is installed.
+qdbus_tool=""
+for candidate in qdbus6 qdbus-qt6; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        qdbus_tool="$candidate"
+        break
+    fi
+done
+
 daemon_was_active=false
 
 quiesce_runtime() {
@@ -156,8 +167,8 @@ quiesce_runtime() {
         daemon_was_active=true
         systemctl --user stop satur8-daemon.service
     fi
-    if command -v qdbus6 >/dev/null 2>&1; then
-        qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect satur8 \
+    if [ -n "$qdbus_tool" ]; then
+        "$qdbus_tool" org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect satur8 \
             >/dev/null 2>&1 || true
     fi
 }
@@ -525,7 +536,24 @@ install_all() {
     install -m644 "$repo/packaging/satur8-daemon.service" "$unit_dir/satur8-daemon.service"
 
     say "Installing desktop entry"
-    install -Dm644 "$repo/packaging/satur8.desktop" "$data/applications/satur8.desktop"
+    # The entry names the app by its full path. A launcher only finds a bare
+    # program name on the session's PATH, and SteamOS (among others) does not
+    # put ~/.local/bin there: the launcher said "Could not find the program
+    # 'satur8-gui'", and Steam's "Add to Steam" could not read the entry.
+    # A path with spaces or special characters is quoted as the Desktop Entry
+    # specification requires.
+    exec_path="$bindir/satur8-gui"
+    case "$exec_path" in
+        *[[:space:]\"\`\$\\]*)
+            exec_line="Exec=\"$(printf '%s' "$exec_path" | sed 's/[\\"`$]/\\&/g')\"" ;;
+        *)
+            exec_line="Exec=$exec_path" ;;
+    esac
+    mkdir -p "$data/applications"
+    EXEC_LINE="$exec_line" awk '/^Exec=/ { print ENVIRON["EXEC_LINE"]; next } { print }' \
+        "$repo/packaging/satur8.desktop" > "$data/applications/satur8.desktop.new"
+    chmod 644 "$data/applications/satur8.desktop.new"
+    mv -f "$data/applications/satur8.desktop.new" "$data/applications/satur8.desktop"
     if [ -z "$app_icon" ]; then
         say "No app icon in this archive: the desktop entry will show a generic icon"
     elif [ "$mode" = system ]; then
@@ -559,7 +587,7 @@ EOF
   * Per-game focus mode on KDE Plasma:
       systemctl --user enable --now satur8-daemon
       kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
-      qdbus6 org.kde.KWin /KWin reconfigure
+      ${qdbus_tool:-qdbus6} org.kde.KWin /KWin reconfigure
 EOF
     fi
     case ":$PATH:" in
@@ -604,8 +632,8 @@ uninstall_all() {
     if [ -x "$bindir/satur8" ]; then
         "$bindir/satur8" off >/dev/null 2>&1 || true
     fi
-    if command -v qdbus6 >/dev/null 2>&1; then
-        qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect satur8 \
+    if [ -n "$qdbus_tool" ]; then
+        "$qdbus_tool" org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect satur8 \
             >/dev/null 2>&1 || true
     fi
     say "Removing per-user install"

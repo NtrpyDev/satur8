@@ -111,6 +111,8 @@ kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
 qdbus6 org.kde.KWin /KWin reconfigure
 ```
 
+On Fedora and Bazzite the last tool is named `qdbus-qt6`; the installer prints the command with the name your system has.
+
 Open the desktop app, add a game profile, and set its saturation:
 
 ```sh
