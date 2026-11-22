@@ -12,6 +12,9 @@
 #    against the floors in abi-floors.sh.
 # 3. --check-effect against the real kwin_wayland on this machine: accepts an
 #    effect for the running KWin and rejects one for another version.
+# 4. --uninstall in a fake home turns the KDE focus script off and has KWin
+#    reread its settings while the script is still installed. Every command
+#    that could reach the real session is a stub that only logs.
 #
 # Scratch files go under $TMPDIR (default /tmp).
 set -euo pipefail
@@ -188,8 +191,38 @@ if "$INSTALLER" --check-effect "$ROOT/mismatched.so"; then
 fi
 echo "PASS: installer accepts only the current KWin effect ABI"
 
+# ------------------------------------ --uninstall turns the focus script off
+
+echo "== install.sh --uninstall: the KDE focus script"
+u="$ROOT/uninstall"
+calls="$u/calls"
+script_dir="$u/home/.local/share/kwin/scripts/satur8-focus"
+mkdir -p "$u/bin" "$script_dir/contents/code"
+for tool in systemctl kwriteconfig6 qdbus-qt6 kwin_wayland gtk-update-icon-cache; do
+    printf '#!/bin/sh\necho "%s $*" >>"%s"\n' "$tool" "$calls" >"$u/bin/$tool"
+done
+# The D-Bus stub also records whether the script was still installed.
+printf '#!/bin/sh\necho "qdbus6 $* installed=$([ -d "%s" ] && echo yes || echo no)" >>"%s"\n' \
+    "$script_dir" "$calls" >"$u/bin/qdbus6"
+chmod +x "$u"/bin/*
+env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$u/home" PATH="$u/bin:$PATH" \
+    "$INSTALLER" --uninstall >"$u/out" 2>&1
+touch "$calls"
+off_line="$(grep -n '^kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled --type bool false$' "$calls" | cut -d: -f1 || true)"
+reconfigure_line="$(grep -n '^qdbus6 org.kde.KWin /KWin reconfigure installed=yes$' "$calls" | cut -d: -f1 || true)"
+if [ -z "$off_line" ] || [ -z "$reconfigure_line" ] || [ "$off_line" -gt "$reconfigure_line" ]; then
+    echo "FAIL: uninstall did not turn the focus script off, then reconfigure KWin with it installed" >&2
+    cat "$calls" >&2
+    fails=$((fails + 1))
+elif [ -e "$script_dir" ]; then
+    echo "FAIL: uninstall left $script_dir" >&2
+    fails=$((fails + 1))
+else
+    echo "PASS: uninstall turns the focus script off before removing it"
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "FAILED: $fails case(s); files in $ROOT" >&2
     exit 1
 fi
-echo "PASS: the effect picker chose as expected for every fake system"
+echo "PASS: the effect picker and uninstall cases behaved as expected"
