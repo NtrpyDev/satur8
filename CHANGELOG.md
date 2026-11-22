@@ -12,8 +12,12 @@ Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.
   and is removed when you leave or close the game. Opening Steam's overlay menu
   over a game keeps the game's profile. The service starts with the Game Mode
   session; this was checked by switching the Deck to Desktop Mode and back, and
-  a cold boot was not tested. A profile added while the service runs takes
-  effect right away.
+  a cold boot was not tested. A profile added or changed while the service runs
+  takes effect right away, also for the game that is on screen.
+- On every desktop, saving a profile for the window that has focus now applies
+  it at once. Before, the daemon only matched profiles again at the next focus
+  change, so a new profile for the game on screen waited until you switched
+  away and back.
 - The Steam home screen and games without a profile get `default_saturation`
   from `profiles.toml`. At 1.0, the default, Satur8 loads nothing there.
 - Profiles match a game by Steam AppID (`satur8 profile add NAME SATURATION

@@ -162,7 +162,7 @@ On a Deck, profiles match a game by its Steam AppID. The AppID is the number in 
 
 Matching by executable also works for Proton games. Use the Windows executable name, for example `--exe Sushiamo.exe`.
 
-A profile you add while the service runs takes effect right away.
+A profile you add or change while the service runs takes effect right away, also for the game that is on screen.
 
 The Steam home screen and games without a profile get `default_saturation` from `~/.config/satur8/profiles.toml`. At 1.0, the default, Satur8 loads nothing there.
 
