@@ -350,6 +350,15 @@ fn cmd_status() -> Result<()> {
                 }
             }
             println!();
+            // Outputs showing another value than the one above, whatever set
+            // them (a manual `set --output`, a profile, an output's default).
+            if loaded {
+                if let Some(levels) = satur8_core::Backend::current_levels(&kwin) {
+                    for line in outputs_report::current_output_lines(&levels) {
+                        println!("{line}");
+                    }
+                }
+            }
         }
         Report::Gnome => println!("{}", gnome_report::status_line(&gnome_report::gather())),
         Report::GameMode(_) | Report::NoDesktopBackend => {

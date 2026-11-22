@@ -25,7 +25,8 @@ A different saturation on each monitor on KDE Plasma, and a desktop saturation t
   `--output NAME` with the same message as before.
 - `satur8 on VALUE --output NAME` does the same as `satur8 set VALUE --output
   NAME`. `satur8 profile list` shows the outputs a profile names, and
-  `satur8 status` names the output when the active profile is limited to one.
+  `satur8 status` names the output when the active profile is limited to one,
+  and lists each output that currently shows another value than the rest.
   Output for profiles and sessions that do not use outputs is unchanged.
 - On every other desktop one saturation still applies to every output, and
   `satur8 outputs`, `satur8 doctor` and `satur8 status` now say so when the

@@ -202,6 +202,18 @@ pub fn settings_section(view: Result<&BackendView, &str>, profiles: &Profiles) -
     lines
 }
 
+/// Lines for `satur8 status` naming each output that shows something other
+/// than the base value right now, for example after `satur8 set VALUE --output
+/// NAME`. Empty when every output shows the base value, so status prints
+/// nothing new then.
+pub fn current_output_lines(levels: &Levels) -> Vec<String> {
+    levels
+        .outputs
+        .iter()
+        .map(|(name, saturation)| format!("  output {name}: saturation {:.2}", saturation.get()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,5 +460,26 @@ mod tests {
         assert_eq!(section[1], format!("    [..] {OLDER_EFFECT}"));
         // Still nothing for a file without per-output settings.
         assert!(settings_section(Ok(&older_kwin(&outputs)), &old_style()).is_empty());
+    }
+
+    #[test]
+    fn status_names_only_the_outputs_that_differ_from_the_base() {
+        let uniform = Levels::uniform(Saturation::new(1.5));
+        assert!(current_output_lines(&uniform).is_empty());
+        let mixed = Levels::new(
+            Saturation::IDENTITY,
+            [
+                ("eDP-1".to_string(), Saturation::new(0.0)),
+                ("DP-2".to_string(), Saturation::new(2.0)),
+                ("DP-3".to_string(), Saturation::IDENTITY),
+            ],
+        );
+        assert_eq!(
+            current_output_lines(&mixed),
+            vec![
+                "  output DP-2: saturation 2.00".to_string(),
+                "  output eDP-1: saturation 0.00".to_string(),
+            ]
+        );
     }
 }
