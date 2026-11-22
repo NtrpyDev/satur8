@@ -36,7 +36,7 @@ Release binaries that run on older systems, and a working KWin effect on systems
 - Bazzite KDE Desktop Mode gets the `fedora45-6.8.3` effect, built in Fedora
   45's packages for the KWin that Bazzite stable uses. In the Bazzite
   container, not on a Bazzite device, the installer picked it and installed it
-  per user; with a KWin one patch newer it skipped the effect with the reason
+  per user; with a stand-in KWin one patch newer it skipped the effect with the reason
   and installed everything else. Game Mode against Bazzite's gamescope passed
   again in the container with this build.
 - The installer copies the whole effect set to
@@ -53,7 +53,7 @@ Release binaries that run on older systems, and a working KWin effect on systems
 - The installer's closing message for Game Mode shows `satur8 games` and
   `satur8 profile add NAME 1.5 --steam-game NAME`.
 - The release pipeline on GitHub builds the portable binaries and the effect
-  set and runs the installer tests before publishing.
+  set and runs the installer tests before it publishes the Linux tarball.
 - Not covered: KWin 6.5 and older. On a system with no build tools, a KWin
   newer than the bundled effects keeps the effect off until a newer Satur8
   release includes that version.
