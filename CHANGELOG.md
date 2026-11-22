@@ -3,6 +3,112 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## v0.5.1 - 2026-11-22
+
+The app in Steam Game Mode: its own layout for the Deck's screen, touch and buttons, opened from the Steam library. Also fixes for the Steam Deck launcher entry and the Bazzite installer, the logo as the app icon, and the last backend verified on real hardware.
+
+- The app works in Steam Game Mode. On a Steam Deck it used to open larger
+  than the screen (2375x1458 on the 1280x800 screen), so only its top left
+  could be touched: the desktop slider stopped at +5% and the add button
+  could not be reached. In a gamescope session it now opens at exactly the
+  screen's size and shows a layout of its own, drawn 640 logical pixels wide
+  (a scale of 2 on a Deck): "General" first (Steam's own screens and
+  every game without a row), then one full-width row per game with a wide
+  slider, an on/off switch and a remove button that asks first. A tap on a
+  slider's track jumps there, a sideways drag changes the value, and a drag
+  up or down scrolls the page. There is no mouse cursor and nothing depends
+  on hovering. The desktop layout is unchanged.
+- The Deck's buttons drive that layout: D-pad or left stick move a
+  highlight, A selects (on a slider, A then left and right change it, faster
+  while held), B goes back or undoes, X turns the game on or off, Y opens
+  the list, L1/R1 change page, L2/R2 change the row's slider by one. A bar
+  along the bottom says what the buttons do right now. Touching the screen
+  moves the focus and hides the highlight. Steam shows the Deck's controls to
+  such a program as a gamepad, which the app reads from the kernel's input
+  devices directly; it acts on them only while it is the app in front. A
+  keyboard works the same way (arrows, Enter, Escape).
+- A game whose row is turned off now shows its normal colors, instead of
+  taking the general saturation. This holds in Steam Game Mode and on a
+  desktop, in the background service and in `satur8 run`. A game with no row
+  at all still gets the general value, and so do the desktop and Steam's own
+  screens. On a setup with a value per output, an off row is normal on the
+  outputs it would change when on: all of them, the ones it lists, or the
+  focused one with `profile_outputs = "focused"`. The first row in Game Mode
+  is now called "General" (it was "Everything else").
+- A profile the v0.5.0 app named after its program (`eldenring` for
+  `eldenring.exe`) shows under its Steam library name ("ELDEN RING") in the
+  app when it carries a Steam AppID. Only what is shown changes; the profile
+  keeps its name in the file and in the commands.
+- A Decky Loader plugin (`satur8-decky-plugin.zip` on the release) for Decky
+  users on a Steam Deck: its Quick Access Menu panel says whether Satur8 is
+  installed and which version, installs, updates or reinstalls it without
+  leaving Game Mode (the release tarball from GitHub, SHA-256 checked before
+  anything runs, installed as your user, never as root), and opens the app.
+  Install it in Decky under Developer, Install Plugin from URL; it is not on
+  the official Decky store. Checked on a Steam Deck OLED with Decky Loader
+  v3.3.1: the panel loads and Open Satur8 starts the app. Installing from
+  the plugin needs a published release to download, so it is checked after
+  this release is out.
+- `satur8 auto on|off|status` turns automatic per-game switching on or off
+  with one command, the same way the switch on the app's Status page does:
+  the background service now and at login, and on KDE Plasma also the KWin
+  focus script, with KWin asked to reload over D-Bus by Satur8 itself. In
+  Steam Game Mode it is the service alone. The installer's closing message
+  and the README show this command, with the commands it replaces kept as a
+  by-hand line.
+- `satur8 status` marks a level that is kept for an output that is not
+  connected as `(not connected)`, so it no longer reads as something on
+  screen.
+- "Add game" is one list of your games by name, in both layouts: the
+  installed Steam games, with any that is running first and marked. A
+  running Steam game is recognized by its Steam AppID and shown under its
+  Steam name ("ELDEN RING", not `eldenring.exe`); launchers, runtimes,
+  wrappers and shells are never listed. A pick adds a profile matched by the
+  Steam AppID. The separate "Add running game" dropdown, which listed
+  process names, is gone; a running game that is not from Steam is still
+  offered by its executable.
+- A profile that knows only a game's Steam AppID now also applies to a
+  native Steam game on a desktop (its window class is not `steam_app_<ID>`):
+  the service reads the AppID from the focused window's process.
+- `satur8 steam-shortcut status|add|artwork`: Satur8's entry in the Steam
+  library, which is how the app is opened in Game Mode. The installer runs
+  `add` on a system with a Steam gaming session (`--no-steam-entry` skips
+  it); it asks the running Steam through SteamOS's own tool, never adds a
+  second entry, and reports a broken leftover entry named `satur8.desktop`
+  from v0.5.0. The entry gets artwork (cover, wide capsule, banner, logo,
+  icon). Uninstall takes the artwork off and says that the entry itself
+  stays and how to remove it in Steam.
+- The Status page works when the app is started from the Steam library,
+  where it runs inside Steam's runtime container without `systemctl`: it
+  asks the user's systemd over the session bus instead. In Game Mode it
+  reads the applied saturation from gamescope.
+- Checked for all of the above: unit tests, and the Game Mode layout on a
+  virtual 1280x800 screen with a Steam Deck's Game Mode environment (pointer
+  presses and drags for touch, keys for the buttons), also started inside
+  the Steam Linux Runtime container. Not yet run on a Steam Deck in this
+  form: the gamepad reader has not read a real pad, and the step that asks
+  Steam to add the entry was not run.
+- Fix the app not opening from the application launcher on the Steam Deck:
+  the launcher said "Could not find the program 'satur8-gui'", because
+  SteamOS does not search `~/.local/bin`. The installer now writes the
+  launcher entry with the app's full path. Steam's "Add to Steam" can read the
+  entry now too, so the app can be added to the Steam library.
+- Fix the installer on Bazzite and Fedora, which have `qdbus-qt6` and no
+  `qdbus6`: the command it prints for turning on per-game switching failed
+  there, and its steps that unload the KWin effect were skipped. It now uses
+  whichever of the two exists. Found on a real Bazzite install.
+- The app's icon is now the rainbow 8 from the Satur8 logo instead of the
+  green S8 tile, in the window, the taskbar and the application launcher.
+- Checked, with no code change: the DRM/KMS path, the last backend that had
+  never been run on real hardware. On a Steam Deck OLED's AMD GPU with its
+  session held open and no compositor running, `satur8 doctor` chose
+  `drm-ctm`, `satur8 set 0` turned color bars gray, 0.5 and 2.0 landed where
+  expected, `satur8 off` put the picture back, `--output` with a CRTC ID
+  changed that CRTC and an unknown ID was refused. The background service,
+  started by hand on that console, showed the desktop saturation at start,
+  followed a change to it and restored it when stopped. The README's backend
+  table now lists DRM/KMS as Verified.
+
 ## v0.5.0 - 2026-11-22
 
 A different saturation on each monitor on KDE Plasma, and a desktop saturation that shows from the start of the session.
