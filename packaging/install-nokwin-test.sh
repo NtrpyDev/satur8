@@ -7,12 +7,24 @@
 # v0.3.4 shipped an installer that aborted here; this is the check that would
 # have caught it. Run it on the release tarball before tagging.
 #
-# Usage: packaging/install-nokwin-test.sh [path/to/satur8-vX.Y.Z-linux-x86_64.tar.gz]
+# Usage: packaging/install-nokwin-test.sh [--image IMAGE] [path/to/satur8-vX.Y.Z-linux-x86_64.tar.gz]
+#
+# IMAGE defaults to fedora:latest. Run it for ubuntu:22.04 too: there it is
+# also a glibc floor test, because satur8 --version and satur8 repair run on
+# glibc 2.35.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$repo/Cargo.toml" | head -n1)"
-tarball="${1:-$repo/target/dist/satur8-v$version-linux-x86_64.tar.gz}"
+image="fedora:latest"
+tarball=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --image) image="${2:?--image requires an image name}"; shift 2 ;;
+        *) tarball="$1"; shift ;;
+    esac
+done
+tarball="${tarball:-$repo/target/dist/satur8-v$version-linux-x86_64.tar.gz}"
 [ -f "$tarball" ] || { echo "FAIL: no release tarball at $tarball (run packaging/release-tarball.sh)" >&2; exit 1; }
 
 runtime=""
@@ -21,8 +33,9 @@ for candidate in podman docker; do
 done
 [ -n "$runtime" ] || { echo "FAIL: needs podman or docker" >&2; exit 1; }
 
+echo "==> $image"
 "$runtime" run --rm --network none \
-    -v "$(realpath "$tarball"):/satur8.tar.gz:ro" fedora:latest bash -c '
+    -v "$(realpath "$tarball"):/satur8.tar.gz:ro" "$image" bash -c '
 set -euo pipefail
 if command -v kwin_wayland cmake >/dev/null 2>&1 || [ -e /usr/include/kwin ]; then
     echo "FAIL: the test container has KWin or cmake, so it proves nothing"; exit 1
@@ -34,6 +47,7 @@ for bin in satur8 satur8-daemon satur8-gui; do
     [ -x "$HOME/.local/bin/$bin" ] || { echo "FAIL: $bin was not installed"; exit 1; }
 done
 [ ! -e "$HOME/.local/lib/qt6/plugins/kwin/effects/plugins/satur8.so" ] || { echo "FAIL: an effect was installed with no KWin present"; exit 1; }
+[ ! -e "$HOME/.local/share/satur8/kwin-effects" ] || { echo "FAIL: the KWin effect set was copied with no KWin present"; exit 1; }
 [ -f "$HOME/.config/systemd/user/satur8-daemon.service" ] || { echo "FAIL: the daemon unit was not installed"; exit 1; }
 "$HOME/.local/bin/satur8" --version
 "$HOME/.local/bin/satur8" repair

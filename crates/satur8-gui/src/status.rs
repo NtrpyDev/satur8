@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use satur8_core::{Desktop, Environment, SessionType};
+use satur8_kwin::repair::Step as RepairStep;
 use zbus::blocking::Connection;
 
 /// The daemon's systemd user unit (installed by install.sh and the packages).
@@ -48,6 +49,9 @@ pub struct EffectFacts {
     pub system: Option<String>,
     /// KWin version the per-user effect was built for.
     pub user: Option<String>,
+    /// What Repair would do here, from the same decision `satur8 repair`
+    /// makes; `None` when it was not worked out.
+    pub repair: Option<RepairStep>,
 }
 
 /// Everything the Status page knows about the system. Gathered read-only.
@@ -174,14 +178,26 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
             }
             Some(e) if e.reachable => {
                 let built = e.user.as_deref().or(e.system.as_deref());
+                // Promise only what Repair can do on this system.
+                let (add, fix) = match e.repair {
+                    Some(RepairStep::InstallFromSet) => {
+                        ("Repair can install it", "Repair replaces it")
+                    }
+                    Some(RepairStep::CannotRepair) => {
+                        ("Repair cannot add it", "Repair cannot fix it")
+                    }
+                    _ => ("Repair can build it", "Repair rebuilds it"),
+                };
                 let detail = match (built, e.headers.as_deref()) {
-                    (None, _) => "Not installed. Repair can build it".to_string(),
-                    (Some(built), Some(needed)) if built != needed => format!(
-                        "Built for KDE {built}, but KDE {needed} is installed. Repair rebuilds it"
-                    ),
-                    (Some(built), _) => format!(
-                        "Built for KDE {built}, but the running KDE will not load it. Repair rebuilds it"
-                    ),
+                    (None, _) => format!("Not installed. {add}"),
+                    (Some(built), Some(needed)) if built != needed => {
+                        format!("Built for KDE {built}, but KDE {needed} is installed. {fix}")
+                    }
+                    (Some(built), _) => {
+                        format!(
+                            "Built for KDE {built}, but the running KDE will not load it. {fix}"
+                        )
+                    }
                 };
                 row("Saturation effect", Level::Problem, detail)
             }
@@ -371,7 +387,7 @@ pub enum Action {
 impl Action {
     pub fn describe(&self) -> String {
         match self {
-            Action::RepairEffect => "Check and rebuild the saturation effect".into(),
+            Action::RepairEffect => "Check and repair the saturation effect".into(),
             Action::Systemctl(args) => format!("systemctl --user {} {DAEMON_UNIT}", args.join(" ")),
             Action::SetFocusEnabled(on) => {
                 format!("kwriteconfig6 --file kwinrc --group Plugins --key {FOCUS_KEY} {on}")
@@ -725,6 +741,7 @@ pub fn probe() -> Facts {
             Some(kwin) => {
                 let supported = kwin.is_supported().unwrap_or(false);
                 let state = satur8_kwin::repair::inspect(supported);
+                let repair = Some(satur8_kwin::repair::decide(&state));
                 EffectFacts {
                     reachable: true,
                     supported,
@@ -732,6 +749,7 @@ pub fn probe() -> Facts {
                     headers: state.headers,
                     system: state.system,
                     user: state.user,
+                    repair,
                 }
             }
             None => EffectFacts::default(),
@@ -1006,6 +1024,7 @@ mod tests {
                 headers: Some("6.8.3".into()),
                 system: Some("6.8.3".into()),
                 user: None,
+                repair: Some(RepairStep::Healthy),
             }),
             kwin_version: Some("6.8.3".into()),
             daemon_running: Some(true),
@@ -1072,11 +1091,53 @@ mod tests {
             headers: Some("6.8.3".into()),
             system: Some("6.8.2".into()),
             user: None,
+            repair: Some(RepairStep::Build),
         });
         let rows = health_rows(&facts);
         assert_eq!(rows[0].level, Level::Problem);
         assert_eq!(rows[1].level, Level::Problem);
         assert!(rows[1].detail.contains("6.8.2") && rows[1].detail.contains("6.8.3"));
+        assert!(rows[1].detail.ends_with("Repair rebuilds it"));
+    }
+
+    fn effect_detail(user: Option<&str>, headers: &str, repair: RepairStep) -> String {
+        let mut facts = healthy();
+        facts.effect = Some(EffectFacts {
+            reachable: true,
+            supported: false,
+            loaded: false,
+            headers: Some(headers.into()),
+            system: None,
+            user: user.map(Into::into),
+            repair: Some(repair),
+        });
+        health_rows(&facts)[1].detail.clone()
+    }
+
+    #[test]
+    fn effect_row_promises_only_what_repair_can_do_here() {
+        // The Deck after an OS update: the set has the new effect.
+        assert_eq!(
+            effect_detail(Some("6.7.3"), "6.8.2", RepairStep::InstallFromSet),
+            "Built for KDE 6.7.3, but KDE 6.8.2 is installed. Repair replaces it"
+        );
+        assert_eq!(
+            effect_detail(None, "6.7.3", RepairStep::InstallFromSet),
+            "Not installed. Repair can install it"
+        );
+        // No set entry and no build tools: no promise of a rebuild.
+        for detail in [
+            effect_detail(Some("6.8.2"), "6.9.0", RepairStep::CannotRepair),
+            effect_detail(Some("6.9.0"), "6.9.0", RepairStep::CannotRepair),
+            effect_detail(None, "6.9.0", RepairStep::CannotRepair),
+        ] {
+            assert!(!detail.contains("build"), "{detail}");
+            assert!(detail.contains("cannot"), "{detail}");
+        }
+        assert_eq!(
+            effect_detail(None, "6.8.3", RepairStep::Build),
+            "Not installed. Repair can build it"
+        );
     }
 
     #[test]

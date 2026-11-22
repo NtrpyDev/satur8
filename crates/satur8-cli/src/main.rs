@@ -316,7 +316,11 @@ fn cmd_doctor() -> Result<()> {
         Some(kwin) => {
             println!("  [ok] KWin reachable over D-Bus");
             match kwin.is_supported() {
-                Ok(true) => println!("  [ok] satur8 effect matches the running KWin ABI"),
+                Ok(true) => {
+                    println!("  [ok] satur8 effect matches the running KWin ABI");
+                    let state = satur8_kwin::repair::inspect(true);
+                    println!("       effect origin: {}", effect_origin(&state));
+                }
                 Ok(false) => {
                     let state = satur8_kwin::repair::inspect(false);
                     let built_for = |abi: &Option<String>| match abi {
@@ -326,6 +330,7 @@ fn cmd_doctor() -> Result<()> {
                     println!("  [!!] the running KWin rejects the satur8 effect.");
                     println!("       system effect  : {}", built_for(&state.system));
                     println!("       per-user effect: {}", built_for(&state.user));
+                    println!("       effect origin  : {}", effect_origin(&state));
                     println!(
                         "       installed KWin : {}",
                         state
@@ -333,7 +338,7 @@ fn cmd_doctor() -> Result<()> {
                             .as_deref()
                             .unwrap_or("unknown (no KWin headers)")
                     );
-                    println!("       Run `satur8 repair` to rebuild it for this KWin version.");
+                    println!("       Next step: {}.", satur8_kwin::repair::advice_here());
                     return Ok(());
                 }
                 Err(error) => {
@@ -381,6 +386,25 @@ fn cmd_doctor() -> Result<()> {
 
     println!();
     print_profiles_summary()
+}
+
+/// Where the effect KWin loads came from, for `satur8 doctor`. KWin searches
+/// the per-user plugin dir ahead of the system one, so a per-user copy is the
+/// one named when both exist.
+fn effect_origin(state: &satur8_kwin::repair::EffectState) -> String {
+    match (&state.user, &state.user_from_set, &state.system) {
+        (Some(version), Some(key), _) => format!(
+            "per-user copy from the set that came with Satur8 ({key}), built for KWin {version}"
+        ),
+        (Some(version), None, _) => format!(
+            "per-user copy built for KWin {version}, not from the set that came with Satur8 \
+             (a local build or an earlier install)"
+        ),
+        (None, _, Some(version)) => format!(
+            "system-wide copy (a package or `install.sh --system`), built for KWin {version}"
+        ),
+        (None, _, None) => "no effect file found".to_string(),
+    }
 }
 
 fn print_profiles_summary() -> Result<()> {
@@ -660,6 +684,40 @@ mod tests {
             },
         );
         assert_eq!(session, None);
+    }
+
+    #[test]
+    fn doctor_names_where_the_effect_came_from() {
+        use satur8_kwin::repair::EffectState;
+        let v = |s: &str| Some(s.to_string());
+        let from_set = EffectState {
+            user: v("6.7.3"),
+            user_from_set: v("steamos-6.7.3"),
+            ..EffectState::default()
+        };
+        assert_eq!(
+            effect_origin(&from_set),
+            "per-user copy from the set that came with Satur8 (steamos-6.7.3), built for KWin 6.7.3"
+        );
+        let built = EffectState {
+            user: v("6.8.3"),
+            system: v("6.8.2"),
+            ..EffectState::default()
+        };
+        assert!(effect_origin(&built)
+            .starts_with("per-user copy built for KWin 6.8.3, not from the set"));
+        let package = EffectState {
+            system: v("6.8.3"),
+            ..EffectState::default()
+        };
+        assert_eq!(
+            effect_origin(&package),
+            "system-wide copy (a package or `install.sh --system`), built for KWin 6.8.3"
+        );
+        assert_eq!(
+            effect_origin(&EffectState::default()),
+            "no effect file found"
+        );
     }
 
     /// Over SSH on the Deck no desktop backend is reachable, so the probe runs.

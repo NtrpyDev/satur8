@@ -9,18 +9,30 @@
 # effect at the next login. --system installs the effect to the system plugin
 # dir instead, which works immediately.
 #
-# Either way the effect source is installed too, so `satur8 repair` (run by the
-# daemon at every session start) can rebuild the effect after a KWin update.
+# A release archive carries prebuilt effects, one per system and KWin version,
+# in prebuilt/linux-x86_64/kwin/effects/<key>/. The installer uses the one built
+# for this system; else builds one; else uses one built for another system with
+# the same KWin when this system's Qt is new enough. On a machine with KWin it
+# copies the whole set to ~/.local/share/satur8/kwin-effects for `satur8 repair`.
+#
+# The effect source is installed too, so `satur8 repair` (run by the daemon at
+# every session start) can rebuild the effect after a KWin update.
 #
 # Usage:
 #   packaging/install.sh                 # per-user install
 #   packaging/install.sh --system        # system install (uses sudo)
 #   packaging/install.sh --enable-daemon # also turn on the background service
 #   packaging/install.sh --uninstall     # remove a per-user install
+#   packaging/install.sh --pick-effect   # print which KWin effect fits; change nothing
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 prebuilt="$repo/prebuilt/linux-x86_64"
+# The bundled effects, one folder per key: <family>-<KWin version>, such as
+# steamos-6.7.3 or fedora45-6.8.3.
+effect_set="$prebuilt/kwin/effects"
+# Names the system family. Tests point it at a fake file.
+os_release="${SATUR8_OS_RELEASE:-/etc/os-release}"
 mode="user"
 action="install"
 effect_to_check=""
@@ -35,13 +47,43 @@ while [ "$#" -gt 0 ]; do
             effect_to_check="${2:?--check-effect requires a plugin path}"
             shift 2
             ;;
-        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+        --pick-effect) action="pick-effect"; shift ;;
+        -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
         *) echo "unknown arg: $1" >&2; exit 1 ;;
     esac
 done
 
+# One os-release field without its quotes; empty when the file or field is
+# missing.
+os_field() {
+    local value
+    value="$(sed -n "s/^$1=//p" "$os_release" 2>/dev/null | head -n1)" || value=""
+    value="${value#\"}"
+    value="${value%\"}"
+    value="${value#\'}"
+    value="${value%\'}"
+    printf '%s' "$value"
+}
+
 is_steamos() {
-    grep -Eq '^ID="?steamos"?$' /etc/os-release 2>/dev/null
+    [ "$(os_field ID)" = steamos ]
+}
+
+# The family half of an effect key: steamos; fedora<NN> for Fedora and systems
+# built from it, such as Bazzite (ID=bazzite, ID_LIKE="fedora"); else other.
+system_family() {
+    local id id_like version
+    id="$(os_field ID)"
+    id_like="$(os_field ID_LIKE)"
+    version="$(os_field VERSION_ID)"
+    if [ "$id" = steamos ]; then
+        echo steamos
+    elif { [ "$id" = fedora ] || [[ " $id_like " == *" fedora "* ]]; } &&
+        [[ "$version" =~ ^[0-9]+$ ]]; then
+        echo "fedora$version"
+    else
+        echo other
+    fi
 }
 
 # Booted from an ostree image (Bazzite, Fedora Atomic): /usr is a read-only
@@ -77,6 +119,7 @@ kwin_script_dir="$data/kwin/scripts/satur8-focus"
 gnome_ext_dir="$data/gnome-shell/extensions/satur8@satur8.github.io"
 unit_dir="$HOME/.config/systemd/user"
 effect_src_dir="$data/satur8/kwin-effect"
+effect_set_dir="$data/satur8/kwin-effects"
 env_dir="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/satur8"
 
@@ -114,11 +157,62 @@ runtime_kwin_abi() {
         /usr/include/kwin/config-kwin.h 2>/dev/null | head -n1
 }
 
+# The KWin version in a plugin's embedded ID. grep -a reads the binary
+# directly, so this needs no binutils (`strings` is missing on many systems).
 effect_kwin_abi() {
-    { strings "$1" 2>/dev/null \
-        | grep -oE 'org\.kde\.kwin\.EffectPluginFactory[0-9]+(\.[0-9]+)+' \
+    { grep -aoE 'org\.kde\.kwin\.EffectPluginFactory[0-9]+(\.[0-9]+)+' "$1" 2>/dev/null \
         | sed 's/^org\.kde\.kwin\.EffectPluginFactory//' \
         | head -n1; } || true
+}
+
+# The highest Qt_6.x symbol version a plugin needs, as x. A Qt older than
+# that cannot load the plugin.
+effect_qt_minor() {
+    { grep -aoE 'Qt_6\.[0-9]+' "$1" 2>/dev/null \
+        | sed 's/^Qt_6\.//' \
+        | sort -n \
+        | tail -n1; } || true
+}
+
+# The installed Qt 6 minor version, from the Qt core library's file name
+# (libQt6Core.so.6.11.1 gives 11). It looks in /usr/lib64 (Fedora), /usr/lib
+# (Arch, SteamOS) and /usr/lib/x86_64-linux-gnu (Debian, Ubuntu), and the first
+# folder that has one decides. SATUR8_QT_LIB_DIR replaces that list for tests.
+installed_qt_minor() {
+    local dirs=(/usr/lib64 /usr/lib /usr/lib/x86_64-linux-gnu) dir file minor best=""
+    if [ -n "${SATUR8_QT_LIB_DIR:-}" ]; then
+        dirs=("$SATUR8_QT_LIB_DIR")
+    fi
+    for dir in "${dirs[@]}"; do
+        for file in "$dir"/libQt6Core.so.6.*; do
+            [ -e "$file" ] || continue
+            minor="${file##*/libQt6Core.so.6.}"
+            minor="${minor%%.*}"
+            [[ "$minor" =~ ^[0-9]+$ ]] || continue
+            if [ -z "$best" ] || [ "$minor" -gt "$best" ]; then
+                best="$minor"
+            fi
+        done
+        if [ -n "$best" ]; then
+            break
+        fi
+    done
+    printf '%s' "$best"
+}
+
+# Whether $1 is a usable entry of the bundled set: its folder name is
+# <family>-<KWin version> and the plugin inside embeds exactly that version.
+# An entry whose embedded ID disagrees with its folder name is never used.
+set_entry_ok() {
+    local dir="$1" key key_re='^[a-z][a-z0-9]*-[0-9]+(\.[0-9]+)+$'
+    key="${dir##*/}"
+    [[ "$key" =~ $key_re ]] || return 1
+    [ -f "$dir/satur8.so" ] && [ -r "$dir/satur8.so" ] || return 1
+    [ "$(effect_kwin_abi "$dir/satur8.so")" = "${key##*-}" ]
+}
+
+has_effect_set() {
+    compgen -G "$effect_set/*/satur8.so" >/dev/null
 }
 
 check_effect_abi() {
@@ -170,24 +264,93 @@ has_gamescope_session() {
     [ -f /usr/lib/systemd/user/gamescope-session-plus@.service ]
 }
 
+# Whether this machine can build the effect: the effect source, cmake, a C++
+# compiler and the KWin development headers. Sets build_blocked_by when not.
+can_build_effect() {
+    build_blocked_by=""
+    if [ ! -f "$repo/assets/kwin-effect/CMakeLists.txt" ]; then
+        build_blocked_by="this archive lacks the effect source"
+        return 1
+    fi
+    local tool
+    for tool in cmake c++; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            build_blocked_by="missing $tool"
+            return 1
+        fi
+    done
+    if [ ! -f /usr/include/kwin/config-kwin.h ]; then
+        build_blocked_by="the KWin development headers are not installed"
+        return 1
+    fi
+}
+
+# Decide which KWin effect this machine gets, changing nothing. In order: the
+# bundled effect built for this family and KWin version; a local build; another
+# family's effect for the same KWin whose Qt_6.x tag is not above the installed
+# Qt. Sets effect_pick to "set" (effect_pick_key names the folder; with
+# effect_pick_note when it was built for another system), "build", or "" with
+# the reason in effect_skip_reason.
+choose_effect() {
+    effect_pick=""
+    effect_pick_key=""
+    effect_pick_note=""
+    effect_skip_reason=""
+    effect_kwin="$(runtime_kwin_abi)"
+    if [ -z "$effect_kwin" ]; then
+        effect_skip_reason="could not determine the installed KWin version"
+        return
+    fi
+    local family qt dir key need qt_note=""
+    family="$(system_family)"
+    if [ "$family" != other ] && set_entry_ok "$effect_set/$family-$effect_kwin"; then
+        effect_pick=set
+        effect_pick_key="$family-$effect_kwin"
+        return
+    fi
+    if can_build_effect; then
+        effect_pick=build
+        return
+    fi
+    qt="$(installed_qt_minor)"
+    for dir in "$effect_set"/*/; do
+        dir="${dir%/}"
+        key="${dir##*/}"
+        [ "${key##*-}" = "$effect_kwin" ] || continue
+        [ "${key%-*}" != "$family" ] || continue
+        set_entry_ok "$dir" || continue
+        need="$(effect_qt_minor "$dir/satur8.so")"
+        if [ -z "$need" ]; then
+            qt_note="$key does not name the Qt version it needs"
+            continue
+        fi
+        if [ -z "$qt" ]; then
+            qt_note="the installed Qt version could not be read, so $key built for another system was not used"
+            continue
+        fi
+        if [ "$need" -gt "$qt" ]; then
+            qt_note="$key needs Qt 6.$need and this system has Qt 6.$qt"
+            continue
+        fi
+        effect_pick=set
+        effect_pick_key="$key"
+        effect_pick_note="this effect was built for another system (${key%-*}) with the same KWin $effect_kwin; this system's Qt 6.$qt is new enough for it"
+        return
+    done
+    effect_skip_reason="this Satur8 has no KWin effect for KWin $effect_kwin built for this system, and cannot build one here ($build_blocked_by)"
+    if [ -n "$qt_note" ]; then
+        effect_skip_reason="$effect_skip_reason; $qt_note"
+    fi
+}
+
 # Build the effect for the installed KWin. Returns non-zero, with the reason in
 # effect_skip_reason, when it cannot: a missing effect must never stop the rest
 # of Satur8 from installing. (This runs inside an `if`, where `set -e` is off,
 # so every step checks its own result.)
 build_effect() {
     effect_skip_reason=""
-    if [ ! -f "$repo/assets/kwin-effect/CMakeLists.txt" ]; then
-        effect_skip_reason="the bundled effect does not match this KWin and this archive lacks the effect source"
-        return 1
-    fi
-    for command in cmake c++; do
-        if ! command -v "$command" >/dev/null 2>&1; then
-            effect_skip_reason="missing $command"
-            return 1
-        fi
-    done
-    if [ ! -f /usr/include/kwin/config-kwin.h ]; then
-        effect_skip_reason="the KWin development headers are not installed"
+    if ! can_build_effect; then
+        effect_skip_reason="$build_blocked_by"
         return 1
     fi
     say "Building the KWin effect"
@@ -213,25 +376,55 @@ prepare_artifacts() {
         build_binaries
     fi
 
-    # The KWin effect is optional: no KWin, or no way to build a matching
-    # effect, skips it and installs everything else.
+    # The KWin effect is optional: no KWin, or no effect that fits and no way
+    # to build one, skips it and installs everything else.
     effect_so=""
     effect_skip_reason=""
-    local prebuilt_effect="$prebuilt/kwin/satur8.so"
     if ! kwin_present; then
         say "KWin not found: skipping the KWin effect (only KDE Plasma uses it)"
-    elif [ -f "$prebuilt_effect" ] && check_effect_abi "$prebuilt_effect" >/dev/null 2>&1; then
-        say "Using bundled KWin effect for ABI $(runtime_kwin_abi)"
-        effect_so="$prebuilt_effect"
-    else
-        if [ -f "$prebuilt_effect" ]; then
-            say "Bundled KWin effect does not match KWin $(runtime_kwin_abi); rebuilding locally"
-        fi
-        if ! build_effect; then
-            effect_so=""
-            say "Skipping the KWin effect: $effect_skip_reason"
-        fi
+        return
     fi
+    choose_effect
+    case "$effect_pick" in
+        set)
+            say "Using bundled KWin effect for ABI $effect_kwin ($effect_pick_key)"
+            if [ -n "$effect_pick_note" ]; then
+                echo "    NOTE: $effect_pick_note."
+            fi
+            effect_so="$effect_set/$effect_pick_key/satur8.so"
+            ;;
+        build)
+            if has_effect_set; then
+                say "Bundled KWin effects do not include KWin $effect_kwin for this system; rebuilding locally"
+            fi
+            if ! build_effect; then
+                effect_so=""
+                say "Skipping the KWin effect: $effect_skip_reason"
+            fi
+            ;;
+        *)
+            say "Skipping the KWin effect: $effect_skip_reason"
+            ;;
+    esac
+}
+
+# --pick-effect: print the decision and change nothing.
+report_effect_pick() {
+    if ! kwin_present; then
+        echo "skip: KWin not found (only KDE Plasma uses it)"
+        return
+    fi
+    choose_effect
+    case "$effect_pick" in
+        set)
+            echo "pick: $effect_pick_key"
+            if [ -n "$effect_pick_note" ]; then
+                echo "note: $effect_pick_note"
+            fi
+            ;;
+        build) echo "build: no bundled effect for KWin $effect_kwin on this system; it would be built here" ;;
+        *) echo "skip: $effect_skip_reason" ;;
+    esac
 }
 
 install_all() {
@@ -263,7 +456,9 @@ install_all() {
         mkdir -p "$state_dir"
         printf '%s' "$satur8_version" > "$state_dir/kwin-effect-source-version"
         echo "    NOTE: KWin picks up the per-user effect at your next login."
-        if per_user_only; then
+        if is_steamos; then
+            echo "    Switch to Game Mode and back to Desktop Mode, or log out and back in, once."
+        elif per_user_only; then
             echo "    Log out and back in once."
         else
             echo "    Log out and back in once, or re-run with --system to use it now."
@@ -277,6 +472,15 @@ install_all() {
         for f in CMakeLists.txt metadata.json satur8_effect.cpp satur8_effect.h; do
             install -m644 "$repo/assets/kwin-effect/$f" "$effect_src_dir/$f"
         done
+    fi
+    # The whole bundled set, so `satur8 repair` can switch to the right effect
+    # after an OS update with no network and no build tools. A set from an
+    # earlier install is replaced, never mixed in. Only KWin uses it.
+    rm -rf "$effect_set_dir"
+    if kwin_present && has_effect_set; then
+        say "Installing the bundled KWin effects to $effect_set_dir"
+        mkdir -p "$effect_set_dir"
+        cp -R "$effect_set/." "$effect_set_dir/"
     fi
     say "Adding the per-user Qt plugin dir to the session environment"
     install -Dm644 "$repo/packaging/60-satur8.conf" "$env_dir/60-satur8.conf"
@@ -368,9 +572,9 @@ uninstall_all() {
     say "Removing per-user install"
     rm -f "$bindir/satur8" "$bindir/satur8-daemon" "$bindir/satur8-tray" "$bindir/satur8-gui"
     rm -f "$qt_plugin_user/satur8.so" "$env_dir/60-satur8.conf"
-    rm -rf "$kwin_script_dir" "$gnome_ext_dir" "$effect_src_dir" "$state_dir"
-    # The effect source was the only thing in this folder; rmdir keeps it if
-    # anything else is there.
+    rm -rf "$kwin_script_dir" "$gnome_ext_dir" "$effect_src_dir" "$effect_set_dir" "$state_dir"
+    # The effect source and the effect set were the only things in this
+    # folder; rmdir keeps it if anything else is there.
     rmdir "$data/satur8" 2>/dev/null || true
     rm -f "$unit_dir/satur8-daemon.service" "$data/applications/satur8.desktop"
     if [ -e "$qt_plugin_sys/satur8.so" ]; then
@@ -382,4 +586,5 @@ case "$action" in
     install) install_all ;;
     uninstall) uninstall_all ;;
     check-effect) check_effect_abi "$effect_to_check" ;;
+    pick-effect) report_effect_pick ;;
 esac
