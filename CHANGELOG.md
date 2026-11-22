@@ -10,7 +10,10 @@ Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.
 - Per-game profiles now switch automatically in Steam Game Mode. With the
   background service running, a game's profile loads when the game takes focus
   and is removed when you leave or close the game. Opening Steam's overlay menu
-  over a game keeps the game's profile.
+  over a game keeps the game's profile. The service starts with the Game Mode
+  session; this was checked by switching the Deck to Desktop Mode and back, and
+  a cold boot was not tested. A profile added while the service runs takes
+  effect right away.
 - The Steam home screen and games without a profile get `default_saturation`
   from `profiles.toml`. At 1.0, the default, Satur8 loads nothing there.
 - Profiles match a game by Steam AppID (`satur8 profile add NAME SATURATION
@@ -36,7 +39,10 @@ Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.
   installed in your home folder, so it survives SteamOS updates. On a machine
   with a Game Mode session where the KWin effect cannot be installed, the
   installer now says Game Mode works without it, and uninstall runs `satur8
-  off` before it removes the commands.
+  off` before it removes the commands. Uninstall keeps `profiles.toml`, so
+  profiles survive a reinstall; on the Deck it was checked with a game running
+  and its table loaded. The installer prints a hint when `~/.local/bin` is not
+  on PATH, which is the case in an SSH login on SteamOS.
 - `satur8 repair` reads the installed KWin version from `kwin_wayland` when the
   KWin development headers are missing, so a matching per-user effect waits for
   the next login instead of reporting an error, and it explains that build
@@ -49,17 +55,22 @@ Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.
   Mode, with a camera pointed at the screen. Saturation from grayscale to 2x
   responds in order.
 - Bazzite: Game Mode support is implemented but Satur8 has not been run on a
-  Bazzite device. The Game Mode code was exercised against Bazzite's own
-  gamescope build (3.17.0-ogc1, in Bazzite stable 45.20261117.1) in a
-  container, and there the v0.3.5 tarball installer installed and uninstalled
-  per user. Install from the release tarball without `--system`. Known gaps:
+  Bazzite device. The v0.4.0 installer and background service were run against
+  Bazzite's own gamescope build (3.17.0-ogc1, in Bazzite stable 45.20261117.1)
+  in a container: the service found gamescope, loaded a profile's table when
+  that app took focus, removed it at the home window and when stopped, and
+  uninstall left no table. Install from the release tarball without `--system`. Known gaps:
   the KDE desktop effect cannot be rebuilt on Bazzite after a KWin update
   because the image has no build tools, the GNOME images run GNOME 51, which
   the GNOME Shell extension does not list yet, and the COPR package is not
   built for Fedora 45, which current Bazzite is based on.
-- Not tested yet: HDR games (by gamescope's source the look table does not
-  change HDR content), an external display, the desktop app on the Deck, the
-  Deck's Desktop Mode, a Bazzite device and other systems that run a gamescope
+- The Deck's Desktop Mode does not work yet. It runs KDE Plasma with KWin
+  6.7.3, the KWin effect bundled in the release tarball is built for a
+  different KWin, and SteamOS has no build tools to rebuild it, so the service
+  starts there but cannot apply anything. Game Mode is not affected.
+- Not tested yet: a cold boot of the Deck, HDR games (by gamescope's source the
+  look table does not change HDR content), an external display, the desktop
+  app on the Deck, a Bazzite device and other systems that run a gamescope
   session, and gamescope versions other than 3.16.30.1.
 - The README has a new Steam Deck section, and ROADMAP.md and PLAN.md describe
   the Game Mode support and the Deck work that remains.
