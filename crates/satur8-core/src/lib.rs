@@ -7,13 +7,15 @@
 
 pub mod ctm;
 pub mod env;
+pub mod levels;
 pub mod proc;
 pub mod profile;
 pub mod steam;
 
 pub use env::{Desktop, Environment, Gpu, SessionType};
+pub use levels::{Levels, Note, Picture};
 pub use proc::{resolve_exe, running_apps, RunningApp};
-pub use profile::{MatchRule, Profile, Profiles};
+pub use profile::{MatchRule, OutputConfig, Profile, ProfileOutputs, Profiles};
 
 /// Rec.709 luma weights. Saturation is defined as a blend toward this luma.
 pub const LUMA_R: f32 = 0.2126;

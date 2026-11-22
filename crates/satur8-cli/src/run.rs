@@ -279,6 +279,7 @@ mod tests {
                     outputs: vec![],
                 },
             ],
+            ..Profiles::default()
         }
     }
 

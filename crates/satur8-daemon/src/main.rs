@@ -624,6 +624,7 @@ mod tests {
                 },
                 outputs: vec![],
             }],
+            ..Profiles::default()
         }
     }
 
@@ -661,6 +662,7 @@ mod tests {
                 },
                 outputs: vec![],
             }],
+            ..Profiles::default()
         }
     }
 

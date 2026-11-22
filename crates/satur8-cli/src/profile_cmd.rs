@@ -306,6 +306,7 @@ mod tests {
         let mut profiles = Profiles {
             default_saturation: 1.0,
             profiles: vec![profile("CS2", 1.6)],
+            ..Profiles::default()
         };
 
         let updated = add_or_replace_profile(&mut profiles, profile("cs2", 1.9));
@@ -321,6 +322,7 @@ mod tests {
         let mut profiles = Profiles {
             default_saturation: 1.0,
             profiles: vec![profile("CS2", 1.6), profile("Dota2", 1.4)],
+            ..Profiles::default()
         };
 
         remove_profile_by_name(&mut profiles, "cs2").unwrap();
@@ -334,6 +336,7 @@ mod tests {
         let mut profiles = Profiles {
             default_saturation: 1.0,
             profiles: vec![profile("CS2", 1.6)],
+            ..Profiles::default()
         };
 
         assert!(remove_profile_by_name(&mut profiles, "missing").is_err());
@@ -345,6 +348,7 @@ mod tests {
         let mut profiles = Profiles {
             default_saturation: 1.0,
             profiles: vec![profile("CS2", 1.6)],
+            ..Profiles::default()
         };
 
         set_profile_enabled(&mut profiles, "cs2", false).unwrap();

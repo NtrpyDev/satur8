@@ -4,6 +4,8 @@
 //! wrapper (M2) and the focus watcher (M4) both resolve a running game to a
 //! profile through [`Profiles::match_*`].
 
+use std::collections::BTreeMap;
+
 use crate::Saturation;
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -49,7 +51,41 @@ impl Profile {
     }
 }
 
+/// Which outputs a game profile changes when the profile itself lists none.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProfileOutputs {
+    /// Every output. The value when the key is absent.
+    #[default]
+    All,
+    /// Only the output the focused game window is on.
+    Focused,
+}
+
+impl ProfileOutputs {
+    fn is_all(&self) -> bool {
+        *self == ProfileOutputs::All
+    }
+}
+
+/// Settings for one output, keyed by the name `satur8 outputs` prints.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct OutputConfig {
+    /// The saturation this output shows when no game profile is changing it,
+    /// in place of the top-level `default_saturation`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_saturation"
+    )]
+    pub default_saturation: Option<f32>,
+}
+
 /// The whole profiles file: a default applied when nothing matches, plus a list.
+///
+/// `profile_outputs` and the `[output."NAME"]` tables are written only when they
+/// are used, so a file that uses neither is written exactly as before they
+/// existed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Profiles {
     /// Desktop default saturation (usually 1.0 = no change).
@@ -58,12 +94,27 @@ pub struct Profiles {
         deserialize_with = "deserialize_saturation"
     )]
     pub default_saturation: f32,
+    /// Which outputs a profile that lists none changes.
+    #[serde(default, skip_serializing_if = "ProfileOutputs::is_all")]
+    pub profile_outputs: ProfileOutputs,
+    /// Per-output settings, from the `[output."NAME"]` tables.
+    #[serde(default, rename = "output", skip_serializing_if = "BTreeMap::is_empty")]
+    pub outputs: BTreeMap<String, OutputConfig>,
     #[serde(default, rename = "profile")]
     pub profiles: Vec<Profile>,
 }
 
 fn default_saturation() -> f32 {
     1.0
+}
+
+fn deserialize_optional_saturation<'de, D>(deserializer: D) -> Result<Option<f32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = f32::deserialize(deserializer)?;
+    Saturation::try_new(value).map_err(serde::de::Error::custom)?;
+    Ok(Some(value))
 }
 
 fn deserialize_saturation<'de, D>(deserializer: D) -> Result<f32, D::Error>
@@ -79,6 +130,8 @@ impl Default for Profiles {
     fn default() -> Profiles {
         Profiles {
             default_saturation: 1.0,
+            profile_outputs: ProfileOutputs::All,
+            outputs: BTreeMap::new(),
             profiles: Vec::new(),
         }
     }
@@ -198,6 +251,7 @@ mod tests {
                     outputs: vec![],
                 },
             ],
+            ..Profiles::default()
         }
     }
 
@@ -255,6 +309,7 @@ mod tests {
                     outputs: vec![],
                 },
             ],
+            ..Profiles::default()
         };
 
         assert_eq!(p.match_exe("same-game").unwrap().name, "first");
@@ -290,6 +345,7 @@ mod tests {
                 match_rule: MatchRule::default(),
                 outputs: vec![],
             }],
+            ..Profiles::default()
         };
 
         assert!(p.match_window_class("Steam").is_none());
@@ -317,6 +373,105 @@ mod tests {
 
         assert!(profiles.profiles[0].enabled);
         assert_eq!(profiles.match_exe("legacy-game").unwrap().name, "Legacy");
+    }
+
+    /// What v0.4.1 writes for `sample()`, pinned so the new schema items cannot
+    /// appear in a file that does not use them. Saturations are `f32`, which
+    /// the TOML writer prints at full `f64` precision.
+    const SAMPLE_TOML: &str = r#"default_saturation = 1.0
+
+[[profile]]
+name = "cs2"
+enabled = true
+saturation = 1.600000023841858
+exe = "cs2"
+steam_app_id = 730
+
+[[profile]]
+name = "Dota 2"
+enabled = true
+saturation = 1.399999976158142
+exe = "dota2"
+window_class = "dota2.x86_64"
+steam_app_id = 570
+outputs = ["DP-1"]
+
+[[profile]]
+name = "Window Only"
+enabled = true
+saturation = 1.2000000476837158
+window_class = "com.example.Game"
+"#;
+
+    #[test]
+    fn an_old_file_writes_back_with_no_new_keys() {
+        assert_eq!(sample().to_toml().unwrap(), SAMPLE_TOML);
+        let parsed = Profiles::from_toml(SAMPLE_TOML).unwrap();
+        assert_eq!(parsed, sample());
+        assert_eq!(parsed.profile_outputs, ProfileOutputs::All);
+        assert!(parsed.outputs.is_empty());
+        assert_eq!(parsed.to_toml().unwrap(), SAMPLE_TOML);
+    }
+
+    /// The example file from the per-output design.
+    const PER_OUTPUT_EXAMPLE: &str = r#"
+default_saturation = 1.0
+profile_outputs = "focused"
+
+[output."DP-2"]
+default_saturation = 1.0
+
+[output."HDMI-A-1"]
+default_saturation = 0.85
+
+[[profile]]
+name = "cs2"
+saturation = 1.6
+exe = "cs2"
+steam_app_id = 730
+
+[[profile]]
+name = "surround racing"
+saturation = 1.4
+exe = "ams2"
+outputs = ["all"]
+
+[[profile]]
+name = "couch game"
+saturation = 1.3
+exe = "hades"
+outputs = ["HDMI-A-1"]
+"#;
+
+    #[test]
+    fn the_per_output_example_file_round_trips() {
+        let parsed = Profiles::from_toml(PER_OUTPUT_EXAMPLE).unwrap();
+        assert_eq!(parsed.profile_outputs, ProfileOutputs::Focused);
+        assert_eq!(parsed.outputs.len(), 2);
+        assert_eq!(parsed.outputs["DP-2"].default_saturation, Some(1.0));
+        assert_eq!(parsed.outputs["HDMI-A-1"].default_saturation, Some(0.85));
+        assert_eq!(parsed.profiles.len(), 3);
+        assert_eq!(parsed.profiles[1].outputs, vec!["all".to_string()]);
+        assert_eq!(parsed.profiles[2].outputs, vec!["HDMI-A-1".to_string()]);
+
+        let written = parsed.to_toml().unwrap();
+        assert!(
+            written.contains("profile_outputs = \"focused\""),
+            "{written}"
+        );
+        assert!(
+            written.contains("[output.DP-2]") || written.contains("[output.\"DP-2\"]"),
+            "{written}"
+        );
+        assert_eq!(Profiles::from_toml(&written).unwrap(), parsed);
+    }
+
+    #[test]
+    fn per_output_values_are_checked_like_every_other_saturation() {
+        assert!(Profiles::from_toml("[output.\"DP-2\"]\ndefault_saturation = nan").is_err());
+        assert!(Profiles::from_toml("profile_outputs = \"sideways\"").is_err());
+        let empty = Profiles::from_toml("[output.\"DP-2\"]\n").unwrap();
+        assert_eq!(empty.outputs["DP-2"].default_saturation, None);
     }
 
     /// A file written by a newer Satur8 must still load in this one: keys it
