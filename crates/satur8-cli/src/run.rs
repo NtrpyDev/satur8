@@ -12,7 +12,7 @@
 
 use anyhow::{bail, Context, Result};
 use satur8_backend::{install_signal_handler, select_backend, RestoreGuard};
-use satur8_core::levels::{desktop_picture, profile_picture};
+use satur8_core::levels::{desktop_picture, profile_outputs_not_connected, profile_picture};
 use satur8_core::{Levels, Picture, Profile, Profiles, Saturation};
 use std::path::Path;
 use std::process::Command;
@@ -116,7 +116,18 @@ pub fn run(args: RunArgs) -> Result<i32> {
     let mut backend = RestoreGuard::new(selected, desktop.levels);
     if let Some(resolved) = resolved {
         let picture = launch_picture(&profiles, &resolved, per_output);
-        for note in desktop.notes.iter().chain(&picture.notes) {
+        let not_connected = match (&resolved.profile, per_output) {
+            (Some(profile), true) => {
+                profile_outputs_not_connected(&profiles, profile, &backend.backend().outputs())
+            }
+            _ => Vec::new(),
+        };
+        for note in desktop
+            .notes
+            .iter()
+            .chain(&picture.notes)
+            .chain(&not_connected)
+        {
             eprintln!("satur8: {note}");
         }
         backend

@@ -75,6 +75,8 @@ pub enum Note {
     /// `profile_outputs` is `"focused"` but no output was reported for the
     /// focused window, so the profile changes every output.
     FocusedOutputUnknown { profile: String },
+    /// The profile names an output that is not connected, so it is skipped.
+    OutputNotConnected { profile: String, output: String },
 }
 
 impl fmt::Display for Note {
@@ -90,6 +92,10 @@ impl fmt::Display for Note {
             Note::FocusedOutputUnknown { profile } => write!(
                 f,
                 "profile '{profile}' changes every output: the focused window's output is unknown"
+            ),
+            Note::OutputNotConnected { profile, output } => write!(
+                f,
+                "profile '{profile}' names output '{output}', which is not connected; it is skipped"
             ),
         }
     }
@@ -203,6 +209,26 @@ pub fn outputs_not_connected(profiles: &Profiles, connected: &[Output]) -> Vec<S
     missing.sort();
     missing.dedup();
     missing
+}
+
+/// One note for each output `profile` names that is not among `connected`.
+/// None when the profile names `"all"`, which covers every output anyway.
+pub fn profile_outputs_not_connected(
+    profiles: &Profiles,
+    profile: &Profile,
+    connected: &[Output],
+) -> Vec<Note> {
+    if profile.outputs.iter().any(|name| name == ALL_OUTPUTS) {
+        return Vec::new();
+    }
+    outputs_not_connected(profiles, connected)
+        .into_iter()
+        .filter(|name| profile.outputs.contains(name))
+        .map(|output| Note::OutputNotConnected {
+            profile: profile.name.clone(),
+            output,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -432,6 +458,28 @@ mod tests {
             }
         );
         assert_eq!(desktop_picture(&profiles, true).levels, levels(1.0, &[]));
+    }
+
+    #[test]
+    fn notes_only_the_profiles_own_names_that_are_not_connected() {
+        let mut profiles = profiles(ProfileOutputs::All);
+        let game = profile(&["DP-3", "HDMI-A-1"]);
+        profiles.profiles = vec![game.clone(), profile(&["DP-9"])];
+        let connected = [Output {
+            id: "HDMI-A-1".into(),
+            human_name: "HDMI-A-1".into(),
+        }];
+        assert_eq!(
+            profile_outputs_not_connected(&profiles, &game, &connected),
+            [Note::OutputNotConnected {
+                profile: "game".into(),
+                output: "DP-3".into()
+            }]
+        );
+        assert!(
+            profile_outputs_not_connected(&profiles, &profile(&["all", "DP-3"]), &connected)
+                .is_empty()
+        );
     }
 
     #[test]

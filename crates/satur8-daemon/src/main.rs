@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use satur8_backend::{install_signal_handler, select_backend, RestoreGuard};
-use satur8_core::levels::{desktop_picture, profile_picture};
+use satur8_core::levels::{desktop_picture, profile_outputs_not_connected, profile_picture};
 use satur8_core::{Backend, BackendError, Levels, Note, Profile, Profiles};
 use zbus::interface;
 
@@ -146,10 +146,20 @@ impl BackendState {
         let per_output = guard.backend().per_output();
         let desktop = desktop_picture(profiles, per_output);
         let picture = profile_picture(profiles, profile, None, per_output);
+        let not_connected = if per_output {
+            profile_outputs_not_connected(profiles, profile, &guard.backend().outputs())
+        } else {
+            Vec::new()
+        };
         guard.set_restore_to(desktop.levels);
         guard.backend_mut().apply_levels(&picture.levels)?;
         guard.arm();
-        Ok(desktop.notes.into_iter().chain(picture.notes).collect())
+        Ok(desktop
+            .notes
+            .into_iter()
+            .chain(picture.notes)
+            .chain(not_connected)
+            .collect())
     }
 
     /// Put the desktop back. Returns what the user should be told about it.
@@ -1147,5 +1157,26 @@ mod tests {
             ]
         );
         assert_eq!(daemon.logged_notes, [Note::PerOutputDefaultsNotUsed]);
+    }
+
+    #[test]
+    fn a_named_output_that_is_not_connected_is_skipped_and_reported() {
+        let mut profiles = profiles();
+        profiles.profiles[0].outputs = vec!["DP-9".into(), "HDMI-A-1".into()];
+        let (mut daemon, pictures) = per_output_setup(profiles);
+
+        daemon.react("game.class", 0);
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [shown(1.0, &[("DP-9", 1.5), ("HDMI-A-1", 1.5)])]
+        );
+        assert_eq!(
+            daemon.logged_notes,
+            [Note::OutputNotConnected {
+                profile: "game".into(),
+                output: "DP-9".into()
+            }]
+        );
     }
 }
