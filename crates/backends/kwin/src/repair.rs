@@ -34,6 +34,9 @@ const PLUGIN_SUBDIR: &str = "kwin/effects/plugins";
 /// The plugin interface id is this prefix followed by the KWin version.
 const ABI_MARKER: &[u8] = b"org.kde.kwin.EffectPluginFactory";
 const KWIN_CONFIG_HEADER: &str = "/usr/include/kwin/config-kwin.h";
+/// Created by ostree at boot. On such systems (Bazzite, Fedora Atomic) `/usr`
+/// is read-only, so build tools cannot simply be installed.
+const OSTREE_BOOTED: &str = "/run/ostree-booted";
 /// Version of the Satur8 effect source this binary ships with. A per-user
 /// build made from an older source is treated as stale.
 const SOURCE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -82,8 +85,9 @@ impl RepairOutcome {
 /// The facts a repair decision is made from.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EffectState {
-    /// KWin version of the installed development headers, which is the version
-    /// a rebuild would target and the version the next login will run.
+    /// KWin version the next login will run, which is the version a rebuild
+    /// would target: from the installed development headers, or, where they
+    /// are not installed (Bazzite ships none), from the installed `kwin_wayland`.
     pub headers: Option<String>,
     /// KWin version the system-path effect was built for, if one is installed.
     pub system: Option<String>,
@@ -179,6 +183,42 @@ pub fn abi_in_header(text: &str) -> Option<String> {
     })
 }
 
+/// Extract the KWin version from `kwin_wayland --version` output, `kwin 6.8.3`.
+pub fn abi_in_version_output(text: &str) -> Option<String> {
+    let version = text.lines().next()?.split_whitespace().last()?;
+    let numeric = version.chars().all(|c| c.is_ascii_digit() || c == '.');
+    let dotted = version.contains('.') && !version.starts_with('.') && !version.ends_with('.');
+    (numeric && dotted).then(|| version.to_string())
+}
+
+/// The version of the installed KWin binary, which the next login runs.
+fn installed_kwin_version() -> Option<String> {
+    let out = Command::new("kwin_wayland")
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    abi_in_version_output(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// What to tell the user when the effect cannot be rebuilt here.
+fn install_advice() -> &'static str {
+    install_advice_for(Path::new(OSTREE_BOOTED).exists())
+}
+
+fn install_advice_for(ostree: bool) -> &'static str {
+    if ostree {
+        "/usr is read-only on this system (an image-based system such as Bazzite), so those \
+         tools could only be added by layering packages with rpm-ostree. Reinstall Satur8 from \
+         a release whose bundled effect matches this KWin instead"
+    } else {
+        "Install cmake, a C++ compiler, and the Qt 6 and KWin development files, then run \
+         `satur8 repair`"
+    }
+}
+
 fn plugin_abi(path: &Path) -> Option<String> {
     abi_in_plugin(&fs::read(path).ok()?)
 }
@@ -264,7 +304,8 @@ pub fn inspect(supported: bool) -> EffectState {
     EffectState {
         headers: fs::read_to_string(KWIN_CONFIG_HEADER)
             .ok()
-            .and_then(|text| abi_in_header(&text)),
+            .and_then(|text| abi_in_header(&text))
+            .or_else(installed_kwin_version),
         system: system_plugin_path().and_then(|p| plugin_abi(&p)),
         user_source_current: user.is_some()
             && stamp.as_deref().map(str::trim) == Some(SOURCE_VERSION),
@@ -321,7 +362,8 @@ pub fn repair() -> Result<RepairOutcome, String> {
         state.headers.clone().ok_or_else(|| {
             format!(
                 "the KWin effect does not match the running KWin and cannot be rebuilt: \
-                 the KWin development headers ({KWIN_CONFIG_HEADER}) are not installed"
+                 neither the KWin development headers ({KWIN_CONFIG_HEADER}) nor \
+                 kwin_wayland report the installed KWin version"
             )
         })
     };
@@ -357,10 +399,17 @@ fn build_into_user_dir(target: &str) -> Result<(), String> {
     for tool in ["cmake", "c++"] {
         if !on_path(tool) {
             return Err(format!(
-                "the KWin effect needs rebuilding for KWin {target}, but `{tool}` is not installed. \
-                 Install cmake, a C++ compiler, and the Qt 6 and KWin development files, then run `satur8 repair`"
+                "the KWin effect needs rebuilding for KWin {target}, but `{tool}` is not installed. {}",
+                install_advice()
             ));
         }
+    }
+    if !Path::new(KWIN_CONFIG_HEADER).is_file() {
+        return Err(format!(
+            "the KWin effect needs rebuilding for KWin {target}, but the KWin development \
+             headers ({KWIN_CONFIG_HEADER}) are not installed. {}",
+            install_advice()
+        ));
     }
     let dest = user_plugin_path().ok_or("HOME is not set")?;
     let build = xdg_dir("XDG_CACHE_HOME", ".cache")
@@ -459,6 +508,28 @@ mod tests {
         let header = "#pragma once\n#define KWIN_PLUGIN_VERSION_STRING \"6.8.3\"\n#define PROJECT_VERSION_MAJOR 6\n";
         assert_eq!(abi_in_header(header), v("6.8.3"));
         assert_eq!(abi_in_header("#define SOMETHING_ELSE 1\n"), None);
+    }
+
+    #[test]
+    fn reads_the_version_out_of_kwin_wayland_version_output() {
+        assert_eq!(abi_in_version_output("kwin 6.8.3\n"), v("6.8.3"));
+        assert_eq!(abi_in_version_output("kwin_wayland 6.7.0"), v("6.7.0"));
+        assert_eq!(
+            abi_in_version_output("kwin 6.8.3\nsecond line 9.9\n"),
+            v("6.8.3")
+        );
+        assert_eq!(abi_in_version_output("kwin\n"), None);
+        assert_eq!(abi_in_version_output("kwin 6.8.\n"), None);
+        assert_eq!(abi_in_version_output("kwin 6.8.3-beta\n"), None);
+        assert_eq!(abi_in_version_output(""), None);
+    }
+
+    #[test]
+    fn advice_on_an_image_based_system_does_not_say_to_install_build_tools() {
+        assert!(install_advice_for(true).contains("rpm-ostree"));
+        assert!(!install_advice_for(true).contains("Install cmake"));
+        assert!(install_advice_for(false).contains("Install cmake"));
+        assert!(install_advice_for(false).contains("satur8 repair"));
     }
 
     #[test]
