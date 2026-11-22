@@ -98,20 +98,15 @@ Satur8 has been run on a real Bazzite install in a virtual machine (the KDE desk
 
 ## Quick start
 
-Start the focus daemon:
+Turn on automatic per-game switching:
 
 ```sh
-systemctl --user enable --now satur8-daemon
+satur8 auto on
 ```
 
-On KDE Plasma, turn on the KWin focus script once. It tells the daemon which window is focused, and it is off until you enable it:
+That starts the focus daemon now and at login. On KDE Plasma it also turns on the KWin focus script, which tells the daemon which window is focused, and asks KWin to load it. It is what the switch on the desktop app's Status page does; `satur8 auto off` reverses it and `satur8 auto status` says whether it is on.
 
-```sh
-kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
-qdbus6 org.kde.KWin /KWin reconfigure
-```
-
-On Fedora and Bazzite the last tool is named `qdbus-qt6`; the installer prints the command with the name your system has.
+The same by hand, if you need it: `systemctl --user enable --now satur8-daemon`, then on KDE Plasma `kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true` and `qdbus6 org.kde.KWin /KWin reconfigure` (on Fedora and Bazzite the last tool is named `qdbus-qt6`; the installer prints the command with the name your system has).
 
 Open the desktop app, add a game profile, and set its saturation:
 
@@ -204,11 +199,13 @@ The Steam home screen and games without a profile get `default_saturation` from 
 
 ### Automatic switching
 
-The background service does the switching. If you installed without `--enable-daemon`, turn it on with:
+The background service does the switching. If you installed without `--enable-daemon`, turn it on with the switch on the app's Status page, or with:
 
 ```sh
-systemctl --user enable --now satur8-daemon
+~/.local/bin/satur8 auto on
 ```
+
+By hand that is `systemctl --user enable --now satur8-daemon`.
 
 The service starts with the Game Mode session. This was checked by switching the Deck to Desktop Mode and back, and by restarting the Deck with v0.4.1 installed: with nobody touching it, the service was running in Game Mode about ten seconds after boot and Steam's color settings were unchanged.
 
@@ -236,13 +233,13 @@ Desktop Mode runs KDE Plasma, which applies Satur8 through its KWin effect. KWin
 
 After installing, switch to Desktop Mode once. KWin then loads the effect; no logout is needed beyond that switch. `~/.local/bin/satur8 on 2.0` and `~/.local/bin/satur8 off` then change the whole desktop.
 
-For per-game switching in Desktop Mode, turn on the KWin focus script once while the Deck is in Desktop Mode. These are the commands the installer prints:
+For per-game switching in Desktop Mode, turn it on once while the Deck is in Desktop Mode, with the switch on the app's Status page or with the command the installer prints:
 
 ```sh
-systemctl --user enable --now satur8-daemon
-kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
-qdbus6 org.kde.KWin /KWin reconfigure
+~/.local/bin/satur8 auto on
 ```
+
+By hand that is `systemctl --user enable --now satur8-daemon`, `kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true` and `qdbus6 org.kde.KWin /KWin reconfigure`.
 
 A profile then applies while its window has focus, and the desktop comes back when you switch to another window. Desktop programs match by `--exe` or `--window-class`.
 
@@ -363,6 +360,14 @@ Set or clear saturation now:
 satur8 on 1.75      # turn on at 1.75x (1.0 = unchanged, 0 = greyscale)
 satur8 off          # restore normal color
 satur8 set 2.0      # set an exact value
+```
+
+Turn automatic per-game switching on or off, the way the switch on the app's Status page does:
+
+```sh
+satur8 auto on      # the background service now and at login; on KDE Plasma also the KWin focus script
+satur8 auto off     # the reverse
+satur8 auto status  # say whether it is on
 ```
 
 Inspect the environment and backend:

@@ -602,17 +602,17 @@ EOF
     if has_gamescope_session; then
         echo "  * Per-game switching in Steam Game Mode:"
         if [ "$enable_daemon" != true ]; then
-            echo "      systemctl --user enable --now satur8-daemon"
+            echo "      satur8 auto on"
+            echo "      (the same by hand: systemctl --user enable --now satur8-daemon)"
         fi
         echo "      satur8 games"
         echo "      satur8 profile add NAME 1.5 --steam-game NAME"
     fi
     if kwin_present || ! has_gamescope_session; then
         cat <<EOF
-  * Per-game focus mode on KDE Plasma:
-      systemctl --user enable --now satur8-daemon
-      kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
-      ${qdbus_tool:-qdbus6} org.kde.KWin /KWin reconfigure
+  * Per-game switching on KDE Plasma (\`satur8 auto off\` turns it off again):
+      satur8 auto on
+      (the same by hand: systemctl --user enable --now satur8-daemon; kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true; ${qdbus_tool:-qdbus6} org.kde.KWin /KWin reconfigure)
 EOF
     fi
     case ":$PATH:" in

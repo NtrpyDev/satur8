@@ -39,6 +39,13 @@ The app in Steam Game Mode: its own layout for the Deck's screen, touch and butt
   `eldenring.exe`) shows under its Steam library name ("ELDEN RING") in the
   app when it carries a Steam AppID. Only what is shown changes; the profile
   keeps its name in the file and in the commands.
+- `satur8 auto on|off|status` turns automatic per-game switching on or off
+  with one command, the same way the switch on the app's Status page does:
+  the background service now and at login, and on KDE Plasma also the KWin
+  focus script, with KWin asked to reload over D-Bus by Satur8 itself. In
+  Steam Game Mode it is the service alone. The installer's closing message
+  and the README show this command, with the commands it replaces kept as a
+  by-hand line.
 - "Add game" is one list of your games by name, in both layouts: the
   installed Steam games, with any that is running first and marked. A
   running Steam game is recognized by its Steam AppID and shown under its
