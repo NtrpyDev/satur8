@@ -13,8 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use satur8_backend::{apply_to_outputs, install_signal_handler, select_backend, RestoreGuard};
-use satur8_core::{BackendError, Profile, Profiles, Saturation};
+use satur8_backend::{install_signal_handler, select_backend, RestoreGuard};
+use satur8_core::levels::{desktop_picture, profile_outputs_not_connected, profile_picture};
+use satur8_core::{Backend, BackendError, Levels, Note, Profile, ProfileOutputs, Profiles};
 use zbus::interface;
 
 const SERVICE: &str = "org.satur8.Daemon";
@@ -24,11 +25,7 @@ const MAX_RETRY: Duration = Duration::from_secs(8);
 
 #[derive(Debug, PartialEq)]
 enum FocusAction {
-    Apply {
-        profile: String,
-        saturation: Saturation,
-        outputs: Vec<String>,
-    },
+    Apply(Profile),
     Restore,
     None,
 }
@@ -47,20 +44,57 @@ fn match_focused<'a>(
         .or_else(|| profiles.match_window_class(window_class))
 }
 
+/// The output a profile's picture is limited to: the focused output, when the
+/// profile follows focus (`profile_outputs = "focused"` and no outputs of its
+/// own), the backend can target one output, and the focus source reported it.
+fn limited_output(
+    profiles: &Profiles,
+    profile: &Profile,
+    focused_output: Option<&str>,
+    per_output: bool,
+) -> Option<String> {
+    let follows_focus =
+        profiles.profile_outputs == ProfileOutputs::Focused && profile.outputs.is_empty();
+    (per_output && follows_focus)
+        .then_some(focused_output)
+        .flatten()
+        .map(str::to_string)
+}
+
+/// Whether a reload shows the desktop picture now: only with no profile
+/// applied, and only when the new file resolves to a different desktop than the
+/// old one. An unrelated edit then leaves the screen alone, so a manual
+/// `satur8 set` or the app's live slider value is not wiped by it.
+fn reload_shows_desktop(profile_active: bool, old: &Levels, new: &Levels) -> bool {
+    !profile_active && old != new
+}
+
+/// What the profile already applied, so a repeated report is a no-op and a
+/// move to another output is a change.
+#[derive(Debug, Clone, Copy, Default)]
+struct Current<'a> {
+    profile: Option<&'a str>,
+    output: Option<&'a str>,
+}
+
 fn decide_focus_action(
-    current: Option<&str>,
+    current: Current,
     window_class: &str,
     exe: Option<&str>,
+    focused_output: Option<&str>,
+    per_output: bool,
     profiles: &Profiles,
 ) -> FocusAction {
     match match_focused(profiles, window_class, exe) {
-        Some(profile) if current == Some(profile.name.as_str()) => FocusAction::None,
-        Some(profile) => FocusAction::Apply {
-            profile: profile.name.clone(),
-            saturation: profile.saturation(),
-            outputs: profile.outputs.clone(),
-        },
-        None if current.is_some() => FocusAction::Restore,
+        Some(profile)
+            if current.profile == Some(profile.name.as_str())
+                && current.output
+                    == limited_output(profiles, profile, focused_output, per_output).as_deref() =>
+        {
+            FocusAction::None
+        }
+        Some(profile) => FocusAction::Apply(profile.clone()),
+        None if current.profile.is_some() => FocusAction::Restore,
         None => FocusAction::None,
     }
 }
@@ -76,20 +110,49 @@ enum GamescopeSync {
     NotGamescope,
 }
 
+/// The desktop picture `backend` restores to for `profiles`.
+fn desktop_levels(profiles: &Profiles, backend: &dyn Backend) -> Levels {
+    desktop_picture(profiles, backend.per_output()).levels
+}
+
+/// The notes for a picture, plus the backend's reason when the picture could
+/// not be what the file asks for because the backend shows one value on every
+/// output (an older KWin effect still loaded, for example).
+fn with_backend_reason(mut notes: Vec<Note>, backend: &dyn Backend) -> Vec<Note> {
+    if !notes.is_empty() && !backend.per_output() {
+        if let Some(reason) = backend.per_output_reason() {
+            notes.push(Note::OneValueBecause { reason });
+        }
+    }
+    notes
+}
+
+/// Whether a backend that has just become reachable shows the desktop picture
+/// now: only with no profile applied and a desktop that is not unchanged, so
+/// an unchanged desktop loads nothing (no KWin effect for nothing). gamescope
+/// is left to its own first sync, which already puts the desktop back.
+fn shows_desktop_at_detection(backend: &str, profile_active: bool, desktop: &Levels) -> bool {
+    backend != "gamescope" && !profile_active && !desktop.is_identity()
+}
+
 struct BackendState {
     guard: Option<RestoreGuard>,
     retry_delay: Duration,
     next_retry: Instant,
+    /// A backend was found since the daemon last looked, so the desktop
+    /// picture may need showing.
+    just_detected: bool,
 }
 
 impl BackendState {
-    fn detect(restore_to: Saturation) -> Self {
+    fn detect(profiles: &Profiles) -> Self {
         let mut state = Self {
             guard: None,
             retry_delay: INITIAL_RETRY,
             next_retry: Instant::now(),
+            just_detected: false,
         };
-        state.try_detect(restore_to);
+        state.try_detect(profiles);
         state
     }
 
@@ -101,27 +164,32 @@ impl BackendState {
             guard: None,
             retry_delay: INITIAL_RETRY,
             next_retry: Instant::now() + Duration::from_secs(3600),
+            just_detected: false,
         }
     }
 
     #[cfg(test)]
-    fn with_backend(backend: Box<dyn satur8_core::Backend>, restore_to: Saturation) -> Self {
+    fn with_backend(backend: Box<dyn Backend>, profiles: &Profiles) -> Self {
+        let restore_to = desktop_levels(profiles, backend.as_ref());
         Self {
             guard: Some(RestoreGuard::new(backend, restore_to)),
             retry_delay: INITIAL_RETRY,
             next_retry: Instant::now(),
+            just_detected: false,
         }
     }
 
-    fn try_detect(&mut self, restore_to: Saturation) {
+    fn try_detect(&mut self, profiles: &Profiles) {
         if self.guard.is_some() || Instant::now() < self.next_retry {
             return;
         }
         match select_backend() {
             Ok(backend) => {
                 eprintln!("satur8-daemon: {} backend active", backend.name());
+                let restore_to = desktop_levels(profiles, backend.as_ref());
                 self.guard = Some(RestoreGuard::new(backend, restore_to));
                 self.retry_delay = INITIAL_RETRY;
+                self.just_detected = true;
             }
             Err(error) => {
                 eprintln!("satur8-daemon: backend unavailable; will retry on focus: {error}");
@@ -131,33 +199,70 @@ impl BackendState {
         }
     }
 
-    fn apply(
-        &mut self,
-        saturation: Saturation,
-        outputs: &[String],
-        restore_to: Saturation,
-    ) -> Result<(), BackendError> {
-        self.try_detect(restore_to);
-        let guard = self
-            .guard
-            .as_mut()
-            .ok_or_else(|| BackendError::Unavailable("no backend is currently reachable".into()))?;
-        guard.set_restore_to(restore_to);
-        let result = apply_to_outputs(guard.backend_mut(), outputs, saturation);
-        if result.is_ok() {
-            guard.arm();
+    /// Whether a backend became reachable since the last call, and the desktop
+    /// picture it should show then.
+    fn take_detected(&mut self, profiles: &Profiles) -> Option<(&'static str, Levels)> {
+        if !std::mem::take(&mut self.just_detected) {
+            return None;
         }
-        result
+        let backend = self.guard.as_ref()?.backend();
+        Some((backend.name(), desktop_levels(profiles, backend)))
     }
 
-    fn restore(&mut self, restore_to: Saturation) -> Result<(), BackendError> {
-        self.try_detect(restore_to);
+    /// Whether the active backend can show a different saturation on each
+    /// output; false while no backend is active.
+    fn per_output(&self) -> bool {
+        self.guard
+            .as_ref()
+            .is_some_and(|guard| guard.backend().per_output())
+    }
+
+    /// Show `profile` and remember the desktop to put back. Returns what the
+    /// user should be told about the result, and the output the picture was
+    /// limited to.
+    fn apply_profile(
+        &mut self,
+        profiles: &Profiles,
+        profile: &Profile,
+        focused_output: Option<&str>,
+    ) -> Result<(Vec<Note>, Option<String>), BackendError> {
+        self.try_detect(profiles);
         let guard = self
             .guard
             .as_mut()
             .ok_or_else(|| BackendError::Unavailable("no backend is currently reachable".into()))?;
-        guard.set_restore_to(restore_to);
-        guard.restore_now()
+        let per_output = guard.backend().per_output();
+        let desktop = desktop_picture(profiles, per_output);
+        let picture = profile_picture(profiles, profile, focused_output, per_output);
+        let limited_to = limited_output(profiles, profile, focused_output, per_output);
+        let not_connected = if per_output {
+            profile_outputs_not_connected(profiles, profile, &guard.backend().outputs())
+        } else {
+            Vec::new()
+        };
+        guard.set_restore_to(desktop.levels);
+        guard.backend_mut().apply_levels(&picture.levels)?;
+        guard.arm();
+        let notes = desktop
+            .notes
+            .into_iter()
+            .chain(picture.notes)
+            .chain(not_connected)
+            .collect();
+        Ok((with_backend_reason(notes, guard.backend()), limited_to))
+    }
+
+    /// Put the desktop back. Returns what the user should be told about it.
+    fn restore(&mut self, profiles: &Profiles) -> Result<Vec<Note>, BackendError> {
+        self.try_detect(profiles);
+        let guard = self
+            .guard
+            .as_mut()
+            .ok_or_else(|| BackendError::Unavailable("no backend is currently reachable".into()))?;
+        let desktop = desktop_picture(profiles, guard.backend().per_output());
+        guard.set_restore_to(desktop.levels);
+        guard.restore_now()?;
+        Ok(with_backend_reason(desktop.notes, guard.backend()))
     }
 }
 
@@ -167,18 +272,28 @@ struct Activation {
     class: String,
     /// The pid resolved to its program name when the focus was reported.
     exe: Option<String>,
+    /// The output the focused window is on, when the focus source said.
+    output: Option<String>,
 }
 
 struct Daemon {
     profiles: Profiles,
     backend: Arc<Mutex<BackendState>>,
     current: Option<String>,
+    /// The output the applied profile was limited to, when it was.
+    current_output: Option<String>,
     /// What the focus script last reported: the resolved executable when the
     /// pid could be resolved, otherwise the window class. Read by the GUI.
     last_focused: String,
     /// The last focus `react` saw, from the KWin script or the gamescope
     /// focus thread.
     last_activation: Option<Activation>,
+    /// Notes already logged since the profiles were last loaded, so each is
+    /// logged once per profile and reason.
+    logged_notes: Vec<Note>,
+    /// The desktop picture failed to apply, so the next focus report with no
+    /// profile tries again.
+    desktop_pending: bool,
 }
 
 impl Daemon {
@@ -191,82 +306,128 @@ impl Daemon {
             profiles,
             backend,
             current: None,
+            current_output: None,
             last_focused: String::new(),
             last_activation: None,
+            logged_notes: Vec::new(),
+            desktop_pending: false,
         }
     }
 
     #[cfg(test)]
-    fn with_profiles(profiles: Profiles, backend: Box<dyn satur8_core::Backend>) -> Self {
-        let restore_to = profiles.default_saturation();
+    fn with_profiles(profiles: Profiles, backend: Box<dyn Backend>) -> Self {
+        let state = BackendState::with_backend(backend, &profiles);
         Self {
             profiles,
-            backend: Arc::new(Mutex::new(BackendState::with_backend(backend, restore_to))),
+            backend: Arc::new(Mutex::new(state)),
             current: None,
+            current_output: None,
             last_focused: String::new(),
             last_activation: None,
+            logged_notes: Vec::new(),
+            desktop_pending: false,
         }
     }
 
+    /// Log each note the first time it comes up.
+    fn log_notes(&mut self, notes: Vec<Note>) {
+        for note in notes {
+            if !self.logged_notes.contains(&note) {
+                eprintln!("satur8-daemon: {note}");
+                self.logged_notes.push(note);
+            }
+        }
+    }
+
+    /// A focus report with no output: the KWin script before per-output
+    /// support, and the gamescope focus thread.
     fn react(&mut self, class: &str, pid: u32) {
-        self.backend
-            .lock()
-            .expect("backend state mutex poisoned")
-            .try_detect(self.profiles.default_saturation());
+        self.react_on(class, pid, None);
+    }
+
+    /// A focus report, with the output the focused window is on when the
+    /// focus source knows it. A report for the same window on another output
+    /// re-resolves a profile that follows focus.
+    fn react_on(&mut self, class: &str, pid: u32, output: Option<&str>) {
+        let (per_output, detected) = {
+            let mut backend = self.backend.lock().expect("backend state mutex poisoned");
+            backend.try_detect(&self.profiles);
+            (backend.per_output(), backend.take_detected(&self.profiles))
+        };
+        // A backend reachable for the first time shows the desktop picture,
+        // unless this report applies a profile, which then wins. The picture is
+        // shown below, through the same path as a retry.
+        if let Some((name, desktop)) = detected {
+            if shows_desktop_at_detection(name, self.current.is_some(), &desktop) {
+                self.desktop_pending = true;
+            }
+        }
         let exe = (pid != 0).then(|| satur8_core::resolve_exe(pid)).flatten();
         self.last_focused = exe.clone().unwrap_or_else(|| class.to_string());
         self.last_activation = Some(Activation {
             class: class.to_string(),
             exe: exe.clone(),
+            output: output.map(str::to_string),
         });
+        let current = Current {
+            profile: self.current.as_deref(),
+            output: self.current_output.as_deref(),
+        };
         match decide_focus_action(
-            self.current.as_deref(),
+            current,
             class,
             exe.as_deref(),
+            output,
+            per_output,
             &self.profiles,
         ) {
-            FocusAction::Apply {
-                profile,
-                saturation,
-                outputs,
-            } => {
+            FocusAction::Apply(profile) => {
                 eprintln!(
-                    "satur8-daemon: '{}' -> profile '{profile}' ({:.2})",
+                    "satur8-daemon: '{}' -> profile '{}' ({:.2}){}",
                     exe.as_deref().unwrap_or(class),
-                    saturation.get()
+                    profile.name,
+                    profile.saturation().get(),
+                    output.map(|o| format!(" on {o}")).unwrap_or_default()
                 );
-                let result = self
-                    .backend
-                    .lock()
-                    .expect("backend state mutex poisoned")
-                    .apply(saturation, &outputs, self.profiles.default_saturation());
-                match result {
-                    Ok(()) => self.current = Some(profile),
-                    Err(error) => {
-                        self.current = None;
-                        eprintln!("satur8-daemon: apply failed: {error}");
-                    }
-                }
+                self.show_profile(&profile, output);
             }
             FocusAction::Restore => {
                 eprintln!("satur8-daemon: '{class}' has no profile -> restoring default");
-                let result = self
-                    .backend
-                    .lock()
-                    .expect("backend state mutex poisoned")
-                    .restore(self.profiles.default_saturation());
-                self.current = None;
-                if let Err(error) = result {
-                    eprintln!("satur8-daemon: restore failed: {error}");
-                }
+                self.invalidate_current();
+                self.restore_default();
+            }
+            FocusAction::None if self.current.is_none() && self.desktop_pending => {
+                eprintln!("satur8-daemon: showing the desktop picture");
+                self.restore_default();
             }
             FocusAction::None => {}
+        }
+    }
+
+    /// Apply `profile` for a window on `focused_output`, and remember it.
+    fn show_profile(&mut self, profile: &Profile, focused_output: Option<&str>) {
+        let result = self
+            .backend
+            .lock()
+            .expect("backend state mutex poisoned")
+            .apply_profile(&self.profiles, profile, focused_output);
+        match result {
+            Ok((notes, limited_to)) => {
+                self.current = Some(profile.name.clone());
+                self.current_output = limited_to;
+                self.log_notes(notes);
+            }
+            Err(error) => {
+                self.invalidate_current();
+                eprintln!("satur8-daemon: apply failed: {error}");
+            }
         }
     }
 
     /// Forget which profile is applied, so the next focus applies again.
     fn invalidate_current(&mut self) {
         self.current = None;
+        self.current_output = None;
     }
 
     /// Re-evaluate focus from scratch when a focus source (re)connects: apply
@@ -279,20 +440,51 @@ impl Daemon {
         if self.current.is_some() {
             return;
         }
+        self.restore_default();
+    }
+
+    /// At start: show the desktop picture once when a backend is reachable, no
+    /// profile is applied, and the desktop is not unchanged. A failure is tried
+    /// again at the next focus report with no profile.
+    fn show_desktop_at_start(&mut self) {
+        let detected = self
+            .backend
+            .lock()
+            .expect("backend state mutex poisoned")
+            .take_detected(&self.profiles);
+        let Some((name, desktop)) = detected else {
+            return;
+        };
+        if shows_desktop_at_detection(name, self.current.is_some(), &desktop) {
+            eprintln!("satur8-daemon: showing the desktop picture");
+            self.restore_default();
+        }
+    }
+
+    /// Put the desktop back, logging a failure and any notes. A failure is
+    /// tried again at the next focus report with no profile.
+    fn restore_default(&mut self) {
         let result = self
             .backend
             .lock()
             .expect("backend state mutex poisoned")
-            .restore(self.profiles.default_saturation());
-        if let Err(error) = result {
-            eprintln!("satur8-daemon: restore failed: {error}");
+            .restore(&self.profiles);
+        match result {
+            Ok(notes) => {
+                self.desktop_pending = false;
+                self.log_notes(notes);
+            }
+            Err(error) => {
+                self.desktop_pending = true;
+                eprintln!("satur8-daemon: restore failed: {error}");
+            }
         }
     }
 
     /// The active backend's name, detecting one first if none is active yet.
     fn backend_name(&mut self) -> Option<&'static str> {
         let mut backend = self.backend.lock().expect("backend state mutex poisoned");
-        backend.try_detect(self.profiles.default_saturation());
+        backend.try_detect(&self.profiles);
         let name = backend.guard.as_ref().map(|guard| guard.backend().name());
         name
     }
@@ -333,8 +525,10 @@ impl Daemon {
     /// now. Nothing is applied before any focus was seen or while no backend is
     /// active.
     fn replace_profiles(&mut self, profiles: Profiles) {
-        self.profiles = profiles;
-        let backend_active = match self
+        let old_profiles = std::mem::replace(&mut self.profiles, profiles);
+        self.logged_notes.clear();
+        // The desktop picture before and after, for the active backend.
+        let desktops = match self
             .backend
             .lock()
             .expect("backend state mutex poisoned")
@@ -342,35 +536,36 @@ impl Daemon {
             .as_mut()
         {
             Some(guard) => {
-                guard.set_restore_to(self.profiles.default_saturation());
-                true
+                let old = desktop_levels(&old_profiles, guard.backend());
+                let new = desktop_levels(&self.profiles, guard.backend());
+                guard.set_restore_to(new.clone());
+                Some((old, new))
             }
-            None => false,
+            None => None,
         };
         eprintln!(
             "satur8-daemon: reloaded, {} profile(s)",
             self.profiles.profiles.len()
         );
-        if !backend_active {
-            return;
-        }
-        let Some((class, exe)) = self
-            .last_activation
-            .as_ref()
-            .map(|activation| (activation.class.clone(), activation.exe.clone()))
-        else {
+        let Some((old_desktop, new_desktop)) = desktops else {
             return;
         };
-
-        let target = match_focused(&self.profiles, &class, exe.as_deref()).map(|profile| {
+        let activation = self.last_activation.as_ref().map(|activation| {
             (
-                profile.name.clone(),
-                profile.saturation(),
-                profile.outputs.clone(),
+                activation.class.clone(),
+                activation.exe.clone(),
+                activation.output.clone(),
             )
         });
+        let (class, exe, output) = activation.clone().unwrap_or_default();
+        let target = activation
+            .as_ref()
+            .and_then(|(class, exe, _)| match_focused(&self.profiles, class, exe.as_deref()))
+            .cloned();
         match (target, self.current.clone()) {
-            (Some((name, saturation, outputs)), current) => {
+            (Some(profile), current) => {
+                let name = profile.name.clone();
+                let saturation = profile.saturation();
                 if current.as_deref() == Some(name.as_str()) {
                     eprintln!(
                         "satur8-daemon: reapplied active profile '{name}' ({:.2})",
@@ -383,18 +578,7 @@ impl Daemon {
                         saturation.get()
                     );
                 }
-                let result = self
-                    .backend
-                    .lock()
-                    .expect("backend state mutex poisoned")
-                    .apply(saturation, &outputs, self.profiles.default_saturation());
-                match result {
-                    Ok(()) => self.current = Some(name),
-                    Err(error) => {
-                        self.current = None;
-                        eprintln!("satur8-daemon: apply failed: {error}");
-                    }
-                }
+                self.show_profile(&profile, output.as_deref());
             }
             (None, Some(current)) => {
                 let still_enabled = self
@@ -411,22 +595,23 @@ impl Daemon {
                         "satur8-daemon: active profile '{current}' is disabled or missing -> restoring default"
                     );
                 }
-                let result = self
-                    .backend
-                    .lock()
-                    .expect("backend state mutex poisoned")
-                    .restore(self.profiles.default_saturation());
-                self.current = None;
-                if let Err(error) = result {
-                    eprintln!("satur8-daemon: restore failed: {error}");
+                self.invalidate_current();
+                self.restore_default();
+            }
+            (None, None) => {
+                if reload_shows_desktop(false, &old_desktop, &new_desktop) {
+                    eprintln!("satur8-daemon: the desktop settings changed -> showing them");
+                    self.restore_default();
                 }
             }
-            (None, None) => {}
         }
     }
 }
 
-#[interface(name = "org.satur8.Daemon")]
+// Focus reports are handled in the order they arrive (`spawn = false`): zbus
+// otherwise gives each call its own task, and two quick reports could then be
+// applied in the wrong order, leaving the profile of the window that lost focus.
+#[interface(name = "org.satur8.Daemon", spawn = false)]
 impl Daemon {
     /// Called on every window activation. Kept for older focus scripts that
     /// cannot report a pid; matching then falls back to the window class.
@@ -441,6 +626,26 @@ impl Daemon {
         self.react(&class, pid.trim().parse::<u32>().unwrap_or(0));
     }
 
+    /// Window activation with the output the window is on, also sent again
+    /// when the focused window moves to another output. `output` is empty
+    /// when the script knows none. Returns true, so a focus script can tell
+    /// this daemon understands the call: an older daemon answers with an error.
+    fn window_activated_on(
+        &mut self,
+        class: String,
+        _caption: String,
+        pid: String,
+        output: String,
+    ) -> bool {
+        let output = output.trim();
+        self.react_on(
+            &class,
+            pid.trim().parse::<u32>().unwrap_or(0),
+            (!output.is_empty()).then_some(output),
+        );
+        true
+    }
+
     /// Re-read the profiles file from disk.
     fn reload(&mut self) {
         self.reload_profiles();
@@ -450,6 +655,13 @@ impl Daemon {
     #[zbus(property)]
     fn active_profile(&self) -> String {
         self.current.clone().unwrap_or_default()
+    }
+
+    /// The output the applied profile is limited to (empty string when it
+    /// changes every output, or none is applied).
+    #[zbus(property)]
+    fn active_output(&self) -> String {
+        self.current_output.clone().unwrap_or_default()
     }
 
     /// The window the focus script last reported (executable or window class;
@@ -502,10 +714,9 @@ fn profiles_path() -> Option<PathBuf> {
 
 fn main() -> Result<()> {
     let profiles = load_profiles(&Profiles::default());
-    let backend = Arc::new(Mutex::new(BackendState::detect(
-        profiles.default_saturation(),
-    )));
-    let daemon = Daemon::new(profiles, backend.clone());
+    let backend = Arc::new(Mutex::new(BackendState::detect(&profiles)));
+    let mut daemon = Daemon::new(profiles, backend.clone());
+    daemon.show_desktop_at_start();
     let running = Arc::new(AtomicBool::new(true));
     let connection = zbus::blocking::connection::Builder::session()
         .context("connecting to the session bus")?
@@ -559,7 +770,7 @@ mod tests {
     use std::sync::atomic::AtomicBool;
 
     use satur8_backend::all_outputs;
-    use satur8_core::{Backend, CostNote, MatchRule, Output, Profile};
+    use satur8_core::{CostNote, MatchRule, Output, OutputConfig, ProfileOutputs, Saturation};
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     enum Call {
@@ -624,6 +835,7 @@ mod tests {
                 },
                 outputs: vec![],
             }],
+            ..Profiles::default()
         }
     }
 
@@ -661,6 +873,7 @@ mod tests {
                 },
                 outputs: vec![],
             }],
+            ..Profiles::default()
         }
     }
 
@@ -736,16 +949,22 @@ mod tests {
         );
     }
 
+    /// Rewritten for per-output support: a backend that shows one saturation
+    /// on every output gets the profile once, on every output, instead of one
+    /// call per named output it would ignore anyway.
     #[test]
-    fn applies_profile_to_each_configured_output() {
+    fn a_profile_naming_outputs_changes_every_output_on_a_uniform_backend() {
         let (mut daemon, calls, _) = setup();
         daemon.profiles.profiles[0].outputs = vec!["DP-1".into(), "HDMI-A-1".into()];
 
         daemon.react("game.class", 0);
 
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
         assert_eq!(
-            *calls.lock().unwrap(),
-            [Call::Apply("DP-1", 1.5), Call::Apply("HDMI-A-1", 1.5)]
+            daemon.logged_notes,
+            [Note::ProfileChangesEveryOutput {
+                profile: "game".into()
+            }]
         );
     }
 
@@ -854,8 +1073,10 @@ mod tests {
             calls: calls.clone(),
             fail_apply: Arc::new(AtomicBool::new(false)),
         };
-        state.lock().unwrap().guard =
-            Some(RestoreGuard::new(Box::new(backend), Saturation::IDENTITY));
+        state.lock().unwrap().guard = Some(RestoreGuard::new(
+            Box::new(backend),
+            Levels::uniform(Saturation::IDENTITY),
+        ));
         assert_eq!(daemon.sync_gamescope(&class, pid), GamescopeSync::Done);
         assert_eq!(daemon.current.as_deref(), Some("cs2"));
         assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 2.0)]);
@@ -952,5 +1173,667 @@ mod tests {
 
         assert_eq!(daemon.current, None);
         assert!(state.lock().unwrap().guard.is_none());
+    }
+
+    /// A backend that can show different outputs at once, recording every
+    /// picture it is given and every reset.
+    struct PerOutputFake {
+        pictures: Arc<Mutex<Vec<Shown>>>,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Shown {
+        Levels(Levels),
+        Reset,
+    }
+
+    impl Backend for PerOutputFake {
+        fn name(&self) -> &'static str {
+            "per-output fake"
+        }
+
+        fn cost(&self) -> CostNote {
+            CostNote::ZeroCost
+        }
+
+        fn outputs(&self) -> Vec<Output> {
+            ["DP-1", "HDMI-A-1"]
+                .map(|id| Output {
+                    id: id.into(),
+                    human_name: id.into(),
+                })
+                .to_vec()
+        }
+
+        fn apply(&mut self, _output: &Output, _saturation: Saturation) -> Result<(), BackendError> {
+            panic!("a per-output backend is driven through apply_levels");
+        }
+
+        fn reset(&mut self, _output: &Output) -> Result<(), BackendError> {
+            self.pictures.lock().unwrap().push(Shown::Reset);
+            Ok(())
+        }
+
+        fn per_output(&self) -> bool {
+            true
+        }
+
+        fn apply_levels(&mut self, levels: &Levels) -> Result<(), BackendError> {
+            self.pictures
+                .lock()
+                .unwrap()
+                .push(Shown::Levels(levels.clone()));
+            Ok(())
+        }
+    }
+
+    fn per_output_setup(profiles: Profiles) -> (Daemon, Arc<Mutex<Vec<Shown>>>) {
+        let pictures = Arc::new(Mutex::new(Vec::new()));
+        let backend = PerOutputFake {
+            pictures: pictures.clone(),
+        };
+        (Daemon::with_profiles(profiles, Box::new(backend)), pictures)
+    }
+
+    fn shown(base: f32, outputs: &[(&str, f32)]) -> Shown {
+        Shown::Levels(Levels::new(
+            Saturation::new(base),
+            outputs
+                .iter()
+                .map(|(name, value)| (name.to_string(), Saturation::new(*value))),
+        ))
+    }
+
+    #[test]
+    fn a_profile_with_fixed_outputs_changes_only_those() {
+        let mut profiles = profiles();
+        profiles.profiles[0].outputs = vec!["HDMI-A-1".into()];
+        let (mut daemon, pictures) = per_output_setup(profiles);
+
+        daemon.react("game.class", 0);
+        daemon.react("desktop", 0);
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [shown(1.0, &[("HDMI-A-1", 1.5)]), Shown::Reset]
+        );
+    }
+
+    #[test]
+    fn the_all_keyword_changes_every_output() {
+        let mut profiles = profiles();
+        profiles.profiles[0].outputs = vec!["all".into(), "HDMI-A-1".into()];
+        let (mut daemon, pictures) = per_output_setup(profiles);
+
+        daemon.react("game.class", 0);
+
+        assert_eq!(*pictures.lock().unwrap(), [shown(1.5, &[])]);
+    }
+
+    #[test]
+    fn focused_with_no_output_reported_changes_every_output_and_says_so() {
+        let mut profiles = profiles();
+        profiles.profile_outputs = ProfileOutputs::Focused;
+        let (mut daemon, pictures) = per_output_setup(profiles);
+
+        daemon.react("game.class", 0);
+        daemon.react("game.class", 0);
+
+        assert_eq!(*pictures.lock().unwrap(), [shown(1.5, &[])]);
+        assert_eq!(
+            daemon.logged_notes,
+            [Note::FocusedOutputUnknown {
+                profile: "game".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn leaving_the_game_restores_each_outputs_own_default() {
+        let mut profiles = profiles();
+        profiles.outputs.insert(
+            "HDMI-A-1".into(),
+            OutputConfig {
+                default_saturation: Some(0.85),
+            },
+        );
+        let (mut daemon, pictures) = per_output_setup(profiles);
+
+        daemon.react("game.class", 0);
+        daemon.react("desktop", 0);
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [shown(1.5, &[]), shown(1.0, &[("HDMI-A-1", 0.85)])]
+        );
+    }
+
+    #[test]
+    fn a_reload_while_the_game_is_focused_applies_its_new_outputs() {
+        let (mut daemon, pictures) = per_output_setup(profiles());
+        daemon.react("game.class", 0);
+
+        let mut updated = daemon.profiles.clone();
+        updated.profiles[0].outputs = vec!["DP-1".into()];
+        daemon.replace_profiles(updated);
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [shown(1.5, &[]), shown(1.0, &[("DP-1", 1.5)])]
+        );
+        assert_eq!(daemon.current.as_deref(), Some("game"));
+    }
+
+    #[test]
+    fn per_output_defaults_on_a_uniform_backend_are_reported_once() {
+        let mut profiles = profiles();
+        profiles.outputs.insert(
+            "HDMI-A-1".into(),
+            OutputConfig {
+                default_saturation: Some(0.85),
+            },
+        );
+        let (mut daemon, calls, _) = setup_with(profiles);
+
+        daemon.react("game.class", 0);
+        daemon.react("desktop", 0);
+        daemon.react("game.class", 0);
+
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [
+                Call::Apply("all", 1.5),
+                Call::Reset,
+                Call::Apply("all", 1.5)
+            ]
+        );
+        assert_eq!(daemon.logged_notes, [Note::PerOutputDefaultsNotUsed]);
+    }
+
+    #[test]
+    fn a_named_output_that_is_not_connected_is_skipped_and_reported() {
+        let mut profiles = profiles();
+        profiles.profiles[0].outputs = vec!["DP-9".into(), "HDMI-A-1".into()];
+        let (mut daemon, pictures) = per_output_setup(profiles);
+
+        daemon.react("game.class", 0);
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [shown(1.0, &[("DP-9", 1.5), ("HDMI-A-1", 1.5)])]
+        );
+        assert_eq!(
+            daemon.logged_notes,
+            [Note::OutputNotConnected {
+                profile: "game".into(),
+                output: "DP-9".into()
+            }]
+        );
+    }
+
+    fn following_focus() -> Profiles {
+        Profiles {
+            profile_outputs: ProfileOutputs::Focused,
+            ..profiles()
+        }
+    }
+
+    #[test]
+    fn a_profile_that_follows_focus_changes_only_the_games_output() {
+        let (mut daemon, pictures) = per_output_setup(following_focus());
+
+        assert!(daemon.window_activated_on(
+            "game.class".into(),
+            "Game".into(),
+            "0".into(),
+            "HDMI-A-1".into()
+        ));
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [shown(1.0, &[("HDMI-A-1", 1.5)])]
+        );
+        assert_eq!(daemon.active_output(), "HDMI-A-1");
+        assert!(daemon.logged_notes.is_empty());
+    }
+
+    #[test]
+    fn moving_the_game_to_another_output_moves_the_change() {
+        let (mut daemon, pictures) = per_output_setup(following_focus());
+
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+        daemon.react_on("game.class", 0, Some("DP-1"));
+        // The same report again changes nothing.
+        daemon.react_on("game.class", 0, Some("DP-1"));
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [
+                shown(1.0, &[("HDMI-A-1", 1.5)]),
+                shown(1.0, &[("DP-1", 1.5)])
+            ]
+        );
+        assert_eq!(daemon.active_output(), "DP-1");
+    }
+
+    #[test]
+    fn a_profile_with_outputs_of_its_own_ignores_moves() {
+        let mut profiles = following_focus();
+        profiles.profiles[0].outputs = vec!["DP-1".into()];
+        let (mut daemon, pictures) = per_output_setup(profiles);
+
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+        daemon.react_on("game.class", 0, Some("DP-1"));
+
+        assert_eq!(*pictures.lock().unwrap(), [shown(1.0, &[("DP-1", 1.5)])]);
+        assert_eq!(daemon.active_output(), "");
+    }
+
+    /// An older focus script still calls WindowActivatedPid: no output is
+    /// known, so a profile that follows focus changes every output and the
+    /// user is told why.
+    #[test]
+    fn the_old_method_still_works_without_an_output() {
+        let (mut daemon, pictures) = per_output_setup(following_focus());
+
+        daemon.window_activated_pid("game.class".into(), "Game".into(), "0".into());
+
+        assert_eq!(*pictures.lock().unwrap(), [shown(1.5, &[])]);
+        assert_eq!(
+            daemon.logged_notes,
+            [Note::FocusedOutputUnknown {
+                profile: "game".into()
+            }]
+        );
+        assert_eq!(daemon.current.as_deref(), Some("game"));
+    }
+
+    #[test]
+    fn an_output_reported_on_a_uniform_backend_changes_every_output_once() {
+        let (mut daemon, calls, _) = setup_with(following_focus());
+
+        daemon.window_activated_on(
+            "game.class".into(),
+            "".into(),
+            "0".into(),
+            "HDMI-A-1".into(),
+        );
+        daemon.window_activated_on("game.class".into(), "".into(), "0".into(), "DP-1".into());
+
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
+        assert_eq!(
+            daemon.logged_notes,
+            [Note::ProfileChangesEveryOutput {
+                profile: "game".into()
+            }]
+        );
+        assert_eq!(daemon.active_output(), "");
+    }
+
+    #[test]
+    fn a_reload_keeps_the_games_output() {
+        let (mut daemon, pictures) = per_output_setup(following_focus());
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+
+        let mut updated = daemon.profiles.clone();
+        updated.profiles[0].saturation = 2.0;
+        daemon.replace_profiles(updated);
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [
+                shown(1.0, &[("HDMI-A-1", 1.5)]),
+                shown(1.0, &[("HDMI-A-1", 2.0)])
+            ]
+        );
+    }
+
+    #[test]
+    fn a_reload_shows_the_desktop_only_when_it_changed_and_no_profile_is_on() {
+        let one = Levels::uniform(Saturation::IDENTITY);
+        let other = Levels::new(
+            Saturation::IDENTITY,
+            [("HDMI-A-1".to_string(), Saturation::new(0.85))],
+        );
+        for (profile_active, old, new, expected) in [
+            (false, &one, &other, true),
+            (false, &other, &one, true),
+            (false, &one, &one, false),
+            (true, &one, &other, false),
+            (true, &one, &one, false),
+        ] {
+            assert_eq!(
+                reload_shows_desktop(profile_active, old, new),
+                expected,
+                "profile active {profile_active}, {old:?} -> {new:?}"
+            );
+        }
+    }
+
+    fn with_output_default(mut profiles: Profiles, name: &str, value: f32) -> Profiles {
+        profiles.outputs.insert(
+            name.into(),
+            OutputConfig {
+                default_saturation: Some(value),
+            },
+        );
+        profiles
+    }
+
+    #[test]
+    fn a_new_output_default_is_shown_when_no_profile_is_on() {
+        let (mut daemon, pictures) = per_output_setup(profiles());
+        daemon.react("desktop", 0);
+
+        daemon.replace_profiles(with_output_default(profiles(), "HDMI-A-1", 0.85));
+        // The same file again shows nothing new.
+        daemon.replace_profiles(with_output_default(profiles(), "HDMI-A-1", 0.85));
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [shown(1.0, &[("HDMI-A-1", 0.85)])]
+        );
+    }
+
+    #[test]
+    fn unsetting_an_output_default_puts_it_back_to_the_base() {
+        let (mut daemon, pictures) =
+            per_output_setup(with_output_default(profiles(), "HDMI-A-1", 0.85));
+        daemon.react("desktop", 0);
+
+        daemon.replace_profiles(profiles());
+
+        assert_eq!(*pictures.lock().unwrap(), [Shown::Reset]);
+    }
+
+    /// v0.4.1 applied nothing here until a profile was applied and restored;
+    /// only the desktop app's slider changed the screen, by itself.
+    #[test]
+    fn a_new_top_level_default_is_shown_when_no_profile_is_on() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("desktop", 0);
+
+        let mut updated = profiles();
+        updated.default_saturation = 1.25;
+        daemon.replace_profiles(updated);
+
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.25)]);
+    }
+
+    #[test]
+    fn an_unrelated_edit_with_no_profile_on_changes_nothing() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("desktop", 0);
+
+        let mut updated = profiles();
+        updated.profiles[0].saturation = 2.0;
+        updated.profiles.push(Profile {
+            name: "other".into(),
+            enabled: true,
+            saturation: 1.8,
+            match_rule: MatchRule {
+                exe: Some("other-game".into()),
+                ..MatchRule::default()
+            },
+            outputs: vec![],
+        });
+        daemon.replace_profiles(updated);
+
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    /// With a profile on, the new desktop is the restore target; the profile's
+    /// own picture is applied again on reload, as always, and its untouched
+    /// outputs show the new desktop value at once, because the resolver builds
+    /// a limited profile picture on top of the desktop picture.
+    #[test]
+    fn a_desktop_change_with_a_profile_on_shows_on_its_untouched_outputs() {
+        let base = Profiles {
+            profile_outputs: ProfileOutputs::Focused,
+            ..profiles()
+        };
+        let (mut daemon, pictures) = per_output_setup(base.clone());
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+
+        daemon.replace_profiles(with_output_default(base, "DP-1", 0.9));
+        daemon.react_on("desktop", 0, Some("DP-1"));
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [
+                shown(1.0, &[("HDMI-A-1", 1.5)]),
+                shown(1.0, &[("DP-1", 0.9), ("HDMI-A-1", 1.5)]),
+                shown(1.0, &[("DP-1", 0.9)]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_desktop_change_is_tried_again_at_the_next_focus() {
+        let (mut daemon, calls, fail_apply) = setup();
+        daemon.react("desktop", 0);
+
+        fail_apply.store(true, Ordering::Release);
+        let mut updated = profiles();
+        updated.default_saturation = 1.25;
+        daemon.replace_profiles(updated);
+        fail_apply.store(false, Ordering::Release);
+        daemon.react("desktop", 0);
+        // Applied once it worked; nothing more after that.
+        daemon.react("desktop", 0);
+
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.25), Call::Apply("all", 1.25)]
+        );
+    }
+
+    #[test]
+    fn a_new_backend_shows_the_desktop_only_when_it_is_changed_and_no_profile_is_on() {
+        let unchanged = Levels::uniform(Saturation::IDENTITY);
+        let boosted = Levels::uniform(Saturation::new(1.5));
+        let one_output = Levels::new(
+            Saturation::IDENTITY,
+            [("HDMI-A-1".to_string(), Saturation::new(0.85))],
+        );
+        for (backend, profile_active, desktop, expected) in [
+            ("kwin", false, &boosted, true),
+            ("kwin", false, &one_output, true),
+            ("kwin", false, &unchanged, false),
+            ("kwin", true, &boosted, false),
+            ("gamescope", false, &boosted, false),
+        ] {
+            assert_eq!(
+                shows_desktop_at_detection(backend, profile_active, desktop),
+                expected,
+                "{backend}, profile active {profile_active}, {desktop:?}"
+            );
+        }
+    }
+
+    /// A backend that has just been found, as at daemon start.
+    fn fresh(daemon: &Daemon) {
+        daemon.backend.lock().unwrap().just_detected = true;
+    }
+
+    #[test]
+    fn a_changed_default_is_shown_when_the_daemon_starts() {
+        let mut profiles = profiles();
+        profiles.default_saturation = 1.5;
+        let (mut daemon, calls, _) = setup_with(profiles);
+        fresh(&daemon);
+
+        daemon.show_desktop_at_start();
+        // Once only.
+        daemon.show_desktop_at_start();
+
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
+    }
+
+    #[test]
+    fn the_default_file_applies_nothing_when_the_daemon_starts() {
+        let (mut daemon, calls, _) = setup();
+        fresh(&daemon);
+
+        daemon.show_desktop_at_start();
+        daemon.react("desktop", 0);
+
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_output_default_is_shown_when_the_daemon_starts() {
+        let (mut daemon, pictures) =
+            per_output_setup(with_output_default(profiles(), "HDMI-A-1", 0.85));
+        fresh(&daemon);
+
+        daemon.show_desktop_at_start();
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [shown(1.0, &[("HDMI-A-1", 0.85)])]
+        );
+    }
+
+    #[test]
+    fn a_backend_found_at_a_focus_report_with_no_profile_shows_the_desktop() {
+        let mut profiles = profiles();
+        profiles.default_saturation = 1.5;
+        let (mut daemon, calls, _) = setup_with(profiles);
+        fresh(&daemon);
+
+        daemon.react("desktop", 0);
+        daemon.react("desktop", 0);
+
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
+    }
+
+    #[test]
+    fn a_profile_at_the_first_focus_report_wins_over_the_desktop() {
+        let mut profiles = profiles();
+        profiles.default_saturation = 1.25;
+        let (mut daemon, calls, _) = setup_with(profiles);
+        fresh(&daemon);
+
+        daemon.react("game.class", 0);
+        daemon.react("desktop", 0);
+
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Apply("all", 1.25)]
+        );
+    }
+
+    #[test]
+    fn a_failed_desktop_at_start_is_tried_again_at_the_next_focus() {
+        let mut profiles = profiles();
+        profiles.default_saturation = 1.5;
+        let (mut daemon, calls, fail_apply) = setup_with(profiles);
+        fresh(&daemon);
+
+        fail_apply.store(true, Ordering::Release);
+        daemon.show_desktop_at_start();
+        fail_apply.store(false, Ordering::Release);
+        daemon.react("desktop", 0);
+        daemon.react("desktop", 0);
+
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Apply("all", 1.5)]
+        );
+    }
+
+    #[test]
+    fn gamescope_keeps_its_own_first_sync() {
+        let mut profiles = steam_profiles();
+        profiles.default_saturation = 1.25;
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let backend = FakeBackend {
+            name: "gamescope",
+            calls: calls.clone(),
+            fail_apply: Arc::new(AtomicBool::new(false)),
+        };
+        let mut daemon = Daemon::with_profiles(profiles, Box::new(backend));
+        fresh(&daemon);
+
+        daemon.show_desktop_at_start();
+        assert!(calls.lock().unwrap().is_empty());
+
+        let (class, pid) = game_mode_focus(769);
+        assert_eq!(daemon.sync_gamescope(&class, pid), GamescopeSync::Done);
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.25)]);
+    }
+
+    /// A uniform backend that, like KWin with an older effect still loaded,
+    /// says why it shows one value on every output.
+    struct WithReason(FakeBackend);
+
+    impl Backend for WithReason {
+        fn name(&self) -> &'static str {
+            "kwin"
+        }
+        fn cost(&self) -> CostNote {
+            CostNote::CompositorShaderPass
+        }
+        fn outputs(&self) -> Vec<Output> {
+            self.0.outputs()
+        }
+        fn apply(&mut self, output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+            self.0.apply(output, saturation)
+        }
+        fn reset(&mut self, output: &Output) -> Result<(), BackendError> {
+            self.0.reset(output)
+        }
+        fn per_output_reason(&self) -> Option<String> {
+            Some("KDE is still running the Satur8 effect from before the upgrade.".into())
+        }
+    }
+
+    #[test]
+    fn the_fallback_note_carries_the_backends_reason_once() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let backend = WithReason(FakeBackend {
+            name: "kwin",
+            calls: calls.clone(),
+            fail_apply: Arc::new(AtomicBool::new(false)),
+        });
+        let mut daemon = Daemon::with_profiles(following_focus(), Box::new(backend));
+
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+        daemon.react_on("desktop", 0, None);
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+
+        assert_eq!(
+            daemon.logged_notes,
+            [
+                Note::ProfileChangesEveryOutput {
+                    profile: "game".into()
+                },
+                Note::OneValueBecause {
+                    reason: "KDE is still running the Satur8 effect from before the upgrade."
+                        .into()
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn no_reason_is_logged_when_nothing_asks_for_per_output() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let backend = WithReason(FakeBackend {
+            name: "kwin",
+            calls: calls.clone(),
+            fail_apply: Arc::new(AtomicBool::new(false)),
+        });
+        let mut daemon = Daemon::with_profiles(profiles(), Box::new(backend));
+
+        daemon.react("game.class", 0);
+        daemon.react("desktop", 0);
+
+        assert!(daemon.logged_notes.is_empty());
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Reset]
+        );
     }
 }

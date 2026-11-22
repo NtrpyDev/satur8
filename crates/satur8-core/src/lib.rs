@@ -7,13 +7,15 @@
 
 pub mod ctm;
 pub mod env;
+pub mod levels;
 pub mod proc;
 pub mod profile;
 pub mod steam;
 
 pub use env::{Desktop, Environment, Gpu, SessionType};
+pub use levels::{Levels, Note, Picture};
 pub use proc::{resolve_exe, running_apps, RunningApp};
-pub use profile::{MatchRule, Profile, Profiles};
+pub use profile::{MatchRule, OutputConfig, Profile, ProfileOutputs, Profiles};
 
 /// Rec.709 luma weights. Saturation is defined as a blend toward this luma.
 pub const LUMA_R: f32 = 0.2126;
@@ -97,6 +99,14 @@ pub struct Output {
     pub human_name: String,
 }
 
+/// Sentinel used when an operation targets every output.
+pub fn all_outputs() -> Output {
+    Output {
+        id: levels::ALL_OUTPUTS.into(),
+        human_name: "All outputs".into(),
+    }
+}
+
 /// Honest per-frame cost of a backend, surfaced to the user instead of hidden.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CostNote {
@@ -129,12 +139,46 @@ pub trait Backend: Send {
     fn supports_linear_light(&self) -> bool {
         false
     }
+
+    /// Whether different outputs can show different saturation at once.
+    /// Default: no, one saturation on every output.
+    fn per_output(&self) -> bool {
+        false
+    }
+
+    /// What every output shows right now, when the backend can tell.
+    /// Default: unknown.
+    fn current_levels(&self) -> Option<Levels> {
+        None
+    }
+
+    /// Why this backend shows one saturation on every output right now and
+    /// what to do about it, when that is something the user can change.
+    /// Default: none, it simply works that way.
+    fn per_output_reason(&self) -> Option<String> {
+        None
+    }
+
+    /// Show `levels`. The default handles a picture that is the same on every
+    /// output through [`apply`](Backend::apply) on [`all_outputs`], and refuses
+    /// any other.
+    fn apply_levels(&mut self, levels: &Levels) -> Result<(), BackendError> {
+        match levels.uniform_value() {
+            Some(saturation) => self.apply(&all_outputs(), saturation),
+            None => Err(BackendError::Unsupported(format!(
+                "the {} backend shows one saturation on every output",
+                self.name()
+            ))),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub enum BackendError {
     Unavailable(String),
     Apply(String),
+    /// The backend cannot do what was asked, such as different outputs at once.
+    Unsupported(String),
 }
 
 impl std::fmt::Display for BackendError {
@@ -142,6 +186,7 @@ impl std::fmt::Display for BackendError {
         match self {
             BackendError::Unavailable(m) => write!(f, "backend unavailable: {m}"),
             BackendError::Apply(m) => write!(f, "failed to apply: {m}"),
+            BackendError::Unsupported(m) => write!(f, "not supported: {m}"),
         }
     }
 }
@@ -154,6 +199,54 @@ mod tests {
 
     fn approx(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-5
+    }
+
+    /// A backend that only implements the required methods, recording `apply`.
+    struct Uniform {
+        applied: Vec<(String, f32)>,
+    }
+
+    impl Backend for Uniform {
+        fn name(&self) -> &'static str {
+            "uniform"
+        }
+        fn cost(&self) -> CostNote {
+            CostNote::ZeroCost
+        }
+        fn outputs(&self) -> Vec<Output> {
+            vec![all_outputs()]
+        }
+        fn apply(&mut self, output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+            self.applied.push((output.id.clone(), saturation.get()));
+            Ok(())
+        }
+        fn reset(&mut self, _output: &Output) -> Result<(), BackendError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn default_apply_levels_sends_a_uniform_picture_to_every_output() {
+        let mut backend = Uniform { applied: vec![] };
+        assert!(!backend.per_output());
+        backend
+            .apply_levels(&Levels::uniform(Saturation::new(1.5)))
+            .unwrap();
+        assert_eq!(backend.applied, [("all".to_string(), 1.5)]);
+    }
+
+    #[test]
+    fn default_apply_levels_refuses_different_outputs() {
+        let mut backend = Uniform { applied: vec![] };
+        let levels = Levels::new(
+            Saturation::IDENTITY,
+            [("DP-1".to_string(), Saturation::new(1.5))],
+        );
+        assert!(matches!(
+            backend.apply_levels(&levels),
+            Err(BackendError::Unsupported(_))
+        ));
+        assert!(backend.applied.is_empty());
     }
 
     #[test]

@@ -14,7 +14,7 @@ use ksni::menu::{MenuItem, StandardItem};
 use ksni::Tray;
 
 use satur8_backend::{all_outputs, install_signal_handler, select_backend, RestoreGuard};
-use satur8_core::{BackendError, Saturation};
+use satur8_core::{BackendError, Levels, Saturation};
 
 /// Work items handed from menu callbacks to the apply thread, so the menu never
 /// blocks on D-Bus.
@@ -49,7 +49,7 @@ fn spawn_apply_thread() -> Sender<Action> {
     let (tx, rx) = mpsc::channel::<Action>();
     thread::spawn(move || {
         let mut guard = select_backend()
-            .map(|backend| RestoreGuard::inactive(backend, Saturation::IDENTITY))
+            .map(|backend| RestoreGuard::inactive(backend, Levels::uniform(Saturation::IDENTITY)))
             .map_err(|error| {
                 eprintln!("satur8-tray: {error}");
                 error
@@ -211,7 +211,8 @@ mod tests {
     fn quit_restores_saturation_before_exiting() {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let backend = Box::new(FakeBackend(calls.clone()));
-        let mut guard = satur8_backend::RestoreGuard::inactive(backend, Saturation::IDENTITY);
+        let mut guard =
+            satur8_backend::RestoreGuard::inactive(backend, Levels::uniform(Saturation::IDENTITY));
 
         assert!(!handle_action(&mut guard, Action::Set(1.5)).unwrap());
         assert!(handle_action(&mut guard, Action::Quit).unwrap());

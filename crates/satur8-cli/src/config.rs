@@ -125,6 +125,7 @@ mod tests {
                 },
                 outputs: vec!["DP-1".into()],
             }],
+            ..Profiles::default()
         };
 
         let toml = profiles.to_toml().unwrap();
