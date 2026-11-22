@@ -13,7 +13,7 @@
 # 3. --check-effect against the real kwin_wayland on this machine: accepts an
 #    effect for the running KWin and rejects one for another version.
 # 4. --uninstall in a fake home turns the KDE focus script off and has KWin
-#    reread its settings while the script is still installed. Every command
+#    unload it while the script is still installed. Every command
 #    that could reach the real session is a stub that only logs.
 #
 # Scratch files go under $TMPDIR (default /tmp).
@@ -209,9 +209,9 @@ env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$u/home" PATH="$
     "$INSTALLER" --uninstall >"$u/out" 2>&1
 touch "$calls"
 off_line="$(grep -n '^kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled --type bool false$' "$calls" | cut -d: -f1 || true)"
-reconfigure_line="$(grep -n '^qdbus6 org.kde.KWin /KWin reconfigure installed=yes$' "$calls" | cut -d: -f1 || true)"
-if [ -z "$off_line" ] || [ -z "$reconfigure_line" ] || [ "$off_line" -gt "$reconfigure_line" ]; then
-    echo "FAIL: uninstall did not turn the focus script off, then reconfigure KWin with it installed" >&2
+unload_line="$(grep -n '^qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript satur8-focus installed=yes$' "$calls" | cut -d: -f1 || true)"
+if [ -z "$off_line" ] || [ -z "$unload_line" ] || [ "$off_line" -gt "$unload_line" ]; then
+    echo "FAIL: uninstall did not turn the focus script off, then unload it while still installed" >&2
     cat "$calls" >&2
     fails=$((fails + 1))
 elif [ -e "$script_dir" ]; then

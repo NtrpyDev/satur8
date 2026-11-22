@@ -681,16 +681,19 @@ uninstall_all() {
         "$qdbus_tool" org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect satur8 \
             >/dev/null 2>&1 || true
     fi
-    # Turn the KDE focus script off and have KWin reread its settings while
-    # the script is still installed: KWin unloads a disabled script only when
-    # it still finds its package (kwin 6.8.3 scripting.cpp:711-735), so after
-    # the files are gone it would keep running until the next login.
+    # Turn the KDE focus script off for later logins, and stop the running
+    # copy now. KWin's reconfigure only starts a 200 ms timer (kwin 6.8.3
+    # workspace.cpp:1032-1034), and by then the script's files are gone, so
+    # KWin no longer finds its package to unload it (scripting.cpp:711-735);
+    # unloadScript stops it at once by name (scripting.cpp:783).
     if command -v kwriteconfig6 >/dev/null 2>&1; then
         kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled --type bool false \
             >/dev/null 2>&1 || true
-        if [ -n "$qdbus_tool" ]; then
-            "$qdbus_tool" org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
-        fi
+    fi
+    if [ -n "$qdbus_tool" ]; then
+        "$qdbus_tool" org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript satur8-focus \
+            >/dev/null 2>&1 || true
+        "$qdbus_tool" org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
     fi
     # The app's entry in the Steam library belongs to Steam: only Steam's own
     # interface removes it. Take our artwork off it and say so, while the
