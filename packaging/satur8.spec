@@ -7,7 +7,7 @@
 # the crates vendored instead, because Koji builds offline.
 
 Name:           satur8
-Version:        0.3.6
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Per-game digital vibrance for Linux
 
