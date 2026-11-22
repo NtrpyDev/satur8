@@ -3,6 +3,13 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## Unreleased
+
+- The desktop app shows its own icon in the title bar and taskbar instead of a
+  generic one. It now sets its app ID to satur8, so the desktop matches the
+  window to satur8.desktop, and every install path (the tarball's installer,
+  the Arch package and the Fedora package) installs the icon that entry names.
+
 ## v0.4.1 - 2026-11-22
 
 Release binaries that run on older systems, a working KWin effect on systems without build tools, including the Steam Deck's Desktop Mode, and GNOME 51 support.
