@@ -77,6 +77,28 @@ struct Current<'a> {
     output: Option<&'a str>,
 }
 
+/// The window class to match a focused window by. A Proton game's window
+/// class is already `steam_app_<AppID>`, which a profile with that AppID
+/// matches. A native Steam game's window class is its own (`cs2`), so a
+/// profile that knows only the game's AppID, as one added from the app's list
+/// of installed games does, would never match it. When neither the
+/// executable nor the class finds a profile and the window's process carries
+/// a Steam AppID that a profile has, this is `steam_app_<AppID>`.
+fn class_to_match(
+    profiles: &Profiles,
+    window_class: &str,
+    exe: Option<&str>,
+    app_id: Option<u32>,
+) -> Option<String> {
+    if match_focused(profiles, window_class, exe).is_some() {
+        return None;
+    }
+    let app_id = app_id?;
+    profiles
+        .match_steam_app_id(app_id)
+        .map(|_| format!("steam_app_{app_id}"))
+}
+
 fn decide_focus_action(
     current: Current,
     window_class: &str,
@@ -364,6 +386,11 @@ impl Daemon {
         }
         let exe = (pid != 0).then(|| satur8_core::resolve_exe(pid)).flatten();
         self.last_focused = exe.clone().unwrap_or_else(|| class.to_string());
+        let by_app_id = (pid != 0)
+            .then(|| satur8_core::proc::steam_app_id_of(pid))
+            .flatten()
+            .and_then(|app_id| class_to_match(&self.profiles, class, exe.as_deref(), Some(app_id)));
+        let class = by_app_id.as_deref().unwrap_or(class);
         self.last_activation = Some(Activation {
             class: class.to_string(),
             exe: exe.clone(),
@@ -882,6 +909,41 @@ mod tests {
             app_id: Some(app_id),
             pid: None,
         })
+    }
+
+    /// CS2 on a desktop: a native Steam game whose window class is `cs2`,
+    /// with a profile added from the app's list, which knows only AppID 730.
+    #[test]
+    fn a_native_steam_game_matches_a_profile_that_knows_only_its_app_id() {
+        let by_app_id = steam_profiles();
+        assert_eq!(
+            class_to_match(&by_app_id, "cs2", Some("cs2"), Some(730)).as_deref(),
+            Some("steam_app_730")
+        );
+        assert!(match_focused(&by_app_id, "steam_app_730", Some("cs2")).is_some());
+        // No AppID on the process, or one no profile has: nothing changes.
+        assert_eq!(class_to_match(&by_app_id, "cs2", Some("cs2"), None), None);
+        assert_eq!(
+            class_to_match(&by_app_id, "cs2", Some("cs2"), Some(570)),
+            None
+        );
+        // A profile that already matches by executable or class wins.
+        let mut by_exe = steam_profiles();
+        by_exe.profiles.insert(
+            0,
+            Profile {
+                name: "by exe".into(),
+                enabled: true,
+                saturation: 1.2,
+                match_rule: MatchRule {
+                    exe: Some("cs2".into()),
+                    window_class: None,
+                    steam_app_id: None,
+                },
+                outputs: vec![],
+            },
+        );
+        assert_eq!(class_to_match(&by_exe, "cs2", Some("cs2"), Some(730)), None);
     }
 
     #[test]
