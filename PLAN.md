@@ -4,9 +4,10 @@
 > boost, applied **outside** the game process so it cannot trip anti-cheat,
 > with as close to **zero CPU cost** as the hardware allows.
 
-Status: v0.3.6 is the current release. KDE Plasma Wayland, GNOME Wayland,
-Hyprland, NVIDIA X11 NV-CONTROL, gamescope-native, and the nested gamescope
-fallback are verified. DRM CTM remains implemented with a passing read-only
+Status: v0.4.0 is the current release. KDE Plasma Wayland, GNOME Wayland,
+Hyprland, NVIDIA X11 NV-CONTROL, automatic per-game switching in Steam Game Mode
+(verified on a Steam Deck OLED with SteamOS 3.9.5 and gamescope 3.16.30.1),
+gamescope-native, and the nested gamescope fallback are verified. DRM CTM remains implemented with a passing read-only
 probe, while runtime apply/off verification is deferred. The KWin effect is
 built against KWin 6.8, and since v0.3.4 `satur8 repair` rebuilds it at login
 when a KWin update rejects the installed copy. Distribution is a Linux x86_64
@@ -181,14 +182,70 @@ unreliable on the proprietary driver). NVIDIA on Wayland is covered natively by
 the compositor shader paths (B1 KWin / B4 GNOME / Hyprland's screen-shader hook),
 *not* gamescope.
 
-### B6. gamescope backends - **native on a running gamescope, nested as the last resort**
-The gamescope crate (`crates/backends/gamescope`) has two run strategies. Both
-are launch-only: they wrap one game launch with `satur8 run --via ...` and
-restore when it exits, and neither is part of the automatic backend selector
-(`select_backend` in `crates/satur8-backend/src/lib.rs`), so `satur8 on`/`set`,
-the GUI, and the daemon never pick them.
+### B6. gamescope backends - **Steam Game Mode, a running gamescope, and nested as the last resort**
+The gamescope crate (`crates/backends/gamescope`) has one automatic backend and
+two run strategies. The Game Mode backend is part of the automatic backend
+selector (`select_backend` in `crates/satur8-backend/src/lib.rs`), so
+`satur8 on`/`set`/`off`, the daemon, and the GUI (not tested on a Deck) use it
+in Steam Game Mode. The two run strategies are launch-only: they wrap one game
+launch with `satur8 run --via ...` and restore when it exits, and the selector
+never picks them.
 
-**gamescope-native (running compositor, the SteamOS/Bazzite path).**
+**Steam Game Mode (automatic, the SteamOS path; `look.rs`, `session.rs`,
+`backend.rs`).** Since v0.4.0. Verified on a Steam Deck OLED with SteamOS 3.9.5
+and gamescope 3.16.30.1.
+
+- *Color.* Satur8 sets gamescope's look table, the `GAMESCOPE_COLOR_LOOK_G22`
+  root property, to the path of a 17x17x17 `.cube` file built from the shared
+  saturation math. gamescope applies the look to each app's gamma-encoded sRGB
+  values before its own color pipeline, so Steam's vibrancy (gamut wideness),
+  color temperature and night mode still run on top of it, and Satur8 never
+  writes those properties. The G22 look only changes SDR content; HDR content
+  is untouched (by gamescope's source; not tested).
+- *One file per value.* gamescope reads the file only when the property
+  changes, so a file is never rewritten in place. Each saturation gets its own
+  file, named by its value (`look-g22-s1750.cube` for 1.75), written once under
+  a temporary name and renamed into `~/.local/state/satur8/gamescope/` (or
+  `$XDG_STATE_HOME/satur8/gamescope/`). Applying a value writes its file if it
+  is missing and sets the property to its path; older Satur8 files are then
+  deleted. At 1.0 the property is removed. A look something else had set is
+  remembered in memory and put back on reset.
+- *Server 0's root only.* The look is one global inside gamescope, whichever
+  Xwayland root set it, and deleting it on any root clears it. Satur8 reads and
+  writes only on the root of gamescope's first Xwayland server.
+- *The probe.* `DISPLAY` is not trusted, because the session scripts unset it
+  for systemd units and an SSH shell has none. Satur8 tries `$DISPLAY`, then
+  each `/tmp/.X11-unix/X<n>` socket, and accepts the root that has
+  `GAMESCOPE_PID`, `GAMESCOPE_XWAYLAND_SERVER_ID` = 0, and
+  `GAMESCOPE_FOCUSED_APP_GFX`. gamescope writes that last one only with
+  `--steam`, so a gamescope nested in a desktop does not count. The backend
+  keeps no X connection between calls: each apply or reset connects, and
+  re-probes when the remembered display is no longer gamescope's.
+- *Focus.* A thread in the daemon waits for `PropertyNotify` on that root for
+  `GAMESCOPE_FOCUSED_APP_GFX` (the AppID of the window being drawn; 769 is the
+  Steam UI), `GAMESCOPE_FOCUSED_WINDOW` and `GAMESCOPE_FOCUSABLE_WINDOWS`. It
+  reports the focus to the daemon as window class `steam_app_<AppID>`, which
+  profiles already match by `steam_app_id`, with the pid from the `[window,
+  appid, pid]` triplet of the focused window, which resolves a Proton game to
+  its Windows executable. No polling while connected. On every new connection
+  it resyncs: it applies the focused game's profile, or puts the default back,
+  which also clears a table a crashed daemon left behind. When the connection
+  drops it re-probes. It acts only while the selected backend is gamescope's,
+  so it never competes with a desktop's focus script.
+
+**Bazzite.** Bazzite's Game Mode (the `bazzite-deck` images) runs the
+OpenGamingCollective gamescope fork, packaged by Terra as `terra-gamescope`
+3.17.0-ogc1 in stable 45.20261117.1, started by OpenGamingCollective's
+`gamescope-session-plus@.service` with `--steam` and two Xwayland servers.
+The fork's color, look and focus code matches upstream 3.17.0, so the look
+table path applies unchanged. Desktop Mode is KDE Plasma 6.8 or GNOME 51 and
+uses the KWin or GNOME backend as on any Fedora desktop. Checked from source and
+in a container only: the v0.4.0 installer and background service ran against
+Bazzite's own gamescope, run headless with `--steam`, which applied and removed
+the look table as focus moved. Satur8 has not been run on a Bazzite device, so
+Bazzite Game Mode is Implemented, not Verified.
+
+**gamescope-native (running compositor, launch option).**
 `satur8 run --via gamescope-native -- %command%` is for a session that already
 runs inside gamescope, such as Steam Game Mode, where Steam launch options run
 with `DISPLAY` pointed at gamescope's embedded Xwayland. It connects to that X
@@ -200,7 +257,11 @@ root-window atoms, holding `GAMESCOPE_COLOR_MANAGEMENT_DISABLE` at 0 while they
 are set. It saves the previous values of all three atoms first and restores them
 when the game exits (or rolls them back if applying fails). No second
 compositor is launched; the saturation goes through gamescope's own color
-pipeline.
+pipeline. The override replaces gamescope's computed color tables, so Steam's
+vibrancy and color temperature do not apply while it is set, and it wins over a
+Satur8 look table until the game ends (measured on a Steam Deck). It is
+unchanged in v0.4.0; in Game Mode the automatic backend above is the
+recommended path, and a game should use one or the other, not both.
 
 **Nested gamescope (the last resort).** gamescope is a nested compositor that
 runs under *any* session and supports `--reshade-effect <path>` applied to its
@@ -222,13 +283,20 @@ GNOME Wayland       -> B4 (Shell extension shader, any GPU incl. NVIDIA)
 X11 + AMD/Intel/nv  -> B2 (DRM CTM)
 X11 + NVIDIA prop   -> B5 (NV-CONTROL Digital Vibrance)
 Bare KMS            -> B2 (DRM CTM, we own DRM master)
+Steam Game Mode     -> B6 Game Mode (gamescope look table)
 Inside gamescope    -> B6 native (`satur8 run --via gamescope-native`, opt-in)
 Sway / other wlr    -> B6 nested (`satur8 run --via gamescope`, opt-in)
                        [no native hook; upstream CTM = TODO]
 ```
-The first six rows are picked automatically. The two gamescope rows are not:
-the user chooses them per launch with `--via`, because both wrap a single game
-launch instead of applying and resetting on demand.
+The first seven rows are picked automatically. `select_backend` tries them in
+this order: KWin, GNOME, Hyprland, NV-CONTROL, then stops with a `satur8 repair`
+hint if KWin is running but rejects the effect, then Steam Game Mode, then DRM
+CTM. Game Mode comes after every desktop backend, so desktops behave as before,
+and before DRM CTM, which needs the DRM master that gamescope holds as the
+session compositor. `satur8 doctor` and `satur8 status` show the Game Mode
+report only when no desktop backend comes first. The last two gamescope rows are not
+automatic: the user chooses them per launch with `--via`, because both wrap a
+single game launch instead of applying and resetting on demand.
 
 ### Who can actually run this (the "all Linux users" answer)
 Three independent axes; only the compositor one is hard:
@@ -251,12 +319,15 @@ Three independent axes; only the compositor one is hard:
 | KDE Plasma Wayland (any GPU) | KWin effect | native, ~free |
 | GNOME Wayland (any GPU) | Shell extension | native, ~free |
 | Hyprland (any GPU) | CTM / screen shader | native, ~free |
+| Steam Game Mode (gamescope `--steam`) | gamescope look table | native, in gamescope's own pipeline |
 | Sway / minimal wlroots | gamescope | fallback, small cost |
 
 **The guarantee:** every major environment gets a *native* backend - gamescope is
 no longer the answer for GNOME or NVIDIA-on-Wayland (those use compositor
-shaders). gamescope survives only as the last-resort floor for niche Wayland
-compositors that expose no hook at all, and even they get working per-game
+shaders). Steam Game Mode, where gamescope is the session compositor, gets its
+own native path through gamescope's look table. Nested gamescope survives only
+as the last-resort floor for niche Wayland compositors that expose no hook at
+all, and even they get working per-game
 satur8. The one genuine gap: desktop-wide *always-on* satur8 on those niche
 compositors (per-game still works via gamescope).
 
@@ -275,6 +346,8 @@ exactly the CPU waste we want to avoid. Two better paths, both near-zero CPU:
    - KDE: subscribe to KWin's active-window-changed D-Bus signal. React only on
      change. Zero idle cost.
    - Hyprland: read its IPC event socket (blocking read, wakes on event).
+   - Steam Game Mode: wait for `PropertyNotify` on gamescope's root for its
+     focused-app properties (blocking wait, wakes on change).
    - Generic X11: `XRandR`/X events.
    - Last resort generic: a slow (e.g. 2s) process check, clearly labeled as the
      fallback for environments with no event source.
@@ -337,7 +410,7 @@ satur8/
 │     ├─ hyprland/         B3  Hyprland CTM protocol / screen shader
 │     ├─ gnome-shell/      B4  GNOME Shell extension (GLSL, any GPU)
 │     ├─ nv-control/       B5  NVIDIA X11 Digital Vibrance (NV-CONTROL)
-│     └─ gamescope/        B6  last-resort launch wrapper + reshade effect
+│     └─ gamescope/        B6  Steam Game Mode look table, launch wrappers, reshade effect
 └─ assets/
    └─ kwin-effect/         the GLSL saturation effect package (shipped)
 ```
