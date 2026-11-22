@@ -261,5 +261,6 @@ container, not on a Bazzite device):
   tarball carries `fedora45-6.8.3`, built in Fedora 45's packages, and the
   installer picked it in the Bazzite container. After a KWin update the effect
   stays off until a newer Satur8 release includes that KWin version.
-- The GNOME images run GNOME 51, which the GNOME Shell extension's metadata does
-  not list yet.
+- The GNOME images run GNOME 51. From v0.4.1, the GNOME Shell
+  extension lists GNOME 51; it was checked on GNOME Shell 51.1 headless in a
+  Fedora 45 container, not on a Bazzite device.

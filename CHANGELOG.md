@@ -5,7 +5,7 @@ GitHub release notes for that tag.
 
 ## v0.4.1 - 2026-11-22
 
-Release binaries that run on older systems, and a working KWin effect on systems without build tools, including the Steam Deck's Desktop Mode.
+Release binaries that run on older systems, a working KWin effect on systems without build tools, including the Steam Deck's Desktop Mode, and GNOME 51 support.
 
 - The release tarball's four programs are now built on Ubuntu 22.04 and need
   glibc 2.35 or newer. Before, the desktop app needed glibc 2.43 and the other
@@ -39,6 +39,23 @@ Release binaries that run on older systems, and a working KWin effect on systems
   per user; with a stand-in KWin one patch newer it skipped the effect with the reason
   and installed everything else. Game Mode against Bazzite's gamescope passed
   again in the container with this build.
+- The GNOME Shell extension now lists GNOME 51, which Fedora 45 and Bazzite's
+  GNOME images run. GNOME 51 removed the shader API the extension used
+  (`Clutter.ShaderEffect`'s `shader-type` property, `set_shader_source()` and
+  the `get_static_shader_source` hook), so on GNOME 51 the effect is a Cogl
+  snippet, the way GNOME Shell 51's own effects are built. GNOME 45 to 50 keep
+  the old code.
+- Fix `satur8 set 0` on GNOME: after another saturation was applied, setting 0
+  left the previous saturation on screen instead of turning it gray. The
+  extension now always passes the saturation to the shader as a float. Seen
+  with the earlier extension on GNOME Shell 50.6 headless in a container; not
+  checked on a real desktop.
+- Checked on GNOME Shell 51.1 headless in a Fedora 45 container with software
+  rendering: the extension loads with no errors or warnings, and
+  `satur8 on 2.0`, `satur8 set 0` and `satur8 off` changed screenshots exactly
+  as the saturation math predicts. The same steps passed on GNOME Shell 50.6
+  (Fedora 44) and 49.10 (Fedora 43) containers. Not run on a GNOME 51 desktop
+  or a Bazzite device.
 - The installer copies the whole effect set to
   `~/.local/share/satur8/kwin-effects`, and `satur8 repair` installs the
   matching effect from there before it tries a local build, with no network.

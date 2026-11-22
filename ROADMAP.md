@@ -197,8 +197,13 @@ and Bazzite is Fedora-based (the live COPR work carries over).
         Still open, and waiting on the owner's decision: whether Satur8 may
         fetch an effect for a newer KWin when the user asks for it with a
         command. Nothing for that is built.
-  - [ ] GNOME images: add GNOME 51 to the Shell extension once it is tested on
-        GNOME 51.
+  - [x] GNOME images: add GNOME 51 to the Shell extension. Checked on GNOME
+        Shell 51.1 headless in a Fedora 45 container with software rendering,
+        not on a Bazzite device or a GNOME 51 desktop. GNOME 51 removed the
+        shader API the extension used, so on GNOME 51 the effect uses a Cogl
+        snippet instead. Screenshots at 2.0, 0 and off matched the saturation
+        math pixel for pixel, and the same steps passed on GNOME Shell 50.6
+        and 49.10.
   - [ ] Fedora 45 COPR package: the build target was added on 2026-11-22.
         Still open: test layering it on Bazzite with `rpm-ostree` and decide
         whether to document that.

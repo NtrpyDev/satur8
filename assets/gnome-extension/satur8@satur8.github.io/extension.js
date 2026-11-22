@@ -12,6 +12,7 @@
 
 import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
+import Cogl from 'gi://Cogl';
 import Gio from 'gi://Gio';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -45,23 +46,76 @@ void main() {
 // every Clutter version, so this works on GNOME 45 through 50.
 const CLUTTER_FRAGMENT_SHADER = 1;
 
-const Satur8Effect = GObject.registerClass(
-class Satur8Effect extends Clutter.ShaderEffect {
-    _init(saturation) {
-        super._init({shader_type: CLUTTER_FRAGMENT_SHADER});
-        this.set_shader_source(SHADER);
-        this.setSaturation(saturation);
-    }
+// GNOME 51 (mutter 51) removed ShaderEffect's GLSL source API: the
+// `shader-type` property, set_shader_source() and the get_static_shader_source
+// vfunc are gone, and an effect returns a Cogl.Snippet from get_static_snippet
+// instead. GJS refuses to register a class that defines a vfunc its parent
+// lacks, so only the class for this Clutter's API is registered.
+// new_with_snippet() exists only alongside the snippet API.
+const HAS_SNIPPET_API =
+    typeof Clutter.ShaderEffect.new_with_snippet === 'function';
 
-    setSaturation(saturation) {
-        this.set_uniform_value('tex', 0);
-        this.set_uniform_value('satur8', parseFloat(saturation));
-    }
+// SHADER as a snippet: the same uniforms and body, replacing the fragment
+// stage the way GNOME Shell 51's own effects do. `tex` is left at its default,
+// texture unit 0, which holds the effect's offscreen texture.
+const SNIPPET_DECLARATIONS = `
+uniform sampler2D tex;
+uniform float satur8;`;
+const SNIPPET_CODE = `
+vec4 c = texture2D(tex, cogl_tex_coord_in[0].st);
+float luma = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+cogl_color_out = vec4(clamp(mix(vec3(luma), c.rgb, satur8), 0.0, 1.0), c.a);`;
 
-    vfunc_get_static_shader_source() {
-        return SHADER;
-    }
-});
+// `satur8` is a float uniform, so it is always passed as a float GValue. GJS
+// turns a whole JS number such as 0 or 2 into an int GValue, and ShaderEffect
+// then sets an int uniform: on GNOME 50.6 and 51.1 (headless, software
+// rendering) SetSaturation(0) after another value left the old saturation on
+// screen. `tex` is a sampler, which takes an int, so it stays a plain number.
+function floatValue(number) {
+    const value = new GObject.Value();
+    value.init(GObject.TYPE_FLOAT);
+    value.set_float(number);
+    return value;
+}
+
+const Satur8Effect = HAS_SNIPPET_API
+    ? GObject.registerClass(
+        class Satur8Effect extends Clutter.ShaderEffect {
+            _init(saturation) {
+                super._init();
+                this.setSaturation(saturation);
+            }
+
+            setSaturation(saturation) {
+                this.set_uniform_value(
+                    'satur8', floatValue(parseFloat(saturation)));
+            }
+
+            vfunc_get_static_snippet() {
+                const snippet = Cogl.Snippet.new(
+                    Cogl.SnippetHook.FRAGMENT, SNIPPET_DECLARATIONS, null);
+                snippet.set_replace(SNIPPET_CODE);
+                return snippet;
+            }
+        })
+    : GObject.registerClass(
+        class Satur8Effect extends Clutter.ShaderEffect {
+            _init(saturation) {
+                super._init({shader_type: CLUTTER_FRAGMENT_SHADER});
+                this.set_shader_source(SHADER);
+                this.setSaturation(saturation);
+            }
+
+            setSaturation(saturation) {
+                this.set_uniform_value('tex', 0);
+                this.set_uniform_value(
+                    'satur8', floatValue(parseFloat(saturation)));
+            }
+
+            vfunc_get_static_shader_source() {
+                return SHADER;
+            }
+        });
 
 export default class Satur8Extension extends Extension {
     enable() {
