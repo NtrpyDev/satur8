@@ -11,7 +11,8 @@ mod run;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use satur8_backend::{all_outputs, select_backend};
-use satur8_core::{CostNote, Environment, Saturation};
+use satur8_core::{CostNote, Environment, Gpu, Saturation};
+use satur8_gamescope::session::{self, ColorState, Focus, Look, X11Root};
 use satur8_kwin::KwinBackend;
 
 #[derive(Parser)]
@@ -224,6 +225,14 @@ fn cmd_off() -> Result<()> {
 }
 
 fn cmd_status() -> Result<()> {
+    if let Some((display, root)) = session::find_session() {
+        println!("satur8 status");
+        for line in gamescope_lines(&display, &root) {
+            println!("{line}");
+        }
+        return Ok(());
+    }
+
     let envr = Environment::detect();
     println!("environment:");
     println!("  session:  {}", envr.session);
@@ -273,6 +282,14 @@ fn cmd_repair() -> Result<()> {
 }
 
 fn cmd_doctor() -> Result<()> {
+    if let Some((display, root)) = session::find_session() {
+        println!("satur8 doctor");
+        for line in gamescope_lines(&display, &root) {
+            println!("{line}");
+        }
+        return print_profiles_summary();
+    }
+
     let envr = Environment::detect();
     println!("satur8 doctor");
     println!("  session type : {}", envr.session);
@@ -348,11 +365,109 @@ fn cmd_doctor() -> Result<()> {
         Err(e) => println!("  DRM CTM: not available ({e})"),
     }
 
-    let profiles = config::load_profiles().unwrap_or_default();
     println!();
+    print_profiles_summary()
+}
+
+fn print_profiles_summary() -> Result<()> {
+    let profiles = config::load_profiles().unwrap_or_default();
     println!("  profiles file: {}", config::profiles_path()?.display());
     println!("  profiles loaded: {}", profiles.profiles.len());
     Ok(())
+}
+
+/// The Game Mode report for the gamescope session on `display`.
+fn gamescope_lines(display: &str, root: &X11Root) -> Vec<String> {
+    let gpu = Environment::detect().gpu;
+    let read = || -> Result<(ColorState, Focus)> {
+        Ok((session::read_color_state(root)?, session::read_focus(root)?))
+    };
+    match read() {
+        Ok((state, focus)) => gamescope_report(display, gpu, &state, &focus, daemon_running()),
+        Err(error) => vec![
+            format!("  session type : Steam Game Mode (gamescope on {display})"),
+            format!("  [!!] couldn't read gamescope's state: {error:#}"),
+        ],
+    }
+}
+
+/// Whether the focus daemon owns its bus name; `None` if the bus is unreachable.
+fn daemon_running() -> Option<bool> {
+    let conn = zbus::blocking::Connection::session().ok()?;
+    let proxy = zbus::blocking::Proxy::new(
+        &conn,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+    )
+    .ok()?;
+    proxy.call("NameHasOwner", &("org.satur8.Daemon",)).ok()
+}
+
+/// The `satur8 doctor` / `satur8 status` lines for Steam Game Mode.
+fn gamescope_report(
+    display: &str,
+    gpu: Gpu,
+    state: &ColorState,
+    focus: &Focus,
+    daemon_running: Option<bool>,
+) -> Vec<String> {
+    let pid = state
+        .pid
+        .map_or_else(|| "unknown".to_string(), |pid| pid.to_string());
+    let reachable = if state.color_management_disabled {
+        format!(
+            "  [!!] gamescope reachable (pid {pid}), color management off: \
+             Satur8 tables have no effect until it is on"
+        )
+    } else {
+        format!("  [ok] gamescope reachable (pid {pid}), color management on")
+    };
+    let table = match &state.look {
+        Look::None => "  [ok] Satur8 table: not loaded".to_string(),
+        Look::Satur8(saturation) => {
+            format!(
+                "  [ok] Satur8 table: loaded, saturation {:.2}",
+                saturation.get()
+            )
+        }
+        Look::Foreign(path) => format!("  [ok] Satur8 table: set by something else: {path}"),
+    };
+    let focused = match focus.app_id {
+        Some(app_id) => format!("  [ok] focused app: {app_id}"),
+        None => "  [ok] focused app: none".to_string(),
+    };
+    let service = match daemon_running {
+        Some(true) => "  [ok] background service: running".to_string(),
+        Some(false) => {
+            "  [..] background service: off (systemctl --user enable --now satur8-daemon)"
+                .to_string()
+        }
+        None => "  [..] background service: unknown (session bus unreachable)".to_string(),
+    };
+    let vibrancy = state
+        .sdr_gamut_wideness
+        .map_or_else(|| "default".to_string(), |value| format!("{value:.2}"));
+    let white_point = state
+        .virtual_white
+        .map_or_else(|| "default".to_string(), |(x, y)| format!("{x:.4} {y:.4}"));
+    let night_mode = match state.night_mode {
+        Some((amount, _, _)) if amount > 0.0 => format!("on (amount {amount:.2})"),
+        _ => "off".to_string(),
+    };
+    vec![
+        format!("  session type : Steam Game Mode (gamescope on {display})"),
+        format!("  gpu          : {gpu}"),
+        "  preferred    : gamescope".to_string(),
+        reachable,
+        table,
+        focused,
+        service,
+        format!(
+            "  Steam settings (left alone): vibrancy {vibrancy}, white point {white_point}, \
+             night mode {night_mode}"
+        ),
+    ]
 }
 
 fn cost_suffix(cost: CostNote) -> &'static str {
@@ -453,5 +568,94 @@ mod tests {
         assert!(!active);
         assert_eq!(backend.set_calls, vec![false]);
         assert_eq!(backend.linear_at_apply, Some(false));
+    }
+
+    /// Steam's values as read on the Deck, 2026-11-21.
+    fn deck_state(look: Look) -> ColorState {
+        ColorState {
+            pid: Some(6366),
+            color_management_disabled: false,
+            look,
+            sdr_gamut_wideness: Some(f32::from_bits(1056964608)),
+            virtual_white: Some((f32::from_bits(1050682510), f32::from_bits(1051232957))),
+            night_mode: None,
+        }
+    }
+
+    fn home() -> Focus {
+        Focus {
+            app_id: Some(769),
+            pid: Some(6788),
+        }
+    }
+
+    #[test]
+    fn game_mode_report_matches_the_design() {
+        let lines = gamescope_report(":0", Gpu::Amd, &deck_state(Look::None), &home(), Some(true));
+        assert_eq!(
+            lines,
+            [
+                "  session type : Steam Game Mode (gamescope on :0)",
+                "  gpu          : AMD",
+                "  preferred    : gamescope",
+                "  [ok] gamescope reachable (pid 6366), color management on",
+                "  [ok] Satur8 table: not loaded",
+                "  [ok] focused app: 769",
+                "  [ok] background service: running",
+                "  Steam settings (left alone): vibrancy 0.50, white point 0.3128 0.3292, \
+                 night mode off",
+            ]
+        );
+    }
+
+    #[test]
+    fn game_mode_report_names_the_loaded_table() {
+        let ours = deck_state(Look::Satur8(Saturation::new(1.75)));
+        let lines = gamescope_report(":0", Gpu::Amd, &ours, &home(), Some(true));
+        assert_eq!(lines[4], "  [ok] Satur8 table: loaded, saturation 1.75");
+
+        let foreign = deck_state(Look::Foreign("/home/deck/vivid.cube".into()));
+        let lines = gamescope_report(":0", Gpu::Amd, &foreign, &home(), Some(true));
+        assert_eq!(
+            lines[4],
+            "  [ok] Satur8 table: set by something else: /home/deck/vivid.cube"
+        );
+    }
+
+    #[test]
+    fn game_mode_report_says_how_to_start_the_service() {
+        let lines = gamescope_report(
+            ":0",
+            Gpu::Amd,
+            &deck_state(Look::None),
+            &Focus::default(),
+            Some(false),
+        );
+        assert_eq!(lines[5], "  [ok] focused app: none");
+        assert_eq!(
+            lines[6],
+            "  [..] background service: off (systemctl --user enable --now satur8-daemon)"
+        );
+        let lines = gamescope_report(":0", Gpu::Amd, &deck_state(Look::None), &home(), None);
+        assert_eq!(
+            lines[6],
+            "  [..] background service: unknown (session bus unreachable)"
+        );
+    }
+
+    #[test]
+    fn game_mode_report_flags_disabled_color_management_and_night_mode() {
+        let mut state = deck_state(Look::None);
+        state.color_management_disabled = true;
+        state.night_mode = Some((0.4, 0.1, 0.9));
+        state.sdr_gamut_wideness = None;
+        state.virtual_white = None;
+        let lines = gamescope_report(":0", Gpu::Amd, &state, &home(), Some(true));
+        assert!(lines[3].starts_with("  [!!] gamescope reachable (pid 6366), color management off"));
+        assert_eq!(
+            lines[7],
+            "  Steam settings (left alone): vibrancy default, white point default, \
+             night mode on (amount 0.40)"
+        );
     }
 }
