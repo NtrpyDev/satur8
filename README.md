@@ -83,6 +83,15 @@ If you clone the source repository instead, the same installer builds and instal
 
 On a Steam Deck, see [Steam Deck](#steam-deck).
 
+### Bazzite
+
+Satur8 has not been run on a Bazzite device. Use the release tarball above without `--system`: the installer writes only to your home folder, which Bazzite keeps across updates, and it needs no root. `--system` is refused on Bazzite and other image-based systems.
+
+- Steam Game Mode (the `bazzite-deck` images) uses the same gamescope color and focus features as the Steam Deck. Satur8's Game Mode code was exercised against Bazzite's own gamescope build (3.17.0-ogc1, in Bazzite stable 45.20261117.1) in a container, not on a Bazzite device. Setup is the same as on the [Steam Deck](#steam-deck).
+- KDE Plasma Desktop Mode uses the KWin effect bundled in the tarball when it matches your KWin version. Bazzite has no build tools for rebuilding it, so after a KWin update the effect stays off until you install a Satur8 release built for that KWin.
+- The GNOME images run GNOME 51, which the Satur8 GNOME Shell extension does not list yet.
+- The Fedora COPR package is not built for Fedora 45, which current Bazzite is based on.
+
 ## Quick start
 
 Start the focus daemon:
@@ -194,7 +203,7 @@ This turns the service off, runs `satur8 off`, and removes the commands, the ser
 - HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged.
 - An external display.
 - The desktop app (`satur8-gui`) on the Deck, and the Deck's Desktop Mode.
-- Bazzite and other systems that run a gamescope session.
+- A Bazzite device (see [Bazzite](#bazzite)) and other systems that run a gamescope session.
 - gamescope versions other than 3.16.30.1.
 
 ## How it works
@@ -225,6 +234,7 @@ Satur8 chooses the best available backend for your session. Zero per-frame cost 
 | Hyprland | `hyprctl` shader backend | One compositor pass | Verified |
 | DRM/KMS sessions | DRM CTM | Zero | Implemented |
 | Steam Game Mode (Steam Deck) | gamescope look table, automatic | Reuses gamescope's color pipeline | Verified on a Steam Deck OLED, SteamOS 3.9.5, gamescope 3.16.30.1 (2026-11-21) |
+| Steam Game Mode (Bazzite) | gamescope look table, automatic | Reuses gamescope's color pipeline | Implemented |
 | gamescope (running compositor) | gamescope-native color atoms | Reuses existing gamescope | Verified |
 | Unsupported Wayland | gamescope nested fallback | Extra nested compositor pass | Verified |
 
