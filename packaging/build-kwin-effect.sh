@@ -3,6 +3,8 @@
 #
 # Usage: packaging/build-kwin-effect.sh OUT_DIR FAMILY RELEASE [testing]
 #        packaging/build-kwin-effect.sh --all OUT_DIR [TARGETS_FILE]
+#        packaging/build-kwin-effect.sh --merge OUT_DIR SRC_DIR...
+#        packaging/build-kwin-effect.sh --list [TARGETS_FILE]
 #   FAMILY RELEASE  one target, as a line of packaging/kwin-effect-targets.txt:
 #                   "steamos 3.9", "steamos main", "fedora 45", "fedora 45 testing"
 #   OUT_DIR         receives <key>/satur8.so and <key>/build-info.txt, where key
@@ -11,6 +13,12 @@
 #   --all           builds every target in TARGETS_FILE (default:
 #                   packaging/kwin-effect-targets.txt) in order. When two
 #                   targets give the same key, the first one is kept.
+#   --merge         copies the <key> folders of each SRC_DIR into OUT_DIR, in
+#                   the order given; when a key is already there, the earlier
+#                   one is kept. CI builds each target in its own job and
+#                   merges the results with this, in target-file order.
+#   --list          prints the targets in TARGETS_FILE, one per line, numbered
+#                   from 01 in file order, for a CI build matrix.
 #
 # Environment, all optional:
 #   ENGINE      podman or docker (default: podman if installed, else docker)
@@ -51,47 +59,98 @@
 # SHA-256.
 set -euo pipefail
 
-usage() { sed -n '2,50p' "$0"; exit 2; }
+usage() { sed -n '2,59p' "$0"; exit 2; }
 say() { printf '==> %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
 
-# ------------------------------------------------------------ --all driver
+# ------------------------------------------------------------ several targets
+key_re='^[a-z][a-z0-9]*-[0-9]+(\.[0-9]+)+$'
+
+# The targets in a targets file, as "NN family release [testing]" lines:
+# comments and blank lines skipped, numbered in file order.
+list_targets() {
+    local file="$1" n=0 words
+    [ -f "$file" ] || fail "no targets file at $file"
+    while read -r -a words; do
+        [ "${#words[@]}" -gt 0 ] || continue
+        case "${words[0]}" in '#'*) continue ;; esac
+        n=$((n + 1))
+        printf '%02d %s\n' "$n" "${words[*]}"
+    done < "$file"
+}
+
+# Copy each <key> folder of $2 into $1 unless that key is already there: the
+# first target to build a key wins, so the effect is built against the oldest
+# Qt that the KWin version meets. Appends to the summary array; a folder that
+# is not a valid effect fails.
+merge_keys() {
+    local out="$1" src="$2" label="$3" dir key id
+    for dir in "$src"/*/; do
+        dir="${dir%/}"
+        [ -d "$dir" ] || continue
+        key="${dir##*/}"
+        [[ "$key" =~ $key_re ]] || fail "$dir is not named <family>-<KWin version>"
+        [ -f "$dir/satur8.so" ] && [ -f "$dir/build-info.txt" ] || fail "$dir lacks satur8.so or build-info.txt"
+        id="$(grep -aoE 'org\.kde\.kwin\.EffectPluginFactory[0-9]+(\.[0-9]+)+' "$dir/satur8.so" | head -n1)"
+        [ "${id#org.kde.kwin.EffectPluginFactory}" = "${key##*-}" ] || fail "$dir/satur8.so embeds '${id:-no ID}', not KWin ${key##*-}"
+        if [ -e "$out/$key" ]; then
+            say "Key $key from $label was already built by an earlier target; keeping the earlier one"
+            summary+=("duplicate  $label -> $key (earlier target kept)")
+        else
+            cp -R "$dir" "$out/$key"
+            chmod 755 "$out/$key/satur8.so"
+            summary+=("built      $label -> $key")
+        fi
+    done
+}
+
+if [ "${1:-}" = --list ]; then
+    [ "$#" -le 2 ] || usage
+    list_targets "${2:-$here/kwin-effect-targets.txt}"
+    exit 0
+fi
+
+if [ "${1:-}" = --merge ]; then
+    [ "$#" -ge 3 ] || usage
+    out_dir="$2"
+    shift 2
+    mkdir -p "$out_dir"
+    summary=()
+    for src in "$@"; do
+        [ -d "$src" ] || fail "no folder at $src"
+        merge_keys "$out_dir" "$src" "${src##*/}"
+    done
+    say "Merged into $out_dir"
+    printf '%s\n' "${summary[@]}"
+    exit 0
+fi
+
 if [ "${1:-}" = --all ]; then
     [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
     out_dir="$2"
     targets_file="${3:-$here/kwin-effect-targets.txt}"
-    [ -f "$targets_file" ] || fail "no targets file at $targets_file"
+    targets="$(list_targets "$targets_file")"
     mkdir -p "$out_dir"
     out_dir="$(cd "$out_dir" && pwd)"
     stage_root="$(mktemp -d "$out_dir/.staging.XXXXXX")"
     trap 'rm -rf "$stage_root"' EXIT
     summary=()
     failed=0
-    n=0
-    while read -r -a words; do
-        [ "${#words[@]}" -gt 0 ] || continue
-        case "${words[0]}" in '#'*) continue ;; esac
-        n=$((n + 1))
-        target="${words[*]}"
+    while read -r n family release extra; do
+        target="$family $release${extra:+ $extra}"
         stage="$stage_root/$n"
         say "Target $n: $target"
-        if ! "$0" "$stage" "${words[@]}" < /dev/null; then
+        # shellcheck disable=SC2086  # extra is empty or one word
+        if ! "$0" "$stage" "$family" "$release" $extra < /dev/null; then
             summary+=("FAIL       $target")
             failed=1
             continue
         fi
-        key="$(cd "$stage" && ls)"
-        if [ -e "$out_dir/$key" ]; then
-            say "Key $key from '$target' was already built by an earlier target; keeping the earlier one"
-            summary+=("duplicate  $target -> $key (earlier target kept)")
-        else
-            mv "$stage/$key" "$out_dir/$key"
-            summary+=("built      $target -> $key")
-        fi
-    done < "$targets_file"
+        merge_keys "$out_dir" "$stage" "'$target'"
+    done <<< "$targets"
     echo
     say "Summary"
     printf '%s\n' "${summary[@]}"
