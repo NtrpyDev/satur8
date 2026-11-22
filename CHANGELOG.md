@@ -5,6 +5,8 @@ GitHub release notes for that tag.
 
 ## Unreleased
 
+- The app's icon is now the rainbow 8 from the Satur8 logo instead of the
+  green S8 tile, in the window, the taskbar and the application launcher.
 - Checked, with no code change: the DRM/KMS path, the last backend that had
   never been run on real hardware. On a Steam Deck OLED's AMD GPU with its
   session held open and no compositor running, `satur8 doctor` chose
