@@ -3,6 +3,68 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## v0.5.0 - 2026-11-22
+
+A different saturation on each monitor on KDE Plasma, and a desktop saturation that shows from the start of the session.
+
+- KDE Plasma can show a different saturation on each output. Each output can
+  have its own desktop value (`satur8 outputs default NAME VALUE`, `--unset`
+  to clear it), a profile can list the outputs it changes
+  (`satur8 profile add ... --output NAME`, repeatable), and
+  `satur8 outputs follow focused` makes profiles that list none change only
+  the output the game is on, following the window when it moves. Checked on
+  headless KWin with two virtual outputs and software rendering, in pixels on
+  KWin 6.7.3, 6.8.2 and 6.8.3. On a real KWin 6.8.3 session with three
+  monitors the focus script reported which monitor a window was on as it
+  moved; a different value on each of several real monitors has not been seen
+  yet. Log out and back in once after upgrading so KWin loads the new effect
+  and focus script.
+- `satur8 set VALUE --output NAME` on KDE Plasma changes only that output and
+  keeps every other output's level. `--output all` means every output on every
+  desktop. A desktop that shows one saturation everywhere still refuses
+  `--output NAME` with the same message as before.
+- `satur8 on VALUE --output NAME` does the same as `satur8 set VALUE --output
+  NAME`. `satur8 profile list` shows the outputs a profile names, and
+  `satur8 status` names the output when the active profile is limited to one,
+  and lists each output that currently shows another value than the rest.
+  Output for profiles and sessions that do not use outputs is unchanged.
+- On every other desktop one saturation still applies to every output, and
+  `satur8 outputs`, `satur8 doctor` and `satur8 status` now say so when the
+  profiles file asks for a single output. `doctor` and `status` print nothing
+  new for a file that does not use the per-output settings.
+- When KDE still runs the Satur8 effect it loaded before an upgrade, which
+  happens until the next login, `satur8 outputs` says so and that one log out
+  and back in turns on per-output values, instead of saying KDE can only show
+  one value. If the effect file on disk is also from before per-output
+  support, it says to reinstall or run `satur8 repair` instead. `satur8
+  doctor` and `satur8 status` say the same when the profiles file uses
+  per-output settings, `satur8 outputs default` and `satur8 outputs follow
+  focused` print it in place of the general note, and the background service
+  logs it once.
+- A desktop saturation set in the desktop app or in `profiles.toml` is now
+  shown when the session starts, or as soon as the background service can
+  reach the display, not only after a game's profile has come and gone. This
+  covers the top-level `default_saturation`, which v0.4.1 also left unshown,
+  and each output's own desktop value. An unchanged desktop (1.0) still loads
+  nothing. Steam Game Mode keeps its own start, which already did this.
+- The background service now handles focus reports in the order they arrive.
+  Before, two quick focus changes could be applied in the wrong order.
+- A profiles file with the new settings still loads in an older Satur8, but
+  an older Satur8 drops them if it saves the file.
+- Checked since v0.4.1, with no code change: a Steam Deck restarted with
+  Satur8 installed comes up in Game Mode with the background service running
+  and Steam's color settings unchanged. The bundled `steamos-6.8.2` and
+  `fedora45-6.8.3` effects were seen changing window colors correctly in
+  headless KWin 6.8.2 and 6.8.3 sessions with software rendering; before, they
+  had only been built and loaded.
+- Looked into, with no code change: on the Deck, gamescope sometimes aborts
+  while Game Mode shuts down for the switch to Desktop Mode. The switch still
+  completes. It happens without Satur8: a session that never had a Satur8
+  table aborted the same way (1 of 8 sessions without a table, 2 of 6 with
+  one). Every abort has one signature, two threads of gamescope 3.16.30.1
+  using the session's D-Bus connection at once during shutdown, which Satur8's
+  Game Mode code does not touch.
+
 ## v0.4.1 - 2026-11-22
 
 Release binaries that run on older systems, a working KWin effect on systems without build tools, including the Steam Deck's Desktop Mode, and GNOME 51 support.
