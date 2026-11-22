@@ -161,6 +161,14 @@ impl BackendState {
     }
 }
 
+/// The last focus a focus source reported, kept so a profile reload can match
+/// it again without waiting for the next focus change.
+struct Activation {
+    class: String,
+    /// The pid resolved to its program name when the focus was reported.
+    exe: Option<String>,
+}
+
 struct Daemon {
     profiles: Profiles,
     backend: Arc<Mutex<BackendState>>,
@@ -168,6 +176,9 @@ struct Daemon {
     /// What the focus script last reported: the resolved executable when the
     /// pid could be resolved, otherwise the window class. Read by the GUI.
     last_focused: String,
+    /// The last focus `react` saw, from the KWin script or the gamescope
+    /// focus thread.
+    last_activation: Option<Activation>,
 }
 
 impl Daemon {
@@ -181,6 +192,7 @@ impl Daemon {
             backend,
             current: None,
             last_focused: String::new(),
+            last_activation: None,
         }
     }
 
@@ -192,6 +204,7 @@ impl Daemon {
             backend: Arc::new(Mutex::new(BackendState::with_backend(backend, restore_to))),
             current: None,
             last_focused: String::new(),
+            last_activation: None,
         }
     }
 
@@ -202,6 +215,10 @@ impl Daemon {
             .try_detect(self.profiles.default_saturation());
         let exe = (pid != 0).then(|| satur8_core::resolve_exe(pid)).flatten();
         self.last_focused = exe.clone().unwrap_or_else(|| class.to_string());
+        self.last_activation = Some(Activation {
+            class: class.to_string(),
+            exe: exe.clone(),
+        });
         match decide_focus_action(
             self.current.as_deref(),
             class,
@@ -311,59 +328,100 @@ impl Daemon {
         self.replace_profiles(profiles);
     }
 
+    /// Take new profiles and match the last focus against them, so a profile
+    /// added, changed, disabled or removed for the app on screen takes effect
+    /// now. Nothing is applied before any focus was seen or while no backend is
+    /// active.
     fn replace_profiles(&mut self, profiles: Profiles) {
         self.profiles = profiles;
-        if let Some(guard) = self
+        let backend_active = match self
             .backend
             .lock()
             .expect("backend state mutex poisoned")
             .guard
             .as_mut()
         {
-            guard.set_restore_to(self.profiles.default_saturation());
-        }
+            Some(guard) => {
+                guard.set_restore_to(self.profiles.default_saturation());
+                true
+            }
+            None => false,
+        };
         eprintln!(
             "satur8-daemon: reloaded, {} profile(s)",
             self.profiles.profiles.len()
         );
-
-        let Some(current) = self.current.clone() else {
+        if !backend_active {
             return;
-        };
-        let Some(profile) = self
-            .profiles
-            .by_name(&current)
-            .filter(|profile| profile.enabled)
+        }
+        let Some((class, exe)) = self
+            .last_activation
+            .as_ref()
+            .map(|activation| (activation.class.clone(), activation.exe.clone()))
         else {
-            eprintln!(
-                "satur8-daemon: active profile '{current}' is disabled or missing -> restoring default"
-            );
-            let result = self
-                .backend
-                .lock()
-                .expect("backend state mutex poisoned")
-                .restore(self.profiles.default_saturation());
-            self.current = None;
-            if let Err(error) = result {
-                eprintln!("satur8-daemon: restore failed: {error}");
-            }
             return;
         };
 
-        let saturation = profile.saturation();
-        let outputs = profile.outputs.clone();
-        eprintln!(
-            "satur8-daemon: reapplied active profile '{current}' ({:.2})",
-            saturation.get()
-        );
-        let result = self
-            .backend
-            .lock()
-            .expect("backend state mutex poisoned")
-            .apply(saturation, &outputs, self.profiles.default_saturation());
-        if let Err(error) = result {
-            self.current = None;
-            eprintln!("satur8-daemon: apply failed: {error}");
+        let target = match_focused(&self.profiles, &class, exe.as_deref()).map(|profile| {
+            (
+                profile.name.clone(),
+                profile.saturation(),
+                profile.outputs.clone(),
+            )
+        });
+        match (target, self.current.clone()) {
+            (Some((name, saturation, outputs)), current) => {
+                if current.as_deref() == Some(name.as_str()) {
+                    eprintln!(
+                        "satur8-daemon: reapplied active profile '{name}' ({:.2})",
+                        saturation.get()
+                    );
+                } else {
+                    eprintln!(
+                        "satur8-daemon: '{}' -> profile '{name}' ({:.2}) after reload",
+                        exe.as_deref().unwrap_or(&class),
+                        saturation.get()
+                    );
+                }
+                let result = self
+                    .backend
+                    .lock()
+                    .expect("backend state mutex poisoned")
+                    .apply(saturation, &outputs, self.profiles.default_saturation());
+                match result {
+                    Ok(()) => self.current = Some(name),
+                    Err(error) => {
+                        self.current = None;
+                        eprintln!("satur8-daemon: apply failed: {error}");
+                    }
+                }
+            }
+            (None, Some(current)) => {
+                let still_enabled = self
+                    .profiles
+                    .by_name(&current)
+                    .is_some_and(|profile| profile.enabled);
+                if still_enabled {
+                    eprintln!(
+                        "satur8-daemon: active profile '{current}' no longer matches '{}' -> restoring default",
+                        exe.as_deref().unwrap_or(&class)
+                    );
+                } else {
+                    eprintln!(
+                        "satur8-daemon: active profile '{current}' is disabled or missing -> restoring default"
+                    );
+                }
+                let result = self
+                    .backend
+                    .lock()
+                    .expect("backend state mutex poisoned")
+                    .restore(self.profiles.default_saturation());
+                self.current = None;
+                if let Err(error) = result {
+                    eprintln!("satur8-daemon: restore failed: {error}");
+                }
+            }
+            (None, None) => {}
         }
     }
 }
@@ -812,5 +870,87 @@ mod tests {
             GamescopeSync::NotGamescope
         );
         assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_profile_added_for_the_focused_app_applies_on_reload() {
+        let mut empty = profiles();
+        empty.profiles.clear();
+        let (mut daemon, calls, _) = setup_with(empty);
+        daemon.react("game.class", 0);
+        assert!(calls.lock().unwrap().is_empty());
+
+        daemon.replace_profiles(profiles());
+
+        assert_eq!(daemon.current.as_deref(), Some("game"));
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
+    }
+
+    #[test]
+    fn removing_the_focused_apps_profile_restores_the_default_on_reload() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("game.class", 0);
+
+        let mut updated = daemon.profiles.clone();
+        updated.profiles.clear();
+        daemon.replace_profiles(updated);
+
+        assert_eq!(daemon.current, None);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Reset]
+        );
+    }
+
+    #[test]
+    fn reload_before_any_focus_applies_nothing() {
+        let (mut daemon, calls, _) = setup();
+        daemon.replace_profiles(profiles());
+        assert_eq!(daemon.current, None);
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn reload_reapplies_the_active_profile_with_its_new_saturation() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("game.class", 0);
+
+        let mut updated = daemon.profiles.clone();
+        updated.profiles[0].saturation = 2.25;
+        daemon.replace_profiles(updated);
+
+        assert_eq!(daemon.current.as_deref(), Some("game"));
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Apply("all", 2.25)]
+        );
+    }
+
+    #[test]
+    fn a_profile_added_for_the_game_on_screen_in_game_mode_applies_on_reload() {
+        let mut empty = steam_profiles();
+        empty.profiles.clear();
+        let (mut daemon, calls, _) = setup_with(empty);
+        let (class, pid) = game_mode_focus(730);
+        daemon.react(&class, pid);
+        assert!(calls.lock().unwrap().is_empty());
+
+        daemon.replace_profiles(steam_profiles());
+
+        assert_eq!(daemon.current.as_deref(), Some("cs2"));
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 2.0)]);
+    }
+
+    #[test]
+    fn reload_without_an_active_backend_applies_nothing() {
+        let state = Arc::new(Mutex::new(BackendState::pending()));
+        let mut daemon = Daemon::new(steam_profiles(), state.clone());
+        let (class, pid) = game_mode_focus(730);
+        daemon.react(&class, pid);
+
+        daemon.replace_profiles(steam_profiles());
+
+        assert_eq!(daemon.current, None);
+        assert!(state.lock().unwrap().guard.is_none());
     }
 }
