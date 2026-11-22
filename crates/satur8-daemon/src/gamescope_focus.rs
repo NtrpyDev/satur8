@@ -21,7 +21,7 @@ use satur8_gamescope::session::{self, Focus, X11Root, FOCUS_PROPERTIES};
 use zbus::blocking::object_server::InterfaceRef;
 use zbus::blocking::Connection;
 
-use crate::{Daemon, PATH};
+use crate::{Daemon, GamescopeSync, PATH};
 
 /// How often to probe while a gamescope session is expected soon.
 const PROBE_INTERVAL: Duration = Duration::from_secs(2);
@@ -31,6 +31,8 @@ const PROBE_INTERVAL: Duration = Duration::from_secs(2);
 const PROBE_WINDOW: Duration = Duration::from_secs(60);
 /// How often to look for new X11 sockets once probing has given up.
 const SOCKET_RECHECK: Duration = Duration::from_secs(30);
+/// How often to retry the first sync while backend detection is pending.
+const SYNC_RETRY: Duration = Duration::from_millis(250);
 
 /// The window class and pid `react` takes for a gamescope focus. The class is
 /// `steam_app_<id>`, which profiles already match by Steam AppID.
@@ -89,32 +91,47 @@ fn run(connection: &Connection, running: &AtomicBool) {
 
 /// Follow focus on `root` until the connection fails. The first focus read on
 /// a fresh connection resyncs, which re-applies the focused profile after a
-/// reconnect and clears a table a crashed daemon left behind.
+/// reconnect and clears a table a crashed daemon left behind. When backend
+/// detection has not finished yet, the sync is retried every `SYNC_RETRY`
+/// instead of waiting for the next focus change.
 fn watch(root: &X11Root, daemon: &InterfaceRef<Daemon>, running: &AtomicBool) -> Result<()> {
     root.watch_properties()?;
-    let mut synced = false;
-    let mut last: Option<Focus> = None;
+    let mut focus = session::read_focus(root)?;
     loop {
-        let focus = session::read_focus(root)?;
-        if !synced || last != Some(focus) {
-            let (class, pid) = activation(focus);
-            let mut daemon = daemon.get_mut();
-            // Checked under the interface lock, which shutdown holds while it
-            // restores, so nothing is applied after the restore.
-            if !running.load(Ordering::Acquire) {
-                return Ok(());
-            }
-            if daemon.uses_gamescope() {
-                if synced {
-                    daemon.react(&class, pid);
-                } else {
-                    daemon.resync(&class, pid);
-                    synced = true;
-                }
-            }
-            last = Some(focus);
+        let (class, pid) = activation(focus);
+        let mut daemon = daemon.get_mut();
+        // Checked under the interface lock, which shutdown holds while it
+        // restores, so nothing is applied after the restore.
+        if !running.load(Ordering::Acquire) {
+            return Ok(());
         }
+        match daemon.sync_gamescope(&class, pid) {
+            GamescopeSync::Done => break,
+            GamescopeSync::NotGamescope => return Ok(()),
+            GamescopeSync::NotYet => {}
+        }
+        drop(daemon);
+        thread::sleep(SYNC_RETRY);
+        root.drain_events()?;
+        focus = session::read_focus(root)?;
+    }
+
+    let mut last = focus;
+    loop {
         root.wait_for_change(&FOCUS_PROPERTIES)?;
+        let focus = session::read_focus(root)?;
+        if focus == last {
+            continue;
+        }
+        last = focus;
+        let (class, pid) = activation(focus);
+        let mut daemon = daemon.get_mut();
+        if !running.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if daemon.uses_gamescope() {
+            daemon.react(&class, pid);
+        }
     }
 }
 

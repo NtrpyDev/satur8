@@ -65,6 +65,17 @@ fn decide_focus_action(
     }
 }
 
+/// The outcome of trying the first sync for a gamescope focus source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GamescopeSync {
+    /// The backend is gamescope's and the focus was synced.
+    Done,
+    /// No backend is selected yet; try again shortly.
+    NotYet,
+    /// A desktop backend is selected, so gamescope focus is not ours to follow.
+    NotGamescope,
+}
+
 struct BackendState {
     guard: Option<RestoreGuard>,
     retry_delay: Duration,
@@ -80,6 +91,17 @@ impl BackendState {
         };
         state.try_detect(restore_to);
         state
+    }
+
+    /// No backend yet, and no detection attempt for an hour, so a test decides
+    /// when one appears.
+    #[cfg(test)]
+    fn pending() -> Self {
+        Self {
+            guard: None,
+            retry_delay: INITIAL_RETRY,
+            next_retry: Instant::now() + Duration::from_secs(3600),
+        }
     }
 
     #[cfg(test)]
@@ -267,6 +289,21 @@ impl Daemon {
     /// selected yet. A selected desktop backend is never replaced.
     fn may_use_gamescope(&mut self) -> bool {
         matches!(self.backend_name(), None | Some("gamescope"))
+    }
+
+    /// The first sync for a gamescope focus source, run as soon as the backend
+    /// is gamescope's. The focus thread retries while this says `NotYet`, so
+    /// the sync happens when the later of the connection and the backend is
+    /// ready, not at the next focus change.
+    fn sync_gamescope(&mut self, class: &str, pid: u32) -> GamescopeSync {
+        match self.backend_name() {
+            Some("gamescope") => {
+                self.resync(class, pid);
+                GamescopeSync::Done
+            }
+            None => GamescopeSync::NotYet,
+            Some(_) => GamescopeSync::NotGamescope,
+        }
     }
 
     fn reload_profiles(&mut self) {
@@ -473,13 +510,14 @@ mod tests {
     }
 
     struct FakeBackend {
+        name: &'static str,
         calls: Arc<Mutex<Vec<Call>>>,
         fail_apply: Arc<AtomicBool>,
     }
 
     impl Backend for FakeBackend {
         fn name(&self) -> &'static str {
-            "fake"
+            self.name
         }
 
         fn cost(&self) -> CostNote {
@@ -539,6 +577,7 @@ mod tests {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let fail_apply = Arc::new(AtomicBool::new(false));
         let backend = FakeBackend {
+            name: "fake",
             calls: calls.clone(),
             fail_apply: fail_apply.clone(),
         };
@@ -738,5 +777,40 @@ mod tests {
         let (mut daemon, _, _) = setup();
         assert!(!daemon.uses_gamescope());
         assert!(!daemon.may_use_gamescope());
+    }
+
+    #[test]
+    fn game_mode_sync_waits_for_the_backend_and_runs_once_it_is_ready() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let state = Arc::new(Mutex::new(BackendState::pending()));
+        let mut daemon = Daemon::new(steam_profiles(), state.clone());
+        let (class, pid) = game_mode_focus(730);
+
+        // The focus thread found gamescope first: nothing to apply through yet.
+        assert_eq!(daemon.sync_gamescope(&class, pid), GamescopeSync::NotYet);
+        assert!(calls.lock().unwrap().is_empty());
+
+        // Backend detection finishes; the thread's next retry syncs at once.
+        let backend = FakeBackend {
+            name: "gamescope",
+            calls: calls.clone(),
+            fail_apply: Arc::new(AtomicBool::new(false)),
+        };
+        state.lock().unwrap().guard =
+            Some(RestoreGuard::new(Box::new(backend), Saturation::IDENTITY));
+        assert_eq!(daemon.sync_gamescope(&class, pid), GamescopeSync::Done);
+        assert_eq!(daemon.current.as_deref(), Some("cs2"));
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 2.0)]);
+    }
+
+    #[test]
+    fn game_mode_sync_steps_aside_for_a_desktop_backend() {
+        let (mut daemon, calls, _) = setup_with(steam_profiles());
+        let (class, pid) = game_mode_focus(730);
+        assert_eq!(
+            daemon.sync_gamescope(&class, pid),
+            GamescopeSync::NotGamescope
+        );
+        assert!(calls.lock().unwrap().is_empty());
     }
 }

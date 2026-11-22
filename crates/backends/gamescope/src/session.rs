@@ -288,6 +288,13 @@ impl X11Root {
         Ok(())
     }
 
+    /// Discard queued events without waiting. An error means the connection
+    /// is gone.
+    pub fn drain_events(&self) -> Result<()> {
+        while self.conn.poll_for_event()?.is_some() {}
+        Ok(())
+    }
+
     /// Block until one of `names` changes on the root. Events already queued
     /// are drained first so a burst of changes is handled once. An error means
     /// the connection is gone.
