@@ -7,7 +7,7 @@
 // (src/mode.rs), which is a scale of 2 on a Deck's 1280x800 screen at about
 // 204 pixels per inch: 1 logical pixel is 0.25 mm. So the 44 pixel controls
 // below are 11 mm, the 52 pixel list rows 13 mm, the 12 pixel small text 3 mm
-// and the 28 pixel slider handle 7 mm.
+// and the 30 pixel slider handle 7.5 mm.
 //
 // What is in focus, what the buttons do and what the prompt bar says come
 // from src/gm.rs through the Gm global; this file only draws them and reports
@@ -278,66 +278,93 @@ component TSwitch inherits Rectangle {
     }
 }
 
-// Slider from -100% to +100% for a thumb: an 8 pixel track, a 28 pixel
-// handle, and the whole 46 pixel band takes the touch. A tap jumps there; a
-// sideways drag from anywhere on the band moves the value; an up-and-down
-// drag scrolls the page and leaves the value alone.
+// Slider from -100% to +100% for a thumb, and the one place this layout
+// spends color: the track up to the handle is the logo's rainbow, gray at the
+// far left (-100%, no color left) and at full strength at the far right
+// (+100%), so the strip shows what the value does. Five fixed gradients,
+// drawn once; nothing is animated.
+//
+// The whole 46 pixel band takes the touch. A tap jumps there; a sideways drag
+// from anywhere on the band moves the value; an up-and-down drag scrolls the
+// page and leaves the value alone.
 component TSlider inherits Rectangle {
     in property <float> value;
     in property <bool> focused: false;
     in property <bool> adjusting: false;
+    // A game that is turned off: its strip fades.
+    in property <bool> dimmed: false;
     callback changed(float);
     callback released(float);
     callback down();
     callback pan-begin();
     callback pan-by(length);
     height: 46px;
-    property <length> pad: 16px;
+    property <length> pad: 18px;
     property <length> track-w: self.width - 2 * root.pad;
     property <length> pos: root.pad + Math.floor(root.track-w * (root.value + 100) / 200 / 1px) * 1px;
     property <length> mid: root.pad + Math.floor(root.track-w / 2px) * 1px;
-    property <length> cy: 16px;
+    property <length> cy: 23px;
     pure function at(x: length) -> float {
         Math.round(Math.clamp((x - root.pad) / root.track-w, 0, 1) * 200 - 100)
     }
     border-radius: 11px;
     background: root.adjusting ? Pal.accent-soft : transparent;
 
+    // The empty track.
     Rectangle {
-        x: root.pad; y: root.cy - 4px; width: root.track-w; height: 8px;
-        border-radius: 4px; background: Pal.field;
+        x: root.pad; y: root.cy - 7.5px; width: root.track-w; height: 15px;
+        border-radius: 3px; background: Pal.field;
     }
+    // The strip, from the left end to the handle. Each band is one color of
+    // the 8 (pink, orange, yellow, teal, blue): its gray at the left end,
+    // most of its color in the middle (0%), all of it at the right end.
     Rectangle {
-        x: Math.min(root.mid, root.pos); y: root.cy - 4px;
-        width: Math.max(2px, Math.abs(root.pos - root.mid)); height: 8px;
-        border-radius: 4px; background: Pal.accent;
+        x: root.pad; y: root.cy - 7.5px; width: Math.max(4px, root.pos - root.pad); height: 15px;
+        border-radius: 3px;
+        clip: true;
+        opacity: root.dimmed ? 0.35 : 1;
+        Rectangle {
+            x: 0; y: 0; width: root.track-w; height: 3px;
+            background: @linear-gradient(90deg, #606060 0%, #bf4368 50%, #ff2f6d 100%);
+        }
+        Rectangle {
+            x: 0; y: 3px; width: root.track-w; height: 3px;
+            background: @linear-gradient(90deg, #7b7b7b 0%, #ca6947 50%, #ff5d24 100%);
+        }
+        Rectangle {
+            x: 0; y: 6px; width: root.track-w; height: 3px;
+            background: @linear-gradient(90deg, #bbbbbb 0%, #e4b95a 50%, #ffb71a 100%);
+        }
+        Rectangle {
+            x: 0; y: 9px; width: root.track-w; height: 3px;
+            background: @linear-gradient(90deg, #b8b8b8 0%, #54d5c4 50%, #12e8cc 100%);
+        }
+        Rectangle {
+            x: 0; y: 12px; width: root.track-w; height: 3px;
+            background: @linear-gradient(90deg, #919191 0%, #5d9ad3 50%, #3aa0ff 100%);
+        }
     }
+    // 0%, where nothing is changed: a notch above and below the track.
     Rectangle {
-        x: root.mid - 1px; y: root.cy - 8px; width: 2px; height: 16px;
+        x: root.mid - 1px; y: root.cy - 13px; width: 2px; height: 4px;
         background: Pal.dim;
     }
     Rectangle {
-        x: root.pos - 14px; y: root.cy - 14px; width: 28px; height: 28px;
-        border-radius: 14px; background: Pal.accent;
+        x: root.mid - 1px; y: root.cy + 9px; width: 2px; height: 4px;
+        background: Pal.dim;
+    }
+    // The handle: light, so it reads on any color under it.
+    Rectangle {
+        x: root.pos - 15px; y: root.cy - 15px; width: 30px; height: 30px;
+        border-radius: 15px; background: Pal.bg;
         Rectangle {
-            x: 10px; y: 10px; width: 8px; height: 8px;
-            border-radius: 4px; background: Pal.on-accent;
+            x: 2px; y: 2px; width: 26px; height: 26px;
+            border-radius: 13px; background: Pal.ink;
+            Rectangle {
+                x: 9px; y: 9px; width: 8px; height: 8px;
+                border-radius: 4px; background: Pal.bg;
+            }
         }
-    }
-    Text {
-        x: root.pad - 8px; y: 30px; width: 60px; height: 16px;
-        text: "-100%"; font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.dim;
-        vertical-alignment: center;
-    }
-    Text {
-        x: root.mid - 30px; y: 30px; width: 60px; height: 16px;
-        text: "0%"; font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.dim;
-        horizontal-alignment: center; vertical-alignment: center;
-    }
-    Text {
-        x: root.width - root.pad + 8px - 60px; y: 30px; width: 60px; height: 16px;
-        text: "+100%"; font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.dim;
-        horizontal-alignment: right; vertical-alignment: center;
     }
     Zone {
         slides: true;
@@ -464,6 +491,7 @@ component GameRowT inherits Card {
     TSlider {
         x: 6px; y: 50px; width: root.width - 12px;
         value: root.game.percent;
+        dimmed: !root.game.enabled;
         focused: Gm.highlight && Gm.focus-kind == 2 && Gm.focus-index == root.index && Gm.focus-part == 0;
         adjusting: self.focused && Gm.adjusting;
         down => { Gm.touched(2, root.index, 0); }
@@ -654,7 +682,7 @@ export component GameModeUi inherits Rectangle {
     // game, one row per game, a note.
     if Gm.page == 0: games-page := Scroller {
         x: 0; y: root.top; width: root.width; height: root.body-h;
-        property <length> rows-y: 8px + 100px + 8px + 52px;
+        property <length> rows-y: 100px + 8px + 52px;
         property <length> rows-h: Gm.games.length == 0 ? 80px : Gm.games.length * 108px - 8px;
         property <length> note-y: self.rows-y + self.rows-h + 6px;
         content-height: self.note-y + 22px + 8px;
@@ -664,9 +692,9 @@ export component GameModeUi inherits Rectangle {
         changed reveal => { self.show-focus(); }
         function show-focus() {
             if (Gm.focus-kind == 0) {
-                self.show(8px, 108px);
+                self.show(0px, 100px);
             } else if (Gm.focus-kind == 1) {
-                self.show(116px, 168px);
+                self.show(108px, 160px);
             } else if (Gm.focus-kind == 2 || Gm.focus-kind == 3) {
                 self.show(self.rows-y + Gm.focus-index * 108px, self.rows-y + Gm.focus-index * 108px + 100px);
             }
@@ -674,10 +702,16 @@ export component GameModeUi inherits Rectangle {
 
         // Everything else: what the desktop app calls Desktop vibrance. In a
         // gaming session there is no desktop: it is Steam's own screens and
-        // every game without a row below.
-        Card {
-            x: 16px; y: 8px; width: root.row-w; height: 100px;
-            border-color: Gm.focus-kind == 0 && Gm.highlight ? Pal.accent-line : Pal.line;
+        // every game without a row below. It is the base the games sit on,
+        // so it is not one more card: it is a band across the screen, joined
+        // to the header.
+        Rectangle {
+            x: 0; y: 0; width: root.width; height: 100px;
+            background: Pal.sheet;
+            Rectangle { x: 0; y: 99px; width: parent.width; height: 1px; background: Pal.line; }
+        }
+        Rectangle {
+            x: 16px; y: 0px; width: root.row-w; height: 100px;
             Text {
                 x: 14px; y: 7px; width: parent.width - 14px - 250px; height: 22px;
                 text: "Everything else";
@@ -721,11 +755,11 @@ export component GameModeUi inherits Rectangle {
         }
 
         TSection {
-            x: 18px; y: 116px; width: 200px; height: 52px;
+            x: 18px; y: 108px; width: 200px; height: 52px;
             text: "Games"; font-size: 22px;
         }
         TBtn {
-            x: root.width - 16px - 160px; y: 120px; width: 160px;
+            x: root.width - 16px - 160px; y: 112px; width: 160px;
             kind: 0;
             text: "Add a game";
             has-icon: true; icon: @image-url("icons/plus.svg");
@@ -807,9 +841,9 @@ export component GameModeUi inherits Rectangle {
                 text: "Right now"; font-size: 17px;
             }
             Text {
-                x: parent.width - 14px - 150px; y: 6px; width: 150px; height: 30px;
-                text: root.live-daemon ? "live" : "service off";
-                font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.muted;
+                x: parent.width - 14px - 240px; y: 6px; width: 240px; height: 30px;
+                text: root.live-daemon ? "Live" : "The background service is off";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
                 horizontal-alignment: right; vertical-alignment: center;
             }
             live-sat := Text {
@@ -1042,10 +1076,10 @@ export component GameModeUi inherits Rectangle {
     // ================= About =================
     if Gm.page == 2: about-page := Scroller {
         x: 0; y: root.top; width: root.width; height: root.body-h;
-        property <length> links-y: 8px + 150px + 8px;
+        property <length> links-y: 8px + 128px + 8px;
         content-height: self.links-y + 60px + 8px;
         Card {
-            x: 16px; y: 8px; width: root.row-w; height: 150px;
+            x: 16px; y: 8px; width: root.row-w; height: 128px;
             Image {
                 x: 16px; y: 16px; width: 144px; height: 28px;
                 source: Pal.dark ? @image-url("word.png") : @image-url("word-light.png");
@@ -1058,7 +1092,7 @@ export component GameModeUi inherits Rectangle {
                 horizontal-alignment: right; vertical-alignment: center;
             }
             Text {
-                x: 16px; y: 54px; width: parent.width - 32px; height: 90px;
+                x: 16px; y: 54px; width: parent.width - 32px; height: 66px;
                 text: "Per-game digital vibrance for Linux. Satur8 changes the display's colors after the game has drawn them; it does not read or change the game. In Steam Game Mode each game's setting shows while that game is on screen, and Steam's own screens use Everything else.";
                 font-family: Font.reg; font-weight: Font.reg-weight; font-size: 13px; color: Pal.soft;
                 wrap: word-wrap;
@@ -1105,7 +1139,7 @@ export component GameModeUi inherits Rectangle {
         TouchArea { mouse-cursor: none; }
         TSection {
             x: 18px; y: 4px; width: 300px; height: 48px;
-            text: "Your games"; font-size: 20px;
+            text: "Add a game"; font-size: 20px;
         }
         TBtn {
             x: parent.width - 16px - 110px; y: 6px; width: 110px;

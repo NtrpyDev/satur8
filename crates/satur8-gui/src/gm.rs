@@ -88,8 +88,9 @@ pub struct Layout {
     pub rest_percent: i32,
     /// Each game row's percent and whether it is turned on.
     pub games: Vec<(i32, bool)>,
-    /// How many rows the open add-a-game list has.
-    pub picks: usize,
+    /// The open add-a-game list: for each row, whether that game already
+    /// has a profile.
+    pub picks: Vec<bool>,
     /// The Status page's items.
     pub status: Vec<Item>,
     /// The About page's items.
@@ -292,8 +293,8 @@ impl State {
                 self.adjusting = None;
                 self.focus = home_focus(Page::Games, layout);
             }
-            Focus::Pick(index) if index >= layout.picks => {
-                self.focus = Focus::Pick(layout.picks.saturating_sub(1));
+            Focus::Pick(index) if index >= layout.picks.len() => {
+                self.focus = Focus::Pick(layout.picks.len().saturating_sub(1));
             }
             Focus::Item(index) => {
                 let count = match self.page {
@@ -342,7 +343,7 @@ pub fn press(state: &mut State, layout: &Layout, press: Press) -> Vec<Effect> {
     let mut effects = Vec::new();
 
     if state.picker_open {
-        let last = layout.picks.saturating_sub(1);
+        let last = layout.picks.len().saturating_sub(1);
         let at = match state.focus {
             Focus::Pick(index) => index.min(last),
             _ => 0,
@@ -352,7 +353,7 @@ pub fn press(state: &mut State, layout: &Layout, press: Press) -> Vec<Effect> {
             Down => state.focus = Focus::Pick((at + 1).min(last)),
             L1 => state.focus = Focus::Pick(at.saturating_sub(5)),
             R1 => state.focus = Focus::Pick((at + 5).min(last)),
-            A if layout.picks > 0 && press.repeat == 0 => effects.push(Effect::PickRow(at)),
+            A if !layout.picks.is_empty() && press.repeat == 0 => effects.push(Effect::PickRow(at)),
             B | Y if press.repeat == 0 => {
                 state.picker_closed();
                 effects.push(Effect::ClosePicker);
@@ -584,12 +585,19 @@ pub fn prompts(state: &State, layout: &Layout) -> Vec<Prompt> {
     let pages = prompt(&["L1", "R1"], "Pages");
     let add = prompt(&["Y"], "Add a game");
     if state.picker_open {
+        // The same words all the way: the button says "Add a game", the
+        // list is titled that, A adds, and the log says "Added". A game that
+        // has a profile is opened instead.
         let mut bar = Vec::new();
-        if layout.picks > 0 && state.highlight {
-            bar.push(prompt(&["A"], "Pick"));
+        if let (Focus::Pick(index), true) = (state.focus, state.highlight) {
+            match layout.picks.get(index) {
+                Some(true) => bar.push(prompt(&["A"], "Open")),
+                Some(false) => bar.push(prompt(&["A"], "Add")),
+                None => {}
+            }
         }
         bar.push(prompt(&["B"], "Close"));
-        if layout.picks > 5 {
+        if layout.picks.len() > 5 {
             bar.push(prompt(&["L1", "R1"], "Jump"));
         }
         return bar;
@@ -612,7 +620,7 @@ pub fn prompts(state: &State, layout: &Layout) -> Vec<Prompt> {
             prompt(&["B"], "Undo"),
         ];
     }
-    let fine = prompt(&["L2", "R2"], "Change");
+    let fine = prompt(&["L2", "R2"], "By 1");
     match (state.page, state.focus) {
         (Page::Games, Focus::Rest(RestPart::Slider)) => {
             vec![prompt(&["A"], "Change"), fine, add, pages]
@@ -665,7 +673,7 @@ mod tests {
         Layout {
             rest_percent: 0,
             games: (0..games).map(|i| (10 * i as i32 + 40, true)).collect(),
-            picks: 10,
+            picks: vec![false; 10],
             status: vec![
                 Item::Button { enabled: true },
                 Item::Button { enabled: true },
@@ -1075,7 +1083,7 @@ mod tests {
     #[test]
     fn an_empty_list_cannot_be_picked_from() {
         let mut l = layout(0);
-        l.picks = 0;
+        l.picks.clear();
         let mut state = with_pad(&l);
         tap(&mut state, &l, Y);
         assert_eq!(tap(&mut state, &l, A), vec![]);
@@ -1197,7 +1205,7 @@ mod tests {
         assert_eq!(state.focus, Focus::AddGame);
         state.picker_open = true;
         state.focus = Focus::Pick(9);
-        l.picks = 3;
+        l.picks.truncate(3);
         state.settle(&l);
         assert_eq!(state.focus, Focus::Pick(2));
     }
@@ -1246,7 +1254,7 @@ mod tests {
             [
                 "A Change",
                 "X Turn off",
-                "L2+R2 Change",
+                "L2+R2 By 1",
                 "Y Add a game",
                 "L1+R1 Pages"
             ]
@@ -1255,7 +1263,7 @@ mod tests {
         state.focus = Focus::Game(0, Part::Toggle);
         assert_eq!(
             bar(&state, &l),
-            ["A Turn on", "L2+R2 Change", "Y Add a game", "L1+R1 Pages"]
+            ["A Turn on", "L2+R2 By 1", "Y Add a game", "L1+R1 Pages"]
         );
         state.focus = Focus::Game(0, Part::Remove);
         assert_eq!(bar(&state, &l)[..2], ["A Remove", "X Turn on"]);
@@ -1275,11 +1283,15 @@ mod tests {
 
     #[test]
     fn the_prompt_bar_for_the_list_the_other_pages_and_touch() {
-        let l = layout(2);
+        let mut l = layout(2);
+        l.picks[1] = true;
         let mut state = with_pad(&l);
         state.picker_open = true;
         state.focus = Focus::Pick(0);
-        assert_eq!(bar(&state, &l), ["A Pick", "B Close", "L1+R1 Jump"]);
+        assert_eq!(bar(&state, &l), ["A Add", "B Close", "L1+R1 Jump"]);
+        // A game that already has a profile is opened, not added again.
+        state.focus = Focus::Pick(1);
+        assert_eq!(bar(&state, &l)[0], "A Open");
         state.picker_open = false;
         state.page = Page::Status;
         state.focus = Focus::Item(0);
@@ -1287,7 +1299,7 @@ mod tests {
         state.focus = Focus::Item(2);
         assert_eq!(bar(&state, &l)[0], "A Switch");
         state.focus = Focus::Item(3);
-        assert_eq!(bar(&state, &l)[..2], ["A Change", "L2+R2 Change"]);
+        assert_eq!(bar(&state, &l)[..2], ["A Change", "L2+R2 By 1"]);
         // With touch in use nothing claims a focus the user cannot see.
         let touch = State::new(&l);
         assert_eq!(bar(&touch, &l), ["Y Add a game", "L1+R1 Pages"]);

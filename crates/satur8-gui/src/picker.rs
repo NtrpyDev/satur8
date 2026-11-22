@@ -32,7 +32,8 @@ pub const NO_GAMES: &str =
     "Steam has no games installed yet, so start your game and open this list again.";
 
 /// Shown in Steam Game Mode when the library lists no games.
-pub const NO_GAMES_GAME_MODE: &str = "Steam has no games installed yet.";
+pub const NO_GAMES_GAME_MODE: &str =
+    "Steam has no games installed yet. Install one in Steam, then open this list again.";
 
 /// What was read from the Steam library when the list opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -956,9 +957,9 @@ mod tests {
             true,
         );
         assert_eq!(game_mode.message, NO_GAMES_GAME_MODE);
+        // Each says what is the case and what to do about it.
         for message in [NO_STEAM, NO_GAMES, NO_GAMES_GAME_MODE] {
-            assert_eq!(message.matches('.').count(), 1, "{message}");
-            assert!(message.ends_with('.'));
+            assert!(message.ends_with("open this list again."), "{message}");
         }
     }
 

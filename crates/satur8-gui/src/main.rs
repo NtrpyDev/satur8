@@ -807,7 +807,12 @@ impl App {
                 .iter()
                 .map(|p| (sat_to_percent(p.saturation), p.enabled))
                 .collect(),
-            picks: self.rows.borrow().len(),
+            picks: self
+                .rows
+                .borrow()
+                .iter()
+                .map(|row| row.has_profile)
+                .collect(),
             status: vec![
                 button(!busy),
                 button(!busy),
@@ -1144,7 +1149,14 @@ fn log_ui(ui: &AppWindow, ok: bool, text: &str) {
 
 /// Show freshly gathered facts: health rows, toggle, and system info.
 fn apply_facts(ui: &AppWindow, facts: status::Facts) {
-    let rows = status::health_rows(&facts);
+    let mut rows = status::health_rows(&facts);
+    // The system info for a bug report keeps every row.
+    let sysinfo = status::system_info_for_this_machine(&facts, &rows);
+    if ui.get_touch() {
+        // The Game Mode page lists what is checked there, not what belongs
+        // to other sessions (the KDE effect and its focus script).
+        rows.retain(|row| row.level != status::Level::NotApplicable);
+    }
     let switch = status::switch_state(&facts);
     ui.set_health(ModelRc::from(Rc::new(VecModel::from(
         rows.iter()
@@ -1163,7 +1175,7 @@ fn apply_facts(ui: &AppWindow, facts: status::Facts) {
     ui.set_switch_available(switch.available);
     ui.set_switch_on(switch.on);
     ui.set_switch_detail(switch.detail.into());
-    ui.set_sysinfo_text(status::system_info_for_this_machine(&facts, &rows).into());
+    ui.set_sysinfo_text(sysinfo.into());
     LAST_FACTS.with(|last| *last.borrow_mut() = Some(facts));
 }
 
