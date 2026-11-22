@@ -31,10 +31,16 @@ Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.
   desktops their output is unchanged.
 - Installer: `packaging/install.sh --enable-daemon` turns on the background
   service; without it the installer prints the command. `--system` is refused
-  on SteamOS. Everything is installed in your home folder, so it survives
-  SteamOS updates. On a machine with a Game Mode session where the KWin effect
-  cannot be installed, the installer now says Game Mode works without it, and
-  uninstall runs `satur8 off` before it removes the commands.
+  on SteamOS and on image-based systems such as Bazzite, where `/usr` is
+  read-only, and the installer no longer suggests it there. Everything is
+  installed in your home folder, so it survives SteamOS updates. On a machine
+  with a Game Mode session where the KWin effect cannot be installed, the
+  installer now says Game Mode works without it, and uninstall runs `satur8
+  off` before it removes the commands.
+- `satur8 repair` reads the installed KWin version from `kwin_wayland` when the
+  KWin development headers are missing, so a matching per-user effect waits for
+  the next login instead of reporting an error, and it explains that build
+  tools cannot simply be installed on image-based systems.
 - Unchanged: the `satur8 run --via gamescope-native` launch option works as
   before. It still replaces Steam's color settings while the game runs, and it
   wins over a profile's table until the game ends. Use the background service
@@ -42,10 +48,19 @@ Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.
 - Tested on a Steam Deck OLED with SteamOS 3.9.5 and gamescope 3.16.30.1 in Game
   Mode, with a camera pointed at the screen. Saturation from grayscale to 2x
   responds in order.
+- Bazzite: Game Mode support is implemented but Satur8 has not been run on a
+  Bazzite device. The Game Mode code was exercised against Bazzite's own
+  gamescope build (3.17.0-ogc1, in Bazzite stable 45.20261117.1) in a
+  container, and there the v0.3.5 tarball installer installed and uninstalled
+  per user. Install from the release tarball without `--system`. Known gaps:
+  the KDE desktop effect cannot be rebuilt on Bazzite after a KWin update
+  because the image has no build tools, the GNOME images run GNOME 51, which
+  the GNOME Shell extension does not list yet, and the COPR package is not
+  built for Fedora 45, which current Bazzite is based on.
 - Not tested yet: HDR games (by gamescope's source the look table does not
   change HDR content), an external display, the desktop app on the Deck, the
-  Deck's Desktop Mode, Bazzite and other systems that run a gamescope session,
-  and gamescope versions other than 3.16.30.1.
+  Deck's Desktop Mode, a Bazzite device and other systems that run a gamescope
+  session, and gamescope versions other than 3.16.30.1.
 - The README has a new Steam Deck section, and ROADMAP.md and PLAN.md describe
   the Game Mode support and the Deck work that remains.
 
