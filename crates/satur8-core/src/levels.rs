@@ -122,6 +122,27 @@ fn output_defaults(profiles: &Profiles) -> impl Iterator<Item = (String, Saturat
     })
 }
 
+/// What the outputs show for the focused window: the picture of the profile
+/// that matches it, on or off, or the desktop picture when no profile does.
+/// The four cases, in one place:
+///
+/// 1. a game whose profile is on: the profile's value;
+/// 2. a game whose profile is off: normal colors (1.0), whatever the general
+///    value is;
+/// 3. a game with no profile: the general value;
+/// 4. the desktop, and Steam's own screens in Game Mode: the general value.
+pub fn focus_picture(
+    profiles: &Profiles,
+    matched: Option<&Profile>,
+    focused_output: Option<&str>,
+    per_output: bool,
+) -> Picture {
+    match matched {
+        Some(profile) => profile_picture(profiles, profile, focused_output, per_output),
+        None => desktop_picture(profiles, per_output),
+    }
+}
+
 /// What the outputs show when no game profile is changing them. On a backend
 /// that shows one saturation everywhere that is the top-level
 /// `default_saturation`, with a note when the file sets per-output defaults.
@@ -146,13 +167,18 @@ pub fn desktop_picture(profiles: &Profiles, per_output: bool) -> Picture {
 
 /// What the outputs show while `profile` is applied. `focused_output` is the
 /// output the focused window is on, when the focus source reported one.
+///
+/// A profile that is off shows normal colors (1.0) on exactly the outputs it
+/// would change when on: every output, the outputs it lists, or the focused
+/// output with `profile_outputs = "focused"`. Other outputs keep the desktop
+/// picture either way.
 pub fn profile_picture(
     profiles: &Profiles,
     profile: &Profile,
     focused_output: Option<&str>,
     per_output: bool,
 ) -> Picture {
-    let saturation = profile.saturation();
+    let saturation = profile.shown_saturation();
     let every_output = |notes: Vec<Note>| Picture {
         levels: Levels::uniform(saturation),
         notes,
@@ -503,5 +529,147 @@ mod tests {
             outputs_not_connected(&profiles, &[]),
             vec!["DP-3".to_string(), "HDMI-A-1".to_string()]
         );
+    }
+
+    /// A file with a general value of 1.3 and `DP-2` at 0.9, and one game.
+    fn general_and_game(enabled: bool, outputs: &[&str], follow: ProfileOutputs) -> Profiles {
+        let mut file = Profiles {
+            default_saturation: 1.3,
+            profile_outputs: follow,
+            ..Profiles::default()
+        };
+        file.outputs.insert(
+            "DP-2".into(),
+            OutputConfig {
+                default_saturation: Some(0.9),
+            },
+        );
+        file.profiles.push(Profile {
+            enabled,
+            ..profile(outputs)
+        });
+        file
+    }
+
+    #[test]
+    fn the_four_cases_on_a_backend_with_one_value_for_every_output() {
+        // (the game's profile: None = no profile, Some(on?)), expected value.
+        let cases: [(&str, Option<bool>, f32); 4] = [
+            (
+                "a game whose profile is on shows the profile's value",
+                Some(true),
+                1.6,
+            ),
+            (
+                "a game whose profile is off shows normal colors",
+                Some(false),
+                1.0,
+            ),
+            ("a game with no profile shows the general value", None, 1.3),
+            (
+                "the desktop and Steam's own screens show the general value",
+                None,
+                1.3,
+            ),
+        ];
+        for (what, game, expected) in cases {
+            let file = general_and_game(game.unwrap_or(true), &[], ProfileOutputs::All);
+            let matched = game.map(|_| &file.profiles[0]);
+            let picture = focus_picture(&file, matched, None, false);
+            assert_eq!(picture.levels, Levels::uniform(s(expected)), "{what}");
+        }
+    }
+
+    #[test]
+    fn a_profile_that_is_off_is_normal_on_the_outputs_it_would_change() {
+        // Profile `outputs`, `profile_outputs`, focused output, expected.
+        // The desktop is 1.3 with DP-2 at 0.9; the profile's own value, 1.6,
+        // must appear nowhere.
+        let rows: Vec<(&[&str], ProfileOutputs, Option<&str>, Levels)> = vec![
+            // Every output: normal everywhere, the per-output default included.
+            (&[], ProfileOutputs::All, Some("DP-1"), levels(1.0, &[])),
+            (
+                &["all"],
+                ProfileOutputs::Focused,
+                Some("DP-1"),
+                levels(1.0, &[]),
+            ),
+            // The outputs it lists: normal there, the desktop elsewhere.
+            (
+                &["DP-1"],
+                ProfileOutputs::All,
+                Some("DP-2"),
+                levels(1.3, &[("DP-1", 1.0), ("DP-2", 0.9)]),
+            ),
+            (
+                &["DP-2"],
+                ProfileOutputs::All,
+                Some("DP-1"),
+                levels(1.3, &[("DP-2", 1.0)]),
+            ),
+            // Following focus: normal on the focused output only.
+            (
+                &[],
+                ProfileOutputs::Focused,
+                Some("DP-1"),
+                levels(1.3, &[("DP-1", 1.0), ("DP-2", 0.9)]),
+            ),
+            (
+                &[],
+                ProfileOutputs::Focused,
+                Some("DP-2"),
+                levels(1.3, &[("DP-2", 1.0)]),
+            ),
+            // Following focus with no output reported: every output.
+            (&[], ProfileOutputs::Focused, None, levels(1.0, &[])),
+        ];
+        for (outputs, follow, focused, expected) in rows {
+            let file = general_and_game(false, outputs, follow);
+            let picture = focus_picture(&file, Some(&file.profiles[0]), focused, true);
+            assert_eq!(
+                picture.levels, expected,
+                "outputs {outputs:?}, {follow:?}, focused {focused:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_four_cases_on_a_backend_with_a_value_per_output() {
+        // The game follows focus and is on DP-1; the desktop is 1.3 with DP-2
+        // at 0.9.
+        let desktop = levels(1.3, &[("DP-2", 0.9)]);
+        let cases: [(&str, Option<bool>, Levels); 4] = [
+            (
+                "on: the profile's value on the game's output",
+                Some(true),
+                levels(1.3, &[("DP-1", 1.6), ("DP-2", 0.9)]),
+            ),
+            (
+                "off: normal colors on the game's output",
+                Some(false),
+                levels(1.3, &[("DP-1", 1.0), ("DP-2", 0.9)]),
+            ),
+            ("no profile: the desktop picture", None, desktop.clone()),
+            (
+                "the desktop itself: the desktop picture",
+                None,
+                desktop.clone(),
+            ),
+        ];
+        for (what, game, expected) in cases {
+            let file = general_and_game(game.unwrap_or(true), &[], ProfileOutputs::Focused);
+            let matched = game.map(|_| &file.profiles[0]);
+            let picture = focus_picture(&file, matched, Some("DP-1"), true);
+            assert_eq!(picture.levels, expected, "{what}");
+        }
+    }
+
+    #[test]
+    fn a_profile_that_is_off_says_the_same_notes_as_one_that_is_on() {
+        for enabled in [true, false] {
+            let file = general_and_game(enabled, &["DP-1"], ProfileOutputs::All);
+            let picture = profile_picture(&file, &file.profiles[0], None, false);
+            assert_eq!(picture.notes, changes_every_output(), "enabled {enabled}");
+        }
     }
 }

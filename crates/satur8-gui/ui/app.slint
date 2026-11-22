@@ -7,74 +7,9 @@ import "fonts/HankenGrotesk-Medium.ttf";
 import "fonts/HankenGrotesk-SemiBold.ttf";
 import "fonts/JetBrainsMono-Medium.ttf";
 
-export struct GameRow {
-    name: string,
-    exe: string,
-    percent: int,      // -100..+100 ; 0 = no change (saturation 1.0)
-    enabled: bool,
-    accent: color,
-    initial: string,
-    icon: image,
-    has-icon: bool,
-}
-
-export struct HealthRowUi {
-    label: string,
-    detail: string,
-    level: int,   // 0 ok, 1 problem, 2 not applicable
-}
-
-export struct LogRow {
-    text: string,
-    time: string,
-    ok: bool,
-}
-
-// Brand palette. Dark values are the render tokens (toolkit.py:7-8).
-// Light mode has no target design; it keeps the earlier light values and
-// extends them to the new tokens.
-export global Pal {
-    in-out property <bool> dark: false;
-    out property <color> accent:      dark ? #1fe3cb : #007568;   // TEAL
-    out property <color> accent-2:    dark ? #6cf5e6 : #005e55;   // hover on solid
-    out property <color> accent-soft: dark ? #0c2d2b : #d8f3ed;   // TINT
-    out property <color> accent-soft-2: dark ? #10403c : #c6ece4; // hover on tint
-    out property <color> accent-line: dark ? #1f655c : #7cc8bc;   // TLINE
-    out property <color> on-accent:   dark ? #08211e : #ffffff;   // DARK
-    out property <color> bg:          dark ? #07080b : #eef1f6;   // BG
-    out property <color> sheet:       dark ? #0e1116 : #ffffff;   // SHEET
-    out property <color> surface:     dark ? #11151b : #ffffff;   // SURFACE
-    out property <color> raised:      dark ? #171c22 : #f3f6fb;   // LIGHT
-    out property <color> field:       dark ? #1c2229 : #cfd6e2;   // FIELD
-    out property <color> line:        dark ? #2b313a : #dde3ee;   // LINE
-    out property <color> line-soft:   dark ? #20262e : #e8ecf2;   // LESS
-    out property <color> ink:         dark ? #f3f6fb : #0a0c10;   // WHITE
-    out property <color> soft:        dark ? #c3cbd4 : #2b3442;   // SOFT
-    out property <color> muted:       dark ? #9ba6b3 : #5b6675;   // MUTED
-    out property <color> dim:         dark ? #8995a5 : #6b7685;   // DIM
-    out property <color> hover:       dark ? #1a2028 : #e6ebf3;
-    out property <color> danger:      #ff5f6e;
-    // Problem rows on the Status page.
-    out property <color> warn:        dark ? #f5b84b : #a86200;
-}
-
-// Typography tokens. To swap fonts, change the `import` lines at the top of
-// this file, these family names and weights, and `default-font-family` on
-// AppWindow. Nothing else in the UI names a font.
-// Roles: reg = body text, med = labels, bold = strong labels and buttons,
-// head = headings and the big teal values, mono = numbers, paths and times.
-export global Font {
-    out property <string> reg:  "Hanken Grotesk";
-    out property <int>    reg-weight:  400;
-    out property <string> med:  "Hanken Grotesk";
-    out property <int>    med-weight:  500;
-    out property <string> bold: "Hanken Grotesk";
-    out property <int>    bold-weight: 600;
-    out property <string> head: "Schibsted Grotesk";
-    out property <int>    head-weight: 700;
-    out property <string> mono: "JetBrains Mono";
-    out property <int>    mono-weight: 500;
-}
+import { GameRow, SteamRow, HealthRowUi, LogRow, Pal, Font } from "theme.slint";
+import { Gm, GameModeUi, GmGame, GmPick, GmPrompt } from "touch.slint";
+export { GameRow, SteamRow, HealthRowUi, LogRow, Pal, Font, Gm, GmGame, GmPick, GmPrompt }
 
 // Button styles from toolkit.py:78-92.
 // kind: 0 solid teal, 1 sub, 2 flat (outline), 3 tint, 4 bare.
@@ -301,6 +236,8 @@ component Para inherits Text {
 // One game profile card, 350x146 at the render size (card_revision.py:12-25).
 component GameCard inherits Rectangle {
     in property <GameRow> game;
+    // The card the "Add Steam game" picker just opened or added.
+    in property <bool> picked: false;
     callback percent-changed(float);
     callback enabled-toggled(bool);
     callback remove-clicked();
@@ -308,7 +245,7 @@ component GameCard inherits Rectangle {
     background: Pal.surface;
     border-radius: 11px;
     border-width: 1px;
-    border-color: Pal.line;
+    border-color: root.picked ? Pal.accent-line : Pal.line;
 
     Rectangle {
         x: 15px; y: 12px; width: 35px; height: 35px;
@@ -387,14 +324,21 @@ export component AppWindow inherits Window {
     icon: @image-url("icon.png");
     default-font-family: "Hanken Grotesk";
     default-font-size: 14px;
-    preferred-width: 1140px;
-    preferred-height: 700px;
-    min-width: 1040px;
-    min-height: 560px;
+    // The size the window opens at. In a Steam gaming session main.rs sets
+    // these to the whole output before the window is shown (src/mode.rs).
+    in property <length> open-width: 1140px;
+    in property <length> open-height: 700px;
+    preferred-width: root.open-width;
+    preferred-height: root.open-height;
+    // A Steam gaming session gets its own layout (touch.slint), drawn 640
+    // logical pixels wide (src/mode.rs). main.rs sets this before the window
+    // is shown.
+    in property <bool> touch: false;
+    min-width: root.touch ? 640px : 1040px;
+    min-height: root.touch ? 360px : 560px;
     background: Pal.bg;
 
     in-out property <[GameRow]> games;
-    in-out property <[string]> running;
     in-out property <[LogRow]> activity;
     in-out property <string> backend-name: "none";
     in-out property <bool> backend-ok: false;
@@ -416,6 +360,7 @@ export component AppWindow inherits Window {
     in-out property <string> live-profile: "-";
     in-out property <string> live-saturation: "-";
     in-out property <string> live-saturation-note: "";
+    in-out property <bool> live-color-off: false;
     in-out property <bool> live-has-focused: false;
     in-out property <string> live-focused: "";
     in-out property <int> new-game-percent: 40;
@@ -436,8 +381,22 @@ export component AppWindow inherits Window {
     callback percent-changed(int, float);
     callback toggle-enabled(int, bool);
     callback remove(int);
-    callback add-running(int);
-    callback refresh-running();
+
+    // The "Add game" list. Rust reads the Steam library and what is running
+    // when it opens (and on Refresh) and fills these; the page only draws them.
+    in-out property <[SteamRow]> steam-rows;
+    in-out property <string> steam-message: "";
+    in-out property <bool> steam-filter-shown: false;
+    // The card to bring into view, and a count that changes on every pick so
+    // picking the same card twice still scrolls to it.
+    in-out property <int> picked-index: -1;
+    in-out property <int> picked-serial: 0;
+    callback steam-picker-opened();
+    callback steam-refresh();
+    callback steam-filter-changed(string);
+    // Enter in the filter field; true when it picked a game.
+    callback steam-filter-accepted() -> bool;
+    callback pick-steam(int);      // the row's index in steam-rows
     callback clear-activity();
     callback dark-mode-changed(bool);
     callback open-link(string);
@@ -460,7 +419,7 @@ export component AppWindow inherits Window {
     property <length> note-y: root.grid-y + root.grid-h + 10px;
 
     // ================= Top bar (toolkit.py:137-145) =================
-    Rectangle {
+    if !root.touch: Rectangle {
         x: 0; y: 0; width: root.width; height: 65px;
         background: Pal.sheet;
         Rectangle { x: 0; y: 64px; width: parent.width; height: 1px; background: Pal.line; }
@@ -516,9 +475,29 @@ export component AppWindow inherits Window {
     }
 
     // ================= Main: desktop strip + game cards =================
-    if root.nav == 0: main-page := Flickable {
+    if !root.touch && root.nav == 0: main-page := Flickable {
         x: 0; y: 65px; width: root.width; height: root.page-h;
         viewport-height: Math.max(self.height, root.note-y + 19px + 28px);
+
+        // After a pick, scroll just enough to show the whole card, 16px clear
+        // of the page edges.
+        property <int> picked-serial: root.picked-serial;
+        changed picked-serial => {
+            if (root.picked-index >= 0) {
+                self.show-card(root.picked-index);
+            }
+        }
+        function show-card(i: int) {
+            let top = root.grid-y + Math.floor(i / root.grid-cols) * 157px - 16px;
+            let bottom = top + 146px + 32px;
+            if (bottom > self.height - self.viewport-y) {
+                self.viewport-y = self.height - bottom;
+            }
+            if (top < -self.viewport-y) {
+                self.viewport-y = -top;
+            }
+            self.viewport-y = Math.min(0px, Math.max(self.height - self.viewport-height, self.viewport-y));
+        }
 
         // Desktop vibrance strip. One control row (title, value, slider,
         // restore), the old Desktop page sentence under it in muted text.
@@ -559,7 +538,7 @@ export component AppWindow inherits Window {
             }
             Text {
                 x: 24px; y: 74px; width: parent.width - 48px; height: 18px;
-                text: "Saturates your whole desktop now, and is the default when no game profile is active. Leave at 0% to keep the desktop untouched.";
+                text: "Saturates your whole desktop, and games with no profile. A game whose profile is off shows normal colors. 0% leaves the desktop untouched.";
                 font-family: Font.reg; font-weight: Font.reg-weight; font-size: 13px; color: Pal.muted;
                 vertical-alignment: center; overflow: elide;
             }
@@ -570,53 +549,152 @@ export component AppWindow inherits Window {
             text: "Games"; font-size: 28px;
         }
         add-btn := Btn {
-            x: parent.width - 209px; y: root.games-y; width: 179px; height: 37px;
+            x: parent.width - 30px - 145px; y: root.games-y; width: 145px; height: 37px;
             kind: 0;
-            text: "Add running game";
+            text: "Add game";
             has-icon: true; icon: @image-url("icons/plus.svg");
             has-trailing: true; trailing: @image-url("icons/down.svg");
-            clicked => { running-popup.show(); }
+            clicked => {
+                root.steam-picker-opened();
+                steam-popup.show();
+            }
         }
 
-        // "Add running game" list. No render exists for the open state; it
-        // reuses the page tokens and components.
-        running-popup := PopupWindow {
-            x: add-btn.x + add-btn.width - 280px;
-            y: add-btn.y + add-btn.height + 6px;
-            width: 280px;
-            height: 320px;
+        // The "Add game" list: the user's games by name, running ones first
+        // (src/picker.rs), a filter field when the list is long, and one
+        // plain sentence when there is nothing to list. The rows use the
+        // Status page's two-line row (dot, bold name, muted detail) at a
+        // height of 48px. Escape or a click outside closes it.
+        property <length> steam-row-h: 48px;
+        property <length> steam-list-y: root.steam-filter-shown ? 102px : 54px;
+        property <length> steam-top: add-btn.y + add-btn.height + 6px;
+        // Room below the button in the window, 16px clear of the bottom.
+        property <length> steam-room: root.height - 65px - self.viewport-y - self.steam-top - 16px;
+        property <length> steam-content: self.steam-list-y
+            + (root.steam-rows.length == 0 ? 96px : root.steam-rows.length * self.steam-row-h) + 8px;
+        steam-popup := PopupWindow {
+            x: add-btn.x + add-btn.width - 400px;
+            y: main-page.steam-top;
+            width: 400px;
+            // A long list keeps one height while the filter narrows it, so the
+            // picker does not jump under the finger; a short one fits its rows.
+            height: Math.max(150px, Math.min(main-page.steam-room,
+                root.steam-filter-shown ? 440px : Math.min(440px, main-page.steam-content)));
+            close-policy: close-on-click-outside;
             Rectangle {
                 background: Pal.sheet;
                 border-radius: 11px;
                 border-width: 1px;
                 border-color: Pal.line;
                 Section {
-                    x: 16px; y: 10px; width: 170px; height: 31px;
-                    text: "Running programs"; font-size: 16px;
+                    x: 16px; y: 10px; width: parent.width - 118px; height: 31px;
+                    text: "Your games"; font-size: 16px;
                 }
                 Btn {
                     x: parent.width - 86px; y: 12px; width: 70px; height: 27px;
                     kind: 2; border-radius: 6px; font-size: 12px;
                     text: "Refresh";
-                    clicked => { root.refresh-running(); }
+                    clicked => { root.steam-refresh(); }
                 }
                 Rectangle { x: 16px; y: 49px; width: parent.width - 32px; height: 1px; background: Pal.line; }
-                Flickable {
-                    x: 8px; y: 54px; width: parent.width - 16px; height: parent.height - 62px;
-                    viewport-height: Math.max(self.height, root.running.length * 32px);
-                    for r[i] in root.running: Rectangle {
-                        x: 0; y: i * 32px; width: parent.width; height: 32px;
+
+                // The app has no visible text field elsewhere; this one is drawn
+                // with the outline button's tokens (radius, line, raised fill).
+                if root.steam-filter-shown: Rectangle {
+                    x: 16px; y: 58px; width: parent.width - 32px; height: 36px;
+                    border-radius: 7px;
+                    background: Pal.raised;
+                    border-width: 1px;
+                    border-color: filter-input.has-focus ? Pal.accent-line : Pal.line;
+                    if filter-input.text == "": Text {
+                        x: 12px; y: 0; width: parent.width - 24px; height: parent.height;
+                        text: "Filter by name";
+                        font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.dim;
+                        vertical-alignment: center;
+                    }
+                    filter-input := TextInput {
+                        x: 12px; y: 0; width: parent.width - 24px; height: parent.height;
+                        font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.ink;
+                        vertical-alignment: center;
+                        single-line: true;
+                        selection-background-color: Pal.accent-soft-2;
+                        selection-foreground-color: Pal.ink;
+                        init => { self.focus(); }
+                        edited => { root.steam-filter-changed(self.text); }
+                        accepted => {
+                            if (root.steam-filter-accepted()) {
+                                steam-popup.close();
+                            }
+                        }
+                    }
+                }
+
+                if root.steam-rows.length == 0: Text {
+                    x: 24px; y: main-page.steam-list-y; width: parent.width - 48px; height: 96px;
+                    text: root.steam-message;
+                    font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.muted;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+                steam-list := Flickable {
+                    x: 8px; y: main-page.steam-list-y;
+                    width: parent.width - 16px; height: parent.height - self.y - 8px;
+                    viewport-height: Math.max(self.height, root.steam-rows.length * main-page.steam-row-h);
+                    // Keyboard focus moving to a row scrolls it into view.
+                    function show-row(i: int) {
+                        let top = i * main-page.steam-row-h;
+                        if (top + main-page.steam-row-h > self.height - self.viewport-y) {
+                            self.viewport-y = self.height - top - main-page.steam-row-h;
+                        }
+                        if (top < -self.viewport-y) {
+                            self.viewport-y = -top;
+                        }
+                    }
+                    for game[i] in root.steam-rows: Rectangle {
+                        x: 0; y: i * main-page.steam-row-h; width: parent.width; height: main-page.steam-row-h;
                         border-radius: 6px;
-                        background: rt.has-hover ? Pal.raised : transparent;
-                        rt := TouchArea {
+                        background: row-touch.has-hover ? Pal.raised : transparent;
+                        border-width: row-focus.has-focus ? 1px : 0px;
+                        border-color: Pal.accent-line;
+                        row-touch := TouchArea {
                             mouse-cursor: pointer;
-                            clicked => { root.add-running(i); running-popup.close(); }
+                            clicked => {
+                                root.pick-steam(i);
+                                steam-popup.close();
+                            }
+                        }
+                        row-focus := FocusScope {
+                            focus-on-click: false;
+                            focus-gained => { steam-list.show-row(i); }
+                            key-pressed(event) => {
+                                if (event.text == Key.Return || event.text == " ") {
+                                    root.pick-steam(i);
+                                    steam-popup.close();
+                                    return accept;
+                                }
+                                reject
+                            }
+                        }
+                        Rectangle {
+                            x: 9px; y: 14px; width: 7px; height: 7px; border-radius: 3.5px;
+                            background: game.running || game.has-profile ? Pal.accent : Pal.dim;
                         }
                         Text {
-                            x: 8px; y: 0; width: parent.width - 16px; height: parent.height;
-                            text: r;
-                            font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.soft;
+                            x: 25px; y: 5px; width: parent.width - 33px; height: 20px;
+                            text: game.name;
+                            font-family: Font.bold; font-weight: Font.bold-weight; font-size: 13px; color: Pal.ink;
                             vertical-alignment: center; overflow: elide;
+                        }
+                        Text {
+                            x: 25px; y: 24px; width: parent.width - 33px; height: 17px;
+                            text: game.detail;
+                            font-family: Font.med; font-weight: Font.med-weight; font-size: 12px;
+                            color: game.running ? Pal.accent : Pal.muted;
+                            vertical-alignment: center; overflow: elide;
+                        }
+                        if i < root.steam-rows.length - 1: Rectangle {
+                            x: 8px; y: main-page.steam-row-h - 1px; width: parent.width - 16px; height: 1px;
+                            background: Pal.line-soft;
                         }
                     }
                 }
@@ -629,7 +707,7 @@ export component AppWindow inherits Window {
             border-radius: 11px; border-width: 1px; border-color: Pal.line;
             Text {
                 width: 100%; height: 100%;
-                text: "No games yet.\nClick “Add running game”, pick your game, and set its satur8.";
+                text: "No games yet.\nClick “Add game”, pick your game, and set its satur8.";
                 font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.muted;
                 horizontal-alignment: center; vertical-alignment: center;
             }
@@ -640,6 +718,7 @@ export component AppWindow inherits Window {
             y: root.grid-y + Math.floor(i / root.grid-cols) * 157px;
             width: root.card-w;
             game: game;
+            picked: i == root.picked-index;
             percent-changed(v) => { root.percent-changed(i, v); }
             enabled-toggled(on) => { root.toggle-enabled(i, on); }
             remove-clicked => { root.remove(i); }
@@ -651,7 +730,7 @@ export component AppWindow inherits Window {
         }
         Text {
             x: 52px; y: root.note-y; width: 879px; height: 19px;
-            text: "Profiles are matched by the game's executable name.";
+            text: "Steam games are matched by their Steam app ID, other games by their executable name.";
             font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
             vertical-alignment: center;
         }
@@ -661,7 +740,7 @@ export component AppWindow inherits Window {
     // Health (first), Right now, Settings, Help, and a compact Activity log.
     // Two columns share the render's 16px gutter; the page scrolls when the
     // window is shorter than the content.
-    if root.nav == 1: status-page := Flickable {
+    if !root.touch && root.nav == 1: status-page := Flickable {
         x: 0; y: 65px; width: root.width; height: root.page-h;
         property <length> left-w: Math.floor((self.width - 76px) * 0.58 / 1px) * 1px;
         property <length> right-x: 46px + self.left-w;
@@ -988,7 +1067,7 @@ export component AppWindow inherits Window {
     // ================= About (directions.py:52-65) =================
     // Render layout, with the old Desktop page's "Auto-apply per game" card
     // added as a third card in the middle row. Cards grow if text wraps.
-    if root.nav == 2: about-page := Flickable {
+    if !root.touch && root.nav == 2: about-page := Flickable {
         x: 0; y: 65px; width: root.width; height: root.page-h;
         property <length> col-w: Math.floor((self.width - 60px - 32px) / 3 / 1px) * 1px;
         property <length> cards-y: intro-card.y + intro-card.height + 16px;
@@ -1108,5 +1187,35 @@ export component AppWindow inherits Window {
                 clicked => { root.open-link("https://satur8.app"); }
             }
         }
+    }
+    // ================= Steam Game Mode =================
+    if root.touch: GameModeUi {
+        x: 0; y: 0; width: root.width; height: root.height;
+        backend-name: root.backend-name;
+        backend-ok: root.backend-ok;
+        version-text: root.version-text;
+        health: root.health;
+        health-problem: root.health-problem;
+        checking: root.checking;
+        repairing: root.repairing;
+        switch-available: root.switch-available;
+        switch-on: root.switch-on;
+        switch-busy: root.switch-busy;
+        switch-detail: root.switch-detail;
+        live-daemon: root.live-daemon;
+        live-profile: root.live-profile;
+        live-saturation: root.live-saturation;
+        live-saturation-note: root.live-saturation-note;
+        live-color-off: root.live-color-off;
+        new-game-percent: root.new-game-percent;
+        sysinfo-text: root.sysinfo-text;
+        activity: root.activity;
+        check-health => { root.check-health(); }
+        repair => { root.repair(); }
+        set-switching(on) => { root.set-switching(on); }
+        sysinfo-copied => { root.sysinfo-copied(); }
+        report-bug => { root.report-bug(); }
+        open-link(url) => { root.open-link(url); }
+        dark-mode-changed(dark) => { root.dark-mode-changed(dark); }
     }
 }

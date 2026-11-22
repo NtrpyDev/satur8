@@ -15,4 +15,6 @@ satur8-hyprland = { workspace = true }
 satur8-nv-control = { workspace = true }
 satur8-gnome = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }
+zbus = { workspace = true }
 signal-hook = "0.3"

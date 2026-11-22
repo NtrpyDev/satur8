@@ -38,9 +38,10 @@ pub enum ProfileCmd {
     },
     /// Remove a profile by name.
     Remove { name: String },
-    /// Enable a profile so it can match running games.
+    /// Turn a profile on: its game shows the profile's saturation.
     Enable { name: String },
-    /// Disable a profile without deleting it.
+    /// Turn a profile off without deleting it: its game shows normal colors,
+    /// not the default saturation.
     Disable { name: String },
     /// Print the profiles file path.
     Path,
@@ -178,10 +179,7 @@ fn set_enabled(name: &str, enabled: bool) -> Result<()> {
     let mut profiles = config::load_profiles()?;
     set_profile_enabled(&mut profiles, name, enabled)?;
     config::save_profiles(&profiles)?;
-    println!(
-        "{} profile '{name}'",
-        if enabled { "enabled" } else { "disabled" }
-    );
+    println!("{}", enabled_message(name, enabled));
     Ok(())
 }
 
@@ -247,6 +245,15 @@ fn remove_profile_by_name(profiles: &mut Profiles, name: &str) -> Result<()> {
         bail!("no profile named '{name}'");
     }
     Ok(())
+}
+
+/// What `profile enable` and `profile disable` print.
+fn enabled_message(name: &str, enabled: bool) -> String {
+    if enabled {
+        format!("enabled profile '{name}'")
+    } else {
+        format!("disabled profile '{name}': its game now shows normal colors")
+    }
 }
 
 fn set_profile_enabled(profiles: &mut Profiles, name: &str, enabled: bool) -> Result<()> {
@@ -376,6 +383,15 @@ mod tests {
 
         assert!(remove_profile_by_name(&mut profiles, "missing").is_err());
         assert_eq!(profiles.profiles.len(), 1);
+    }
+
+    #[test]
+    fn disabling_says_what_the_game_shows() {
+        assert_eq!(enabled_message("cs2", true), "enabled profile 'cs2'");
+        assert_eq!(
+            enabled_message("cs2", false),
+            "disabled profile 'cs2': its game now shows normal colors"
+        );
     }
 
     #[test]

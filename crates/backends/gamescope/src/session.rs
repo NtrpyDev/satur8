@@ -32,6 +32,7 @@ const SERVER_ID: &str = "GAMESCOPE_XWAYLAND_SERVER_ID";
 const FOCUSED_APP_GFX: &str = "GAMESCOPE_FOCUSED_APP_GFX";
 const FOCUSED_WINDOW: &str = "GAMESCOPE_FOCUSED_WINDOW";
 const FOCUSABLE_WINDOWS: &str = "GAMESCOPE_FOCUSABLE_WINDOWS";
+const FOCUSABLE_APPS: &str = "GAMESCOPE_FOCUSABLE_APPS";
 const COLOR_MANAGEMENT_DISABLE: &str = "GAMESCOPE_COLOR_MANAGEMENT_DISABLE";
 const SDR_GAMUT_WIDENESS: &str = "GAMESCOPE_COLOR_SDR_GAMUT_WIDENESS";
 const VIRTUAL_WHITE: &str = "GAMESCOPE_DISPLAY_VIRTUAL_WHITE";
@@ -115,7 +116,9 @@ pub fn read_focus(props: &dyn RootProps) -> Result<Focus> {
     let pid = match first(props.cardinals(FOCUSED_WINDOW)?) {
         Some(window) => props.cardinals(FOCUSABLE_WINDOWS)?.and_then(|triplets| {
             triplets
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .find(|triplet| triplet[0] == window)
                 .map(|triplet| triplet[2])
         }),
@@ -125,6 +128,26 @@ pub fn read_focus(props: &dyn RootProps) -> Result<Focus> {
         app_id,
         pid: pid.filter(|pid| *pid != 0),
     })
+}
+
+/// The AppIDs that have a window right now: `GAMESCOPE_FOCUSABLE_APPS`, plus
+/// the AppID of every `[window, appid, pid]` triplet in
+/// `GAMESCOPE_FOCUSABLE_WINDOWS`. Steam's own interface (769) and the calling
+/// program's own shortcut are in the list too; the caller leaves them out.
+/// Each ID once, in the order gamescope lists them.
+pub fn running_apps(props: &dyn RootProps) -> Result<Vec<u32>> {
+    let mut apps = props.cardinals(FOCUSABLE_APPS)?.unwrap_or_default();
+    if let Some(triplets) = props.cardinals(FOCUSABLE_WINDOWS)? {
+        apps.extend(triplets.as_chunks::<3>().0.iter().map(|triplet| triplet[1]));
+    }
+    let mut seen = Vec::new();
+    apps.retain(|app| {
+        *app != 0 && !seen.contains(app) && {
+            seen.push(*app);
+            true
+        }
+    });
+    Ok(apps)
 }
 
 fn classify_look(value: Option<String>) -> Look {
@@ -269,6 +292,17 @@ impl X11Root {
             root,
             atoms: RefCell::new(HashMap::new()),
         })
+    }
+
+    /// The root window's size in pixels right now. In a gamescope session
+    /// this is the size games are given, which is what a window has to fit.
+    pub fn size(&self) -> Result<(u32, u32)> {
+        let geometry = self
+            .conn
+            .get_geometry(self.root)?
+            .reply()
+            .context("reading the root window's size")?;
+        Ok((u32::from(geometry.width), u32::from(geometry.height)))
     }
 
     fn atom(&self, name: &str) -> Result<Atom> {
@@ -439,6 +473,32 @@ mod tests {
         let mut root = FakeRoot::default();
         root.strings.insert(LOOK.into(), value.into());
         root
+    }
+
+    /// The Deck with Sushiamo and ELDEN RING running and Satur8's own Steam
+    /// shortcut (3367991943) in front, 2026-11-22.
+    #[test]
+    fn running_apps_lists_each_app_with_a_window_once() {
+        let root = root()
+            .with(FOCUSABLE_APPS, &[3367991943, 4555040, 1245620, 769])
+            .with(
+                FOCUSABLE_WINDOWS,
+                &[
+                    100663299, 3367991943, 20114, 33554435, 4555040, 16797, 31457333, 769, 6788,
+                ],
+            );
+        assert_eq!(
+            running_apps(&root).unwrap(),
+            vec![3367991943, 4555040, 1245620, 769]
+        );
+        // Only the triplets, as older gamescope publishes.
+        let older =
+            FakeRoot::default().with(FOCUSABLE_WINDOWS, &[33554435, 4555040, 16797, 1, 0, 2]);
+        assert_eq!(running_apps(&older).unwrap(), vec![4555040]);
+        assert_eq!(
+            running_apps(&FakeRoot::default()).unwrap(),
+            Vec::<u32>::new()
+        );
     }
 
     /// Values read on the Deck in Sushiamo, 2026-11-21.
