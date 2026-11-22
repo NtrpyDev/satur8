@@ -32,6 +32,9 @@ pub enum Install {
     Installed {
         dir: PathBuf,
         per_user: bool,
+        /// A system-wide copy exists too, which the shell loads when it skips
+        /// the per-user folder.
+        system_copy: bool,
         metadata: Metadata,
     },
 }
@@ -127,6 +130,10 @@ pub struct GnomeFacts {
     pub user_extensions_enabled: Option<bool>,
     pub install: Install,
     pub view: ShellView,
+    /// `org.gnome.shell allow-extension-installation`, as GSettings reads it.
+    /// When it is false the shell skips the per-user extension folder. `Err`
+    /// says why the value is unknown.
+    pub allow_extension_installation: Result<bool, String>,
     /// Whether the extension's bus name is owned; `None` when unknown.
     pub service_owned: Option<bool>,
     /// The extension's `Saturation` property when it could be read.
@@ -141,6 +148,8 @@ pub enum NextStep {
     NotInstalled,
     /// Installed after the shell started.
     LogOutAndIn,
+    /// Installed per user only, and per-user extensions are not allowed.
+    PerUserNotAllowed,
     /// The folder is there but its `metadata.json` is missing or damaged.
     Reinstall,
     UserExtensionsOff,
@@ -190,7 +199,7 @@ pub fn next_step(facts: &GnomeFacts) -> NextStep {
             ExtState::Error => NextStep::LoadError,
             ExtState::OutOfDate => NextStep::OutOfDate { listed, running },
             ExtState::Activating | ExtState::Deactivating | ExtState::Downloading => NextStep::Busy,
-            ExtState::Uninstalled => not_loaded_step(&facts.install, listed, running),
+            ExtState::Uninstalled => not_loaded_step(facts, listed, running),
             ExtState::Inactive | ExtState::Initialized | ExtState::Other(_) => {
                 if facts.user_extensions_enabled == Some(false) {
                     NextStep::UserExtensionsOff
@@ -199,7 +208,7 @@ pub fn next_step(facts: &GnomeFacts) -> NextStep {
                 }
             }
         },
-        ShellView::NotLoaded => not_loaded_step(&facts.install, listed, running),
+        ShellView::NotLoaded => not_loaded_step(facts, listed, running),
         ShellView::QueryFailed(error) => match facts.install {
             Install::NotInstalled => NextStep::NotInstalled,
             Install::Installed { .. } => NextStep::QueryFailed(error.clone()),
@@ -208,9 +217,14 @@ pub fn next_step(facts: &GnomeFacts) -> NextStep {
 }
 
 /// The shell does not have the extension: decide from what is on disk.
-fn not_loaded_step(install: &Install, listed: Vec<String>, running: String) -> NextStep {
-    match install {
+fn not_loaded_step(facts: &GnomeFacts, listed: Vec<String>, running: String) -> NextStep {
+    match &facts.install {
         Install::NotInstalled => NextStep::NotInstalled,
+        Install::Installed {
+            per_user: true,
+            system_copy: false,
+            ..
+        } if facts.allow_extension_installation == Ok(false) => NextStep::PerUserNotAllowed,
         Install::Installed { metadata, .. } => match metadata {
             Metadata::Versions(_) if !lists_version(&listed, &running) => {
                 NextStep::OutOfDate { listed, running }
@@ -237,6 +251,12 @@ pub fn advice(step: &NextStep) -> String {
             .to_string(),
         NextStep::LogOutAndIn => "log out and back in; GNOME Shell looks for extensions only \
              when it starts, and on Wayland it cannot restart without logging out"
+            .to_string(),
+        NextStep::PerUserNotAllowed => "per-user extensions are turned off here \
+             (`org.gnome.shell allow-extension-installation` is false), so GNOME Shell skips \
+             the copy in your home folder; ask whoever manages this computer to allow them, \
+             or install Satur8's Arch or Fedora COPR package, which puts the extension in \
+             /usr/share"
             .to_string(),
         NextStep::Reinstall => "run Satur8's installer again (`packaging/install.sh`) to \
              replace the damaged extension folder, then log out and back in"
@@ -297,6 +317,7 @@ pub fn doctor_lines(facts: &GnomeFacts) -> Vec<String> {
             dir,
             per_user,
             metadata,
+            ..
         } => {
             let scope = if *per_user { "per-user" } else { "system-wide" };
             lines.push(format!(
@@ -304,6 +325,20 @@ pub fn doctor_lines(facts: &GnomeFacts) -> Vec<String> {
                 dir.display()
             ));
             lines.push(metadata_line(metadata, running.as_deref()));
+            if *per_user {
+                match &facts.allow_extension_installation {
+                    Ok(true) => {}
+                    Ok(false) => lines.push(
+                        "  [!!] per-user extensions are not allowed \
+                         (org.gnome.shell allow-extension-installation is false)"
+                            .to_string(),
+                    ),
+                    Err(reason) => lines.push(format!(
+                        "  [..] couldn't read org.gnome.shell allow-extension-installation: \
+                         {reason}"
+                    )),
+                }
+            }
         }
     }
 
@@ -390,6 +425,7 @@ pub fn status_line(facts: &GnomeFacts) -> String {
         NextStep::ShellUnreachable => "GNOME Shell not reachable",
         NextStep::NotInstalled => "extension not installed",
         NextStep::LogOutAndIn => "extension installed, GNOME Shell has not loaded it yet",
+        NextStep::PerUserNotAllowed => "per-user extensions not allowed",
         NextStep::Reinstall => "extension folder damaged",
         NextStep::UserExtensionsOff => "extensions turned off",
         NextStep::Enable => "extension disabled",
@@ -545,17 +581,46 @@ fn find_install() -> Install {
         data_dirs.as_deref(),
         GNOME_EXTENSION_UUID,
     );
-    for (dir, per_user) in dirs {
-        if dir.is_dir() {
+    let found: Vec<(PathBuf, bool)> = dirs.into_iter().filter(|(dir, _)| dir.is_dir()).collect();
+    let system_copy = found.iter().any(|(_, per_user)| !per_user);
+    match found.into_iter().next() {
+        Some((dir, per_user)) => {
             let metadata = read_metadata(&dir);
-            return Install::Installed {
+            Install::Installed {
                 dir,
                 per_user,
+                system_copy: per_user && system_copy,
                 metadata,
-            };
+            }
         }
+        None => Install::NotInstalled,
     }
-    Install::NotInstalled
+}
+
+/// Read `allow-extension-installation` through GSettings, as the shell does.
+/// `gsettings` falls back to a memory backend when dconf is missing and then
+/// prints only the schema default, so that case is unknown, not `true`.
+pub fn parse_gsettings_bool(stdout: &str, stderr: &str) -> Result<bool, String> {
+    if stderr.contains("memory") && stderr.contains("GSettings backend") {
+        return Err("no GSettings backend here (dconf missing), only the default".to_string());
+    }
+    match stdout.trim() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(format!("unexpected gsettings output {other:?}")),
+    }
+}
+
+fn read_allow_extension_installation() -> Result<bool, String> {
+    let output = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.shell", "allow-extension-installation"])
+        .output()
+        .map_err(|error| format!("couldn't run gsettings: {error}"))?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        return Err(format!("gsettings failed: {}", stderr.trim()));
+    }
+    parse_gsettings_bool(&String::from_utf8_lossy(&output.stdout), &stderr)
 }
 
 /// `org.freedesktop.DBus.Properties.Get` on one property.
@@ -628,6 +693,7 @@ fn name_has_owner(conn: &Connection, name: &str) -> Option<bool> {
 /// Read every fact from the session bus and the disk.
 pub fn gather() -> GnomeFacts {
     let install = find_install();
+    let allow_extension_installation = read_allow_extension_installation();
     let conn = match Connection::session() {
         Ok(conn) => conn,
         Err(error) => {
@@ -636,6 +702,7 @@ pub fn gather() -> GnomeFacts {
                 shell: Err(error.clone()),
                 user_extensions_enabled: None,
                 install,
+                allow_extension_installation,
                 view: ShellView::QueryFailed(error),
                 service_owned: None,
                 saturation: None,
@@ -675,6 +742,7 @@ pub fn gather() -> GnomeFacts {
         shell,
         user_extensions_enabled,
         install,
+        allow_extension_installation,
         view,
         service_owned,
         saturation,
@@ -695,6 +763,7 @@ mod tests {
                 "/home/u/.local/share/gnome-shell/extensions/satur8@satur8.github.io",
             ),
             per_user: true,
+            system_copy: false,
             metadata,
         }
     }
@@ -721,6 +790,7 @@ mod tests {
             shell: Ok("51.1".to_string()),
             user_extensions_enabled: Some(true),
             install: up_to_51(),
+            allow_extension_installation: Ok(true),
             view: loaded(ExtState::Active),
             service_owned: Some(true),
             saturation: Some(1.0),
@@ -1019,6 +1089,84 @@ mod tests {
             ExtState::Other(_)
         ));
         assert!(matches!(ExtState::from_number(1e9), ExtState::Other(_)));
+    }
+
+    #[test]
+    fn per_user_copy_with_per_user_extensions_off_says_so() {
+        let facts = GnomeFacts {
+            allow_extension_installation: Ok(false),
+            view: ShellView::NotLoaded,
+            service_owned: Some(false),
+            saturation: None,
+            ..healthy()
+        };
+        assert_eq!(next_step(&facts), NextStep::PerUserNotAllowed);
+        let lines = doctor_lines(&facts);
+        assert_eq!(
+            lines[3],
+            "  [!!] per-user extensions are not allowed \
+             (org.gnome.shell allow-extension-installation is false)"
+        );
+        assert!(lines
+            .last()
+            .is_some_and(|line| line.contains("allow-extension-installation` is false")));
+        assert_eq!(
+            status_line(&facts),
+            "backend gnome-shell: unavailable, per-user extensions not allowed \
+             (see `satur8 doctor`)"
+        );
+        // A system-wide copy is loaded instead, so the setting does not block it.
+        let with_system_copy = GnomeFacts {
+            install: Install::Installed {
+                dir: PathBuf::from("/home/u/x"),
+                per_user: true,
+                system_copy: true,
+                metadata: Metadata::Versions(versions(&["51"])),
+            },
+            ..facts.clone()
+        };
+        assert_eq!(next_step(&with_system_copy), NextStep::LogOutAndIn);
+        // Once the shell has loaded it, the setting no longer matters.
+        let loaded_anyway = GnomeFacts {
+            view: loaded(ExtState::Active),
+            service_owned: Some(true),
+            ..facts
+        };
+        assert_eq!(next_step(&loaded_anyway), NextStep::Ready);
+    }
+
+    #[test]
+    fn unknown_setting_is_shown_and_not_guessed() {
+        let facts = GnomeFacts {
+            allow_extension_installation: Err("couldn't run gsettings: not found".to_string()),
+            view: ShellView::NotLoaded,
+            service_owned: Some(false),
+            ..healthy()
+        };
+        assert_eq!(next_step(&facts), NextStep::LogOutAndIn);
+        assert_eq!(
+            doctor_lines(&facts)[3],
+            "  [..] couldn't read org.gnome.shell allow-extension-installation: \
+             couldn't run gsettings: not found"
+        );
+        // The healthy report has no line for it.
+        assert!(doctor_lines(&healthy())
+            .iter()
+            .all(|line| !line.contains("allow-extension-installation")));
+    }
+
+    #[test]
+    fn gsettings_output_is_read_strictly() {
+        assert_eq!(parse_gsettings_bool("true\n", ""), Ok(true));
+        assert_eq!(parse_gsettings_bool("false\n", ""), Ok(false));
+        assert!(parse_gsettings_bool("", "").is_err());
+        assert!(parse_gsettings_bool("@mb nothing\n", "").is_err());
+        assert!(parse_gsettings_bool(
+            "true\n",
+            "GLib-GIO-Message: Using the \u{201c}memory\u{201d} GSettings backend.  \
+             Your settings will not be saved or shared with other applications.\n"
+        )
+        .is_err());
     }
 
     #[test]
