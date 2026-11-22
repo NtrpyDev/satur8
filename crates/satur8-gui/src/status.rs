@@ -22,6 +22,9 @@ const FOCUS_KEY: &str = "satur8-focusEnabled";
 const DAEMON_BUS: &str = "org.satur8.Daemon";
 const DAEMON_PATH: &str = "/org/satur8/Daemon";
 const KWIN_BUS: &str = "org.kde.KWin";
+const SYSTEMD_BUS: &str = "org.freedesktop.systemd1";
+const SYSTEMD_PATH: &str = "/org/freedesktop/systemd1";
+const SYSTEMD_MANAGER: &str = "org.freedesktop.systemd1.Manager";
 
 // ------------------------------------------------------------------ facts
 
@@ -589,9 +592,20 @@ impl System for RealSystem {
         match action {
             Action::RepairEffect => satur8_kwin::repair::repair().map(|outcome| outcome.describe()),
             Action::Systemctl(args) => {
-                let mut cmd = Command::new("systemctl");
-                cmd.arg("--user").args(args).arg(DAEMON_UNIT);
-                run_command(cmd)
+                if on_path("systemctl") {
+                    let mut cmd = Command::new("systemctl");
+                    cmd.arg("--user").args(args).arg(DAEMON_UNIT);
+                    run_command(cmd)
+                } else {
+                    // Steam starts the app inside its runtime container,
+                    // which has no systemctl; the user's systemd is still on
+                    // the session bus.
+                    let conn = session()?;
+                    for step in manager_steps(args) {
+                        run_manager_step(&conn, step)?;
+                    }
+                    Ok(String::new())
+                }
             }
             Action::SetFocusEnabled(on) => {
                 let mut cmd = Command::new("kwriteconfig6");
@@ -727,16 +741,124 @@ where
 }
 
 fn unit_state() -> UnitState {
-    let Ok(out) = Command::new("systemctl")
+    match Command::new("systemctl")
         .args(["--user", "is-enabled", DAEMON_UNIT])
         .output()
-    else {
-        return UnitState::Unknown;
-    };
-    parse_unit_state(
-        &String::from_utf8_lossy(&out.stdout),
-        &String::from_utf8_lossy(&out.stderr),
-    )
+    {
+        Ok(out) => parse_unit_state(
+            &String::from_utf8_lossy(&out.stdout),
+            &String::from_utf8_lossy(&out.stderr),
+        ),
+        // No systemctl to run: Steam's runtime container, where the app runs
+        // when it is started from the Steam library. Ask systemd itself.
+        Err(_) => {
+            let answer = session().and_then(|conn| {
+                call::<String>(
+                    &conn,
+                    SYSTEMD_BUS,
+                    SYSTEMD_PATH,
+                    SYSTEMD_MANAGER,
+                    "GetUnitFileState",
+                    &(DAEMON_UNIT,),
+                )
+            });
+            unit_state_from_manager(answer.as_deref().map_err(String::as_str))
+        }
+    }
+}
+
+/// Map systemd's own answer to `GetUnitFileState` to a [`UnitState`]: the
+/// state word `systemctl is-enabled` prints, or its error for a unit that
+/// does not exist ("No such file or directory").
+pub fn unit_state_from_manager(answer: Result<&str, &str>) -> UnitState {
+    match answer {
+        Ok(state) => parse_unit_state(state, ""),
+        Err(error) if error.contains("No such file") => UnitState::NotInstalled,
+        Err(_) => UnitState::Unknown,
+    }
+}
+
+/// One call to the user's systemd over the session bus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManagerStep {
+    Enable,
+    Disable,
+    /// Reread unit files, as `systemctl enable` and `disable` do afterwards.
+    Reload,
+    Start,
+    Stop,
+}
+
+/// The calls that do what `systemctl --user <args> satur8-daemon.service`
+/// does, for the argument lists [`Action::Systemctl`] is built with.
+pub fn manager_steps(args: &[&str]) -> Vec<ManagerStep> {
+    let now = args.contains(&"--now");
+    let mut steps = Vec::new();
+    for arg in args {
+        match *arg {
+            "enable" => {
+                steps.extend([ManagerStep::Enable, ManagerStep::Reload]);
+                if now {
+                    steps.push(ManagerStep::Start);
+                }
+            }
+            "disable" => {
+                steps.extend([ManagerStep::Disable, ManagerStep::Reload]);
+                if now {
+                    steps.push(ManagerStep::Stop);
+                }
+            }
+            "start" => steps.push(ManagerStep::Start),
+            "stop" => steps.push(ManagerStep::Stop),
+            _ => {}
+        }
+    }
+    steps
+}
+
+fn run_manager_step(conn: &Connection, step: ManagerStep) -> Result<(), String> {
+    type Changes = Vec<(String, String, String)>;
+    fn manager<R>(
+        conn: &Connection,
+        method: &str,
+        body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
+    ) -> Result<R, String>
+    where
+        R: for<'d> zbus::zvariant::DynamicDeserialize<'d>,
+    {
+        call(
+            conn,
+            SYSTEMD_BUS,
+            SYSTEMD_PATH,
+            SYSTEMD_MANAGER,
+            method,
+            body,
+        )
+    }
+    match step {
+        ManagerStep::Enable => {
+            manager::<(bool, Changes)>(conn, "EnableUnitFiles", &(vec![DAEMON_UNIT], false, false))
+                .map(|_| ())
+        }
+        ManagerStep::Disable => {
+            manager::<Changes>(conn, "DisableUnitFiles", &(vec![DAEMON_UNIT], false)).map(|_| ())
+        }
+        ManagerStep::Reload => manager::<()>(conn, "Reload", &()),
+        ManagerStep::Start => {
+            manager::<zbus::zvariant::OwnedObjectPath>(conn, "StartUnit", &(DAEMON_UNIT, "replace"))
+                .map(|_| ())
+        }
+        ManagerStep::Stop => {
+            manager::<zbus::zvariant::OwnedObjectPath>(conn, "StopUnit", &(DAEMON_UNIT, "replace"))
+                .map(|_| ())
+        }
+    }
+}
+
+/// Whether a program of this name is on `PATH`.
+fn on_path(program: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
 }
 
 /// Map `systemctl --user is-enabled` output to a [`UnitState`].
@@ -915,9 +1037,12 @@ pub struct Live {
     pub active_profile: Option<String>,
     /// Daemon LastFocused; `None` when the daemon lacks that property.
     pub last_focused: Option<String>,
-    /// Saturation the KWin effect reports (1.0 when it is not loaded);
-    /// `None` when that cannot be read on this session.
+    /// Saturation the KWin effect reports (1.0 when it is not loaded), or
+    /// in Steam Game Mode the one gamescope's loaded table says; `None` when
+    /// that cannot be read on this session.
     pub applied: Option<f32>,
+    /// Steam Game Mode: gamescope's own session was found.
+    pub game_mode: bool,
 }
 
 /// Light, read-only poll for the "Right now" card.
@@ -941,14 +1066,34 @@ pub fn probe_live() -> Live {
                 Err(_) => None,
             };
         }
+    } else if let Some((_, root)) = satur8_gamescope::session::find_session() {
+        // Steam Game Mode: the table gamescope has loaded says it.
+        live.game_mode = true;
+        live.applied = satur8_gamescope::session::read_color_state(&root)
+            .ok()
+            .and_then(|state| applied_from_look(&state.look));
     }
     live
 }
 
+/// The saturation gamescope shows, from the look it has loaded: Satur8's
+/// table says its own value, no table is normal colors, and a table something
+/// else loaded cannot be read as a saturation.
+pub fn applied_from_look(look: &satur8_gamescope::session::Look) -> Option<f32> {
+    use satur8_gamescope::session::Look;
+    match look {
+        Look::None => Some(1.0),
+        Look::Satur8(saturation) => Some(saturation.get()),
+        Look::Foreign(_) => None,
+    }
+}
+
 /// "Active profile" line.
-pub fn describe_active(live: &Live) -> String {
+pub fn describe_active(live: &Live, game_mode: bool) -> String {
     match live.active_profile.as_deref() {
         Some(name) if !name.is_empty() => name.to_string(),
+        // Steam Game Mode has no desktop: its first row is "Everything else".
+        _ if game_mode => "None, Everything else".to_string(),
         _ => "None, desktop default".to_string(),
     }
 }
@@ -1532,11 +1677,11 @@ mod tests {
     #[test]
     fn live_descriptions() {
         let mut live = Live::default();
-        assert_eq!(describe_active(&live), "None, desktop default");
+        assert_eq!(describe_active(&live, false), "None, desktop default");
         assert_eq!(describe_focused(&live), None);
         live.active_profile = Some("cs2".into());
         live.last_focused = Some(String::new());
-        assert_eq!(describe_active(&live), "cs2");
+        assert_eq!(describe_active(&live, false), "cs2");
         assert_eq!(
             describe_focused(&live).as_deref(),
             Some("Desktop or nothing reported yet")
@@ -1774,6 +1919,80 @@ mod tests {
             running.unit = UnitState::Enabled;
             assert_eq!(details(&running)[2], "Running");
             assert!(plan_repair(&running).is_empty());
+        }
+    }
+
+    #[test]
+    fn game_mode_names_the_first_row_when_no_profile_is_active() {
+        let mut live = Live {
+            daemon_running: true,
+            active_profile: Some(String::new()),
+            ..Live::default()
+        };
+        assert_eq!(describe_active(&live, true), "None, Everything else");
+        assert_eq!(describe_active(&live, false), "None, desktop default");
+        live.active_profile = Some("ELDEN RING".into());
+        assert_eq!(describe_active(&live, true), "ELDEN RING");
+    }
+
+    #[test]
+    fn the_loaded_gamescope_table_says_what_is_applied() {
+        use satur8_gamescope::session::Look;
+        assert_eq!(applied_from_look(&Look::None), Some(1.0));
+        assert_eq!(
+            applied_from_look(&Look::Satur8(satur8_core::Saturation::new(1.75))),
+            Some(1.75)
+        );
+        assert_eq!(
+            applied_from_look(&Look::Foreign("/x/steam.cube".into())),
+            None
+        );
+    }
+
+    // ------------------------------------------- systemd without systemctl
+
+    /// systemd's answers on the session bus, read on 2026-11-22: the state
+    /// word for an installed unit, an error for one that does not exist.
+    #[test]
+    fn systemds_own_answer_maps_like_systemctls() {
+        assert_eq!(unit_state_from_manager(Ok("enabled")), UnitState::Enabled);
+        assert_eq!(unit_state_from_manager(Ok("disabled")), UnitState::Disabled);
+        assert_eq!(unit_state_from_manager(Ok("masked")), UnitState::Disabled);
+        assert_eq!(
+            unit_state_from_manager(Err("No such file or directory")),
+            UnitState::NotInstalled
+        );
+        assert_eq!(
+            unit_state_from_manager(Err(
+                "org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable"
+            )),
+            UnitState::Unknown
+        );
+        assert_eq!(unit_state_from_manager(Ok("")), UnitState::Unknown);
+    }
+
+    #[test]
+    fn the_systemctl_steps_have_the_same_calls_on_the_bus() {
+        use ManagerStep::*;
+        assert_eq!(manager_steps(&["enable", "--now"]), [Enable, Reload, Start]);
+        assert_eq!(
+            manager_steps(&["disable", "--now"]),
+            [Disable, Reload, Stop]
+        );
+        assert_eq!(manager_steps(&["start"]), [Start]);
+        assert_eq!(manager_steps(&["enable"]), [Enable, Reload]);
+        // Every argument list a plan is built with is covered.
+        let facts = game(Some(false), UnitState::Disabled);
+        for plan in [
+            plan_enable(&facts),
+            plan_disable(&facts),
+            plan_repair(&facts),
+        ] {
+            for action in plan {
+                if let Action::Systemctl(args) = action {
+                    assert!(!manager_steps(&args).is_empty(), "{args:?}");
+                }
+            }
         }
     }
 

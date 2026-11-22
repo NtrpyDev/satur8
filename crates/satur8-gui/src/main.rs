@@ -1282,7 +1282,7 @@ fn spawn_live_poll(w: slint::Weak<AppWindow>) {
                     )
                 }
             };
-            let active = status::describe_active(&live);
+            let active = status::describe_active(&live, live.game_mode);
             let focused = status::describe_focused(&live);
             let w = w.clone();
             let keep_going = slint::invoke_from_event_loop(move || {
