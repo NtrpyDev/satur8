@@ -28,7 +28,7 @@ It is built for Linux gaming setups that want the punchy color controls common o
 - **Per-game profiles.** Tune saturation per game instead of changing your whole desktop. Profiles match by executable name, window class, or Steam AppID.
 - **Follows focus.** The profile applies when the game is focused and your desktop color comes back when you switch away.
 - **Outside the game.** No injection, no overlay, no Vulkan layer. See [How it works](#how-it-works).
-- **Native Linux backends.** Uses the compositor, driver, or display color path that fits your session, across Wayland and X11. See [Backend support](#backend-support).
+- **Native Linux backends.** Uses the compositor, driver, or display color path that fits your session, across Wayland and X11, and Steam Game Mode on a Steam Deck. See [Backend support](#backend-support).
 - **GUI and CLI.**
 
 ## Install
@@ -81,6 +81,17 @@ packaging/install.sh --uninstall
 
 If you clone the source repository instead, the same installer builds and installs Satur8 from source.
 
+On a Steam Deck, see [Steam Deck](#steam-deck).
+
+### Bazzite
+
+Satur8 has not been run on a Bazzite device. Use the release tarball above without `--system`: the installer writes only to your home folder, which Bazzite keeps across updates, and it needs no root. `--system` is refused on Bazzite and other image-based systems.
+
+- Steam Game Mode (the `bazzite-deck` images) uses the same gamescope color and focus features as the Steam Deck. The v0.4.0 installer and background service were run against Bazzite's own gamescope build (3.17.0-ogc1, in Bazzite stable 45.20261117.1) in a container, not on a Bazzite device: the service found gamescope, loaded a profile's table when that app took focus, and removed it at the home window and when stopped. Setup is the same as on the [Steam Deck](#steam-deck).
+- KDE Plasma Desktop Mode uses the KWin effect bundled in the tarball when it matches your KWin version. Bazzite has no build tools for rebuilding it, so after a KWin update the effect stays off until you install a Satur8 release built for that KWin.
+- The GNOME images run GNOME 51, which the Satur8 GNOME Shell extension does not list yet.
+- A Fedora 45 build target (what current Bazzite is based on) was added to the COPR project on 2026-11-22. Installing that package on Bazzite by layering it with `rpm-ostree` has not been tested, and Bazzite's documentation treats layering as a last resort.
+
 ## Quick start
 
 Start the focus daemon:
@@ -119,6 +130,102 @@ satur8 run --via gamescope-native -- %command%   # drive a running gamescope
 satur8 run --via gamescope -- %command%          # nested gamescope fallback
 ```
 
+In Steam Game Mode, use the focus daemon instead; see [Steam Deck](#steam-deck).
+
+## Steam Deck
+
+Satur8 switches saturation per game in Steam Game Mode. This was tested on a Steam Deck OLED with SteamOS 3.9.5 and gamescope 3.16.30.1. The Deck's Desktop Mode does not work yet; see [Desktop Mode](#desktop-mode).
+
+Satur8 applies the color through gamescope's look table, so Steam's own Color Vibrancy and Color Temperature settings keep working on top of it. Satur8 never changes them.
+
+### Install on the Deck
+
+Open Konsole in Desktop Mode, or connect to the Deck over SSH. Download the latest Linux x86_64 release from the [releases page](https://github.com/NtrpyDev/satur8/releases), then run the per-user installer with the background service turned on:
+
+```sh
+tar -xzf satur8-*-linux-x86_64.tar.gz
+cd satur8-*-linux-x86_64
+packaging/install.sh --enable-daemon
+```
+
+Without `--enable-daemon`, the installer prints the command that turns the service on. Everything is installed in your home folder, so it survives SteamOS updates. `--system` is refused on SteamOS. If the installer says the KWin effect was not installed, Game Mode still works without it.
+
+The commands are installed to `~/.local/bin`. An SSH login on SteamOS does not have that folder on its PATH, so over SSH a plain `satur8` gives "command not found"; the installer prints a hint about this. The examples below use the full path, `~/.local/bin/satur8`, which works everywhere. (Konsole in Desktop Mode was not checked.)
+
+### Add a game
+
+List the installed Steam games, then add a profile by the game's name:
+
+```sh
+~/.local/bin/satur8 games
+~/.local/bin/satur8 profile add sushiamo 1.75 --steam-game sushiamo
+```
+
+`satur8 games` shows each game's AppID, name, and profile. `--steam-game` takes the game's name, part of it, or its AppID. If several games match, Satur8 lists them; pass a longer name or the AppID.
+
+On a Deck, profiles match a game by its Steam AppID, and you can also give the AppID yourself. The AppID is the number in the game's `~/.local/share/Steam/steamapps/appmanifest_<AppID>.acf` file name, and in the game's Steam store URL.
+
+```sh
+~/.local/bin/satur8 profile add sushiamo 1.75 --steam-app-id 4555040
+```
+
+Matching by executable also works for Proton games. Use the Windows executable name, for example `--exe Sushiamo.exe`.
+
+A profile you add or change while the service runs takes effect right away, also for the game that is on screen.
+
+The Steam home screen and games without a profile get `default_saturation` from `~/.config/satur8/profiles.toml`. At 1.0, the default, Satur8 loads nothing there.
+
+### Automatic switching
+
+The background service does the switching. If you installed without `--enable-daemon`, turn it on with:
+
+```sh
+systemctl --user enable --now satur8-daemon
+```
+
+The service starts with the Game Mode session. This was checked by switching the Deck to Desktop Mode and back; a cold boot was not tested.
+
+In Game Mode, a game's profile loads when the game takes focus and is removed when you leave or close the game. Opening Steam's overlay menu over the game keeps its profile. If the service is killed, systemd restarts it within 5 seconds. Stopping the service puts `default_saturation` back; `~/.local/bin/satur8 off` removes Satur8's table at any value.
+
+### Check it
+
+Over SSH while the Deck is in Game Mode:
+
+```sh
+~/.local/bin/satur8 doctor
+```
+
+It reports `Steam Game Mode (gamescope on :0)`, whether a Satur8 table is loaded and at what saturation, the focused app's AppID, whether the background service is running, and Steam's own color settings, which Satur8 leaves alone. `~/.local/bin/satur8 status` shows the same. `~/.local/bin/satur8 on`, `set` and `off` also work in Game Mode, including over SSH.
+
+Run these checks in Game Mode only. An SSH shell has none of the desktop session's settings, so in Desktop Mode `doctor` over SSH prints a report that does not apply to the desktop.
+
+### The launch option
+
+The `satur8 run --via gamescope-native -- %command%` launch option still works as before. It replaces Steam's color settings while the game runs, and it wins over a profile's table until the game ends. Use the background service instead, and do not use both on one game.
+
+### Desktop Mode
+
+Satur8 does not work in the Deck's Desktop Mode yet. Desktop Mode runs KDE Plasma (KWin 6.7.3 on the tested Deck), and KWin only loads Satur8's effect when it was built for that exact KWin version. The effect bundled in the release tarball is built for a different KWin, and SteamOS has no build tools (no `cmake`) to rebuild it, so the service starts in Desktop Mode but cannot apply anything there. Game Mode is not affected and works again when you switch back.
+
+### Uninstall from the Deck
+
+From the extracted release folder:
+
+```sh
+packaging/install.sh --uninstall
+```
+
+This stops the service, removes Satur8's table, and removes the commands, the service and the table folder. It was checked on the Deck with a game running and its table loaded: the picture went back to normal. Your profiles in `~/.config/satur8/profiles.toml` are kept, so they come back if you reinstall.
+
+### Not tested yet
+
+- A cold boot of the Deck straight into Game Mode.
+- HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged.
+- An external display.
+- The desktop app (`satur8-gui`) on the Deck.
+- A Bazzite device (see [Bazzite](#bazzite)) and other systems that run a gamescope session.
+- gamescope versions other than 3.16.30.1.
+
 ## How it works
 
 Satur8 does not modify the game itself.
@@ -146,6 +253,8 @@ Satur8 chooses the best available backend for your session. Zero per-frame cost 
 | X11 with NVIDIA | NV-CONTROL Digital Vibrance | Zero | Verified |
 | Hyprland | `hyprctl` shader backend | One compositor pass | Verified |
 | DRM/KMS sessions | DRM CTM | Zero | Implemented |
+| Steam Game Mode (Steam Deck) | gamescope look table, automatic | Reuses gamescope's color pipeline | Verified on a Steam Deck OLED, SteamOS 3.9.5, gamescope 3.16.30.1 (2026-11-21) |
+| Steam Game Mode (Bazzite) | gamescope look table, automatic | Reuses gamescope's color pipeline | Implemented |
 | gamescope (running compositor) | gamescope-native color atoms | Reuses existing gamescope | Verified |
 | Unsupported Wayland | gamescope nested fallback | Extra nested compositor pass | Verified |
 
@@ -154,7 +263,7 @@ Status legend:
 - Verified: tested on real hardware
 - Implemented: built and behind environment detection, not yet independently verified
 
-The gamescope-native path drives an already-running gamescope compositor through its Xwayland color atoms, instead of launching a nested gamescope. It is the basis for the planned Steam Deck and Bazzite work in the [roadmap](ROADMAP.md).
+In Steam Game Mode, the focus daemon sets gamescope's look table per game, so Steam's own vibrancy and color temperature keep working on top; see [Steam Deck](#steam-deck). The gamescope-native path is a launch option that drives an already-running gamescope compositor through its Xwayland color override atoms, instead of launching a nested gamescope. While it runs, it replaces Steam's color settings.
 
 ## GUI
 
@@ -211,6 +320,9 @@ Manage per-game profiles:
 
 ```sh
 satur8 profile add cs2 1.75 --exe cs2 --steam-app-id 730
+satur8 games
+satur8 games --json
+satur8 profile add cs2 1.75 --steam-game cs2
 satur8 profile list
 satur8 profile show cs2
 satur8 profile disable cs2
@@ -219,7 +331,7 @@ satur8 profile remove cs2
 satur8 profile path
 ```
 
-A profile needs at least one match rule: `--exe`, `--window-class`, or `--steam-app-id`.
+A profile needs at least one match rule: `--exe`, `--window-class`, `--steam-app-id`, or `--steam-game`. `satur8 games` lists the installed Steam games and the profile each one uses (`--json` for scripts). `--steam-game` takes a game's name, part of it, or its AppID, and stores the AppID.
 
 ## Development
 
@@ -266,7 +378,7 @@ packaging/source-tarball.sh
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for what ships next: Steam Deck and Bazzite support, then a stable 1.0. Distribution status and open packaging work are tracked there and in the [open issues](https://github.com/NtrpyDev/satur8/issues).
+See [ROADMAP.md](ROADMAP.md) for what ships next: the remaining Steam Deck work and Bazzite support, then a stable 1.0. Distribution status and open packaging work are tracked there and in the [open issues](https://github.com/NtrpyDev/satur8/issues).
 
 ## Contributing
 
