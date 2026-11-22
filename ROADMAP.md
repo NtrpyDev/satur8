@@ -157,7 +157,10 @@ and Bazzite is Fedora-based (the live COPR work carries over).
 - [x] SteamOS: install story on a read-only root. Done in v0.4.0 without a Decky
       plugin: the release tarball's per-user installer puts everything in the
       home folder, which survives SteamOS updates, `--enable-daemon` turns on
-      the background service, and `--system` is refused on SteamOS.
+      the background service, and `--system` is refused on SteamOS. The
+      service starts with the Game Mode session; this was checked by switching
+      the Deck to Desktop Mode and back, and a cold boot was not tested.
+      Uninstall was checked on the Deck and keeps `profiles.toml`.
 - [ ] Bazzite (atomic Fedora). Checked 2026-11-21 against Bazzite stable
       45.20261117.1, from source and in a container, not on a Bazzite device:
       Game Mode runs the OpenGamingCollective gamescope fork 3.17.0-ogc1 with
@@ -170,6 +173,13 @@ and Bazzite is Fedora-based (the live COPR work carries over).
   - [x] Container check: Bazzite's gamescope, run headless with `--steam`,
         publishes the focus and server-id properties and applies a Satur8
         look table (grayscale and 2x confirmed in screenshots).
+  - [x] Container check with v0.4.0 itself: the v0.4.0 tarball installs per
+        user on the `bazzite-deck` image; the v0.4.0 background service, with
+        no `DISPLAY` set, finds Bazzite's gamescope, loads a profile's table
+        on the first X server only when that app takes focus, removes it at the
+        home window, applies it again after being killed and restarted, and
+        removes it when stopped; `satur8 doctor` prints the Game Mode report;
+        uninstall leaves no table.
   - [x] Installer refuses `--system` on image-based systems (read-only `/usr`).
         Done in v0.4.0.
   - [ ] Game Mode on a real Bazzite device with an AMD GPU: the same background
@@ -227,7 +237,11 @@ Not blocking the packaging spine; picked up as time allows.
 - [ ] Steam Deck: a Decky panel.
 - [ ] Steam Deck: HDR games, through gamescope's separate HDR look table. The
       v0.4.0 look table only changes SDR content.
-- [ ] Steam Deck: check the Deck's Desktop Mode.
+- [ ] Steam Deck: make the KWin effect available on SteamOS Desktop Mode.
+      Checked 2026-11-22: it does not work. Desktop Mode runs KWin 6.7.3, the
+      effect bundled in the release tarball is built for a different KWin, and
+      SteamOS has no build tools (no `cmake`) to rebuild it, so the service
+      starts there but cannot apply anything. Game Mode is not affected.
 - [ ] Re-check whether a future KWin release exposes a client CTM path that would
       make the KDE backend zero-cost (none in KWin 6.7, see PLAN.md section 10).
 - [x] `CONTRIBUTING.md`, issue and PR templates, and the dedicated
