@@ -17,7 +17,9 @@ which claims are honest today.
 - Release tarball: GitHub release artifact for Linux x86_64, installed with
   `packaging/install.sh`. Since v0.4.0 this is also the install path on SteamOS
   (tested on a Steam Deck in Game Mode).
-- Debian/Ubuntu, SteamOS, and Bazzite packages are not shipped yet.
+- Debian/Ubuntu, SteamOS, and Bazzite packages are not shipped yet. On
+  Bazzite the release tarball's per-user installer is the intended path; it
+  was run in a Bazzite container, not on a Bazzite device.
 
 Use `vX.Y.Z` for public Satur8 releases. Only use Arch-style `X.Y.Z-1` when
 talking about the Arch package build number.
@@ -200,3 +202,18 @@ testing, because they depend on gamescope behavior on real systems, not just on
 the package format. SteamOS is supported since v0.4.0 through the release
 tarball's per-user installer, tested on a Steam Deck in Game Mode. Bazzite has
 not been tested on real hardware.
+
+Bazzite specifics (stable 45.20261117.1, checked 2026-11-21 from source and in a
+container, not on a Bazzite device):
+
+- It is Fedora 45 based. The COPR project builds Fedora 43 and 44 only, so a
+  COPR package cannot be layered on Bazzite until a Fedora 45 build exists, and
+  Bazzite's documentation calls `rpm-ostree` layering a last resort.
+- `/usr` is read-only, so `install.sh --system` cannot work there and the
+  installer refuses it; the per-user install writes only under `$HOME`, which
+  persists.
+- The images ship no `cmake` and no KWin development headers, so the KWin
+  effect cannot be rebuilt on the machine after a KWin update. The tarball's
+  bundled effect is used when its KWin version matches.
+- The GNOME images run GNOME 51, which the GNOME Shell extension's metadata does
+  not list yet.
