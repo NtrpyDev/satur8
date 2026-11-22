@@ -1,0 +1,197 @@
+name: build tarball
+
+# Builds the Linux x86_64 release tarball from portable parts and tests it.
+# No AI, no secrets, nothing published: release.yml attaches the result.
+#
+#   targets   reads packaging/kwin-effect-targets.txt into the effect matrix
+#   binaries  the four Rust binaries in Ubuntu 22.04, so they need glibc 2.35
+#   effects   one KWin effect per target, inside that system's own packages
+#   assemble  merges the effects in target order (the first of a duplicate key
+#             wins), builds the tarball and its checksum, runs the installer
+#             and portability tests on it, and uploads it as an artifact
+#
+# Called by release.yml and ci.yml. It can also be run by hand.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to build; empty means the commit the caller runs on"
+        type: string
+        required: false
+        default: ""
+    outputs:
+      artifact:
+        description: "Name of the artifact that holds the tarball and its .sha256"
+        value: ${{ jobs.assemble.outputs.artifact }}
+      tarball:
+        description: "File name of the tarball, for example satur8-v0.4.1-linux-x86_64.tar.gz"
+        value: ${{ jobs.assemble.outputs.tarball }}
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build; empty means the branch this runs on"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  # The scripts run their containers with docker here. The runner is a
+  # dedicated machine, so no container resource limits.
+  ENGINE: docker
+  LIMITS: ""
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  targets:
+    name: effect targets
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Read the targets file
+        id: list
+        run: |
+          packaging/build-kwin-effect.sh --list
+          matrix="$(packaging/build-kwin-effect.sh --list | jq -R -s -c '
+            split("\n") | map(select(length > 0) | split(" ")
+              | {n: .[0], target: (.[1:] | join(" ")), slug: (.[1:] | join("-"))})')"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  binaries:
+    name: binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Build the release binaries in Ubuntu 22.04 and check the glibc floor
+        run: packaging/build-portable.sh target/portable-bin
+
+      # Artifacts do not keep file modes, so the binaries travel as a tar.
+      - name: Pack the binaries
+        run: tar -C target/portable-bin -cf portable-bin.tar .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: portable-bin
+          path: portable-bin.tar
+          if-no-files-found: error
+          retention-days: 7
+
+  effects:
+    name: effect ${{ matrix.target.target }}
+    needs: targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Build the effect inside the target's own packages
+        env:
+          TARGET: ${{ matrix.target.target }}
+        run: |
+          read -r -a words <<< "$TARGET"
+          packaging/build-kwin-effect.sh effect-out "${words[@]}"
+
+      - name: Pack the effect
+        run: tar -C effect-out -cf effect.tar .
+
+      # One artifact per target, named with its place in the targets file, so
+      # assemble can merge them in that order.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kwin-effect-${{ matrix.target.n }}-${{ matrix.target.slug }}
+          path: effect.tar
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: assemble and test
+    needs: [binaries, effects]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      artifact: linux-x86_64-tarball
+      tarball: ${{ steps.tarball.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: portable-bin
+          path: incoming/bin
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: kwin-effect-*
+          path: incoming/effects
+
+      - name: Unpack the binaries and merge the effects in target order
+        run: |
+          mkdir -p target/portable-bin
+          tar -C target/portable-bin -xf incoming/bin/portable-bin.tar
+          sources=()
+          # The glob sorts by the zero-padded target number, so the merge
+          # keeps the targets file's order.
+          for dir in incoming/effects/kwin-effect-*/; do
+            dir="${dir%/}"
+            name="${dir##*/}"
+            mkdir -p "incoming/unpacked/$name"
+            tar -C "incoming/unpacked/$name" -xf "$dir/effect.tar"
+            sources+=("incoming/unpacked/$name")
+          done
+          packaging/build-kwin-effect.sh --merge target/effects "${sources[@]}"
+
+      - name: Check the glibc floor of the binaries
+        run: packaging/check-portability.sh target/portable-bin
+
+      - name: Build the release tarball and checksum
+        id: tarball
+        run: |
+          packaging/release-tarball.sh --bin-dir target/portable-bin --effects-dir target/effects
+          cd target/dist
+          sha256sum -c satur8-v*-linux-x86_64.tar.gz.sha256
+          name="$(ls satur8-v*-linux-x86_64.tar.gz)"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Installer picks the bundled effect with no build tools and no network
+        run: packaging/install-prebuilt-effect-test.sh "target/dist/${{ steps.tarball.outputs.name }}"
+
+      - name: Installer works on a machine without KDE (Fedora)
+        run: packaging/install-nokwin-test.sh "target/dist/${{ steps.tarball.outputs.name }}"
+
+      - name: Installer works on a machine without KDE (Ubuntu 22.04, glibc 2.35)
+        run: packaging/install-nokwin-test.sh --image ubuntu:22.04 "target/dist/${{ steps.tarball.outputs.name }}"
+
+      - name: Every program starts on the oldest supported systems
+        run: packaging/portability-test.sh "target/dist/${{ steps.tarball.outputs.name }}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-x86_64-tarball
+          path: |
+            target/dist/satur8-v*-linux-x86_64.tar.gz
+            target/dist/satur8-v*-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
