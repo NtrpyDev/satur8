@@ -26,6 +26,12 @@ GitHub release notes for that tag.
   `satur8 outputs`, `satur8 doctor` and `satur8 status` now say so when the
   profiles file asks for a single output. `doctor` and `status` print nothing
   new for a file that does not use the per-output settings.
+- A desktop saturation set in the desktop app or in `profiles.toml` is now
+  shown when the session starts, or as soon as the background service can
+  reach the display, not only after a game's profile has come and gone. This
+  covers the top-level `default_saturation`, which v0.4.1 also left unshown,
+  and each output's own desktop value. An unchanged desktop (1.0) still loads
+  nothing. Steam Game Mode keeps its own start, which already did this.
 - The background service now handles focus reports in the order they arrive.
   Before, two quick focus changes could be applied in the wrong order.
 - A profiles file with the new settings still loads in an older Satur8, but
