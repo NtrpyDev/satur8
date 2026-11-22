@@ -8,7 +8,8 @@ PartOf=graphical-session.target
 [Service]
 Type=simple
 # KWin only loads an effect built for its exact version. Check that at session
-# start and rebuild the effect if a KWin update stranded it. Never fatal.
+# start and, if a KWin update stranded it, install the matching effect from the
+# bundled set or rebuild it where build tools exist. Never fatal.
 ExecStartPre=-%h/.local/bin/satur8 repair
 ExecStart=%h/.local/bin/satur8-daemon
 Restart=on-failure
