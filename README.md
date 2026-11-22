@@ -154,7 +154,16 @@ The commands are installed to `~/.local/bin`. An SSH login on SteamOS does not h
 
 ### Add a game
 
-On a Deck, profiles match a game by its Steam AppID. The AppID is the number in the game's `~/.local/share/Steam/steamapps/appmanifest_<AppID>.acf` file name, and in the game's Steam store URL.
+List the installed Steam games, then add a profile by the game's name:
+
+```sh
+~/.local/bin/satur8 games
+~/.local/bin/satur8 profile add sushiamo 1.75 --steam-game sushiamo
+```
+
+`satur8 games` shows each game's AppID, name, and profile. `--steam-game` takes the game's name, part of it, or its AppID. If several games match, Satur8 lists them; pass a longer name or the AppID.
+
+On a Deck, profiles match a game by its Steam AppID, and you can also give the AppID yourself. The AppID is the number in the game's `~/.local/share/Steam/steamapps/appmanifest_<AppID>.acf` file name, and in the game's Steam store URL.
 
 ```sh
 ~/.local/bin/satur8 profile add sushiamo 1.75 --steam-app-id 4555040

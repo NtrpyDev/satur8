@@ -3,6 +3,12 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## Unreleased
+
+- `satur8 games` lists the installed Steam games with each game's AppID and
+  profile, and `satur8 profile add NAME SATURATION --steam-game NAME` adds a
+  profile by the game's name instead of its AppID.
+
 ## v0.4.0 - 2026-11-22
 
 Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.

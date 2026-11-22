@@ -232,8 +232,11 @@ Not blocking the packaging spine; picked up as time allows.
       red as `(54,54,54)` while linear-light output sampled red as
       `(127,127,127)`, matching the expected sRGB transfer-function path.
 - [ ] Multi-monitor and per-output profiles.
-- [ ] Steam Deck: pick a game from a list of installed Steam games instead of
-      typing its AppID.
+- [x] Steam Deck: pick a game from a list of installed Steam games instead of
+      typing its AppID, on the command line: `satur8 games` lists them and
+      `satur8 profile add NAME SATURATION --steam-game NAME` adds a profile by
+      the game's name.
+- [ ] Steam Deck: the same installed-games picker in the desktop app.
 - [ ] Steam Deck: the desktop app in Game Mode.
 - [ ] Steam Deck: a Decky panel.
 - [ ] Steam Deck: HDR games, through gamescope's separate HDR look table. The
