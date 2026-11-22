@@ -10,6 +10,10 @@ GitHub release notes for that tag.
 - The roadmap and packager guide no longer say AUR publication is blocked.
   They now match the README: `satur8` and `satur8-bin` are on the AUR,
   published and maintained by a community member.
+- Roadmap cleanups: the website backend table item is marked done, the Game
+  Mode item no longer claims per-game saturation is unique to Satur8
+  (vibrantDeck already does per-app saturation), and the immutable targets are
+  labeled v0.4 like everywhere else.
 
 ## v0.3.5 - 2026-11-21
 

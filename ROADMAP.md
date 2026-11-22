@@ -125,9 +125,9 @@ other backends.
       was OFF 409.4/166.0 FPS vs ON 402.4/165.0 FPS; paired median delta was
       -1.5% Avg / +0.038 ms/frame. Treat the result as within run-to-run noise,
       not a precise zero-cost claim.
-- [ ] Update the backend status table on the website when v0.3.3 ships. The
-      README table already reflects the current v0.3.3 backend-sweep state; the
-      live site remains on shipped v0.3.2 wording until release/deploy.
+- [x] Update the backend status table on the website. Done: satur8.app shows
+      v0.3.5 with six backends Verified and DRM/KMS Implemented, matching the
+      README table.
 
 ## v0.4: SteamOS / Bazzite support
 
@@ -141,8 +141,9 @@ and Bazzite is Fedora-based (the live COPR work carries over).
       saturation per-game at runtime (zero extra pass, no injection), instead of
       the nested-gamescope reshade fallback. Landed in v0.3.0 and verified on a
       full-screen gamescope session; on-Deck field-testing is the remaining work.
-- [ ] Per-game auto-apply in Game Mode. This is the differentiator versus the
-      existing global-saturation tools (e.g. vibrantDeck).
+- [ ] Per-game auto-apply in Game Mode, from the same Satur8 profiles used on
+      the desktop. vibrantDeck, an existing Decky plugin, already applies
+      per-app saturation in Game Mode, so this is not unique to Satur8.
 - [ ] SteamOS: install story on a read-only root (a Decky plugin is the likely
       path); ship only honest, tested docs.
 - [ ] Bazzite (atomic Fedora): evaluate rpm-ostree layering versus a Decky/
@@ -201,5 +202,5 @@ answer, but it does not fit Satur8. Satur8 is a system-integration tool: it
 installs a KWin compositor plugin, a systemd user unit, a KWin focus script, and
 talks D-Bus to the compositor. A Flatpak sandbox cannot install a compositor
 plugin where KWin scans for it. That is why native per-distro packaging is the
-primary path, and it is the deeper reason the immutable targets (v0.5) are
+primary path, and it is the deeper reason the immutable targets (v0.4) are
 genuinely hard rather than a quick Flatpak away.
