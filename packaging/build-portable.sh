@@ -66,13 +66,6 @@ mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd)"
 for name in $binaries SHA256SUMS; do rm -f "$out_dir/$name"; done
 
-# Rootful docker writes the outputs as root; hand them back to the caller.
-# Rootless podman already maps the container's root to the caller, and a chown
-# there would hand the files to a sub-UID instead.
-owner_env=()
-if [ "$engine" = docker ]; then
-    owner_env=(-e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)")
-fi
 jobs_env=()
 if [ -n "${CARGO_BUILD_JOBS:-}" ]; then
     jobs_env=(-e "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS")
@@ -127,6 +120,23 @@ say "Building the Satur8 release binaries in $image with $engine"
 digest="$("$engine" image inspect --format '{{index .RepoDigests 0}}' "$image" 2>/dev/null || echo unknown)"
 say "Image digest: $digest"
 say "Source: $repo ($(git -C "$repo" describe --always --dirty 2>/dev/null || echo 'not a git checkout'))"
+
+# Rootful docker (a GitHub runner) writes the outputs as root, so they are
+# handed back to the caller with chown. Rootless podman and rootless docker
+# already map the container's root to the caller, and a chown there would hand
+# the files to a sub-UID instead. Which case applies is tested with one file,
+# not guessed from the engine's name.
+owner_env=()
+probe="$out_dir/.owner-probe"
+rm -rf "$probe"
+mkdir -p "$probe"
+"$engine" run --rm --network none -v "$probe:/probe" "$image" touch /probe/file \
+    || fail "could not start a container from $image"
+if [ "$(stat -c %u "$probe/file")" != "$(id -u)" ]; then
+    owner_env=(-e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)")
+    say "The container writes files as another user; its outputs will be handed back with chown"
+fi
+rm -rf "$probe"
 
 t0=$(date +%s)
 "$engine" run --rm --pull=missing "${limits[@]}" "${owner_env[@]}" "${jobs_env[@]}" \
