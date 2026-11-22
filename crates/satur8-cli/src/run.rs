@@ -239,6 +239,8 @@ where
 
 /// Decide the saturation to apply, in priority order:
 /// explicit `--saturation` > named `--profile` > match the command's exe.
+/// A profile that is off, named or matched, gives normal colors (1.0): the
+/// same rule the daemon follows. No profile at all gives `None`.
 fn resolve_saturation(profiles: &Profiles, args: &RunArgs) -> Result<Option<ResolvedSaturation>> {
     if let Some(s) = args.saturation {
         return Ok(Some(ResolvedSaturation {
@@ -250,8 +252,9 @@ fn resolve_saturation(profiles: &Profiles, args: &RunArgs) -> Result<Option<Reso
         let p = profiles
             .by_name(name)
             .with_context(|| format!("no profile named '{name}' (see `satur8 profile list`)"))?;
+        say_if_off(p);
         return Ok(Some(ResolvedSaturation {
-            saturation: p.saturation(),
+            saturation: p.shown_saturation(),
             profile: Some(p.clone()),
         }));
     }
@@ -259,12 +262,23 @@ fn resolve_saturation(profiles: &Profiles, args: &RunArgs) -> Result<Option<Reso
     let exe = exe_basename(&args.command[0]);
     if let Some(p) = profiles.match_exe(&exe) {
         eprintln!("satur8: matched profile '{}' by exe '{exe}'", p.name);
+        say_if_off(p);
         return Ok(Some(ResolvedSaturation {
-            saturation: p.saturation(),
+            saturation: p.shown_saturation(),
             profile: Some(p.clone()),
         }));
     }
     Ok(None)
+}
+
+fn say_if_off(profile: &Profile) {
+    if !profile.enabled {
+        eprintln!(
+            "satur8: profile '{}' is disabled, so the game gets normal colors \
+             (turn it on with `satur8 profile enable {}`)",
+            profile.name, profile.name
+        );
+    }
 }
 
 fn exe_basename(cmd: &str) -> String {
@@ -369,6 +383,39 @@ mod tests {
         let args = args(None, None, "/games/auto-game");
         let resolved = resolve_saturation(&profiles(), &args).unwrap().unwrap();
         assert_eq!(resolved.saturation.get(), 1.8);
+    }
+
+    #[test]
+    fn a_profile_that_is_off_gives_normal_colors_named_or_matched() {
+        let mut profiles = profiles();
+        profiles.default_saturation = 1.3;
+        for profile in &mut profiles.profiles {
+            profile.enabled = false;
+        }
+        // Named with --profile: still that profile, with its outputs, at 1.0.
+        let named = args(Some("named"), None, "/games/other");
+        let resolved = resolve_saturation(&profiles, &named).unwrap().unwrap();
+        assert_eq!(resolved.saturation, Saturation::IDENTITY);
+        assert_eq!(resolved.outputs(), ["DP-1", "HDMI-A-1"]);
+        assert_eq!(
+            launch_picture(&profiles, &resolved, false).levels,
+            Levels::uniform(Saturation::IDENTITY)
+        );
+        // Matched by the command's program: the same.
+        let matched = args(None, None, "/games/auto-game");
+        let resolved = resolve_saturation(&profiles, &matched).unwrap().unwrap();
+        assert_eq!(resolved.saturation, Saturation::IDENTITY);
+        assert_eq!(
+            launch_picture(&profiles, &resolved, true).levels,
+            Levels::uniform(Saturation::IDENTITY)
+        );
+        // An explicit --saturation is not a profile and is used as given.
+        let explicit = args(Some("named"), Some(2.2), "/games/auto-game");
+        let resolved = resolve_saturation(&profiles, &explicit).unwrap().unwrap();
+        assert_eq!(resolved.saturation.get(), 2.2);
+        // A program with no profile is still no match.
+        let none = args(None, None, "/games/missing");
+        assert!(resolve_saturation(&profiles, &none).unwrap().is_none());
     }
 
     #[test]

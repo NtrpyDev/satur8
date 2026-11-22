@@ -4,6 +4,7 @@
 //! saturation from the command line - directly (`set`/`on`/`off`), as a launch
 //! wrapper (`run`), or via per-game profiles (`profile`).
 
+mod auto_cmd;
 mod config;
 mod games_cmd;
 mod gnome_report;
@@ -11,6 +12,7 @@ mod outputs_cmd;
 mod outputs_report;
 mod profile_cmd;
 mod run;
+mod steam_shortcut_cmd;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -95,6 +97,19 @@ enum Command {
         #[command(subcommand)]
         cmd: profile_cmd::ProfileCmd,
     },
+    /// Satur8's own entry in the Steam library, which is how the desktop app
+    /// is opened in Steam Game Mode: say whether it is there, add it, and
+    /// put its artwork in place.
+    SteamShortcut {
+        #[command(subcommand)]
+        cmd: steam_shortcut_cmd::SteamShortcutCmd,
+    },
+    /// Turn automatic per-game switching on or off, as the desktop app's
+    /// Status page switch does, or say whether it is on.
+    Auto {
+        #[command(subcommand)]
+        cmd: auto_cmd::AutoCmd,
+    },
     /// Show the current environment, chosen backend, and state.
     Status,
     /// Diagnose the environment and backend availability.
@@ -120,7 +135,13 @@ fn main() -> Result<()> {
     // default so they always reach their restore path.
     if matches!(
         cli.command,
-        Command::Status | Command::Doctor | Command::Outputs { cmd: None } | Command::Games { .. }
+        Command::Status
+            | Command::Doctor
+            | Command::Outputs { cmd: None }
+            | Command::Games { .. }
+            | Command::Auto {
+                cmd: auto_cmd::AutoCmd::Status
+            }
     ) {
         // SAFETY: called once at startup, before any other thread exists.
         unsafe {
@@ -159,6 +180,8 @@ fn main() -> Result<()> {
         }
         Command::Games { json } => games_cmd::run(json),
         Command::Profile { cmd } => profile_cmd::run(cmd),
+        Command::SteamShortcut { cmd } => steam_shortcut_cmd::run(cmd),
+        Command::Auto { cmd } => auto_cmd::run(cmd),
         Command::Status => cmd_status(),
         Command::Doctor => cmd_doctor(),
         Command::Repair => cmd_repair(),
@@ -354,7 +377,8 @@ fn cmd_status() -> Result<()> {
             // them (a manual `set --output`, a profile, an output's default).
             if loaded {
                 if let Some(levels) = satur8_core::Backend::current_levels(&kwin) {
-                    for line in outputs_report::current_output_lines(&levels) {
+                    let connected = satur8_core::Backend::outputs(&kwin);
+                    for line in outputs_report::current_output_lines(&levels, &connected) {
                         println!("{line}");
                     }
                 }
@@ -810,6 +834,54 @@ mod tests {
         fn supports_linear_light(&self) -> bool {
             self.supports_linear
         }
+    }
+
+    #[test]
+    fn auto_command_takes_on_off_and_status() {
+        for (word, cmd) in [
+            ("on", auto_cmd::AutoCmd::On),
+            ("off", auto_cmd::AutoCmd::Off),
+            ("status", auto_cmd::AutoCmd::Status),
+        ] {
+            assert!(matches!(
+                Cli::try_parse_from(["satur8", "auto", word]).map(|cli| cli.command),
+                Ok(Command::Auto { cmd: parsed }) if parsed == cmd
+            ));
+        }
+        assert!(Cli::try_parse_from(["satur8", "auto"]).is_err());
+    }
+
+    #[test]
+    fn steam_shortcut_command_takes_its_three_actions() {
+        use steam_shortcut_cmd::SteamShortcutCmd;
+        let parse = |args: &[&str]| {
+            let mut all = vec!["satur8", "steam-shortcut"];
+            all.extend_from_slice(args);
+            match Cli::try_parse_from(all).map(|cli| cli.command) {
+                Ok(Command::SteamShortcut { cmd }) => Some(cmd),
+                _ => None,
+            }
+        };
+        assert_eq!(parse(&["status"]), Some(SteamShortcutCmd::Status));
+        assert_eq!(
+            parse(&["add"]),
+            Some(SteamShortcutCmd::Add {
+                desktop_file: None,
+                again: false,
+            })
+        );
+        assert_eq!(
+            parse(&["add", "--again", "--desktop-file", "/x/satur8.desktop"]),
+            Some(SteamShortcutCmd::Add {
+                desktop_file: Some("/x/satur8.desktop".into()),
+                again: true,
+            })
+        );
+        assert_eq!(
+            parse(&["artwork", "--remove"]),
+            Some(SteamShortcutCmd::Artwork { remove: true })
+        );
+        assert_eq!(parse(&[]), None);
     }
 
     #[test]

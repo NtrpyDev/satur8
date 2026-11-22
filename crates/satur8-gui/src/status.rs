@@ -2,37 +2,39 @@
 //! switching toggle, the repair plan, the "Right now" view, and the system
 //! information used by "Copy system info" and "Report a bug".
 //!
-//! Everything that changes the system goes through [`System`], so the plans
-//! can be tested with a fake. [`RealSystem`] is the only implementation that
-//! touches the user's session, and it only runs after a click.
+//! Everything that changes the system goes through
+//! [`System`](satur8_core::switching::System), so the plans can be tested
+//! with a fake. [`RealSystem`] is the only implementation that touches the
+//! user's session, and it only runs after a click.
 
 use std::path::PathBuf;
-use std::process::Command;
 
-use satur8_core::{Desktop, Environment, SessionType};
+use satur8_core::Environment;
+#[cfg(test)]
+use satur8_core::{Desktop, SessionType};
 use satur8_kwin::repair::Step as RepairStep;
 use zbus::blocking::Connection;
 
-/// The daemon's systemd user unit (installed by install.sh and the packages).
-pub const DAEMON_UNIT: &str = "satur8-daemon.service";
-/// The KWin script id (assets/kwin-script/metadata.json).
-pub const FOCUS_SCRIPT: &str = "satur8-focus";
-/// kwinrc key that enables the script at login (packaging/install.sh:267).
-const FOCUS_KEY: &str = "satur8-focusEnabled";
-const DAEMON_BUS: &str = "org.satur8.Daemon";
+// The switching toggle's state and steps are shared with `satur8 auto`: the
+// pure part lives in satur8_core::switching, the system part in
+// satur8_backend::switching.
+use satur8_backend::switching::{
+    find_script, name_has_owner, script_enabled, script_loaded, unit_state, DAEMON_BUS,
+};
+pub use satur8_backend::switching::{wait_for_daemon, RealSystem};
+use satur8_core::switching::{self as switching, SwitchFacts};
+pub use satur8_core::switching::{
+    execute, kde_wayland, plan_starts_daemon, Action, SwitchState, UnitState,
+};
+#[cfg(test)]
+use satur8_core::switching::{
+    focus_enabled_in, manager_steps, parse_unit_state, unit_state_from_manager, ManagerStep, System,
+};
+
 const DAEMON_PATH: &str = "/org/satur8/Daemon";
 const KWIN_BUS: &str = "org.kde.KWin";
 
 // ------------------------------------------------------------------ facts
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UnitState {
-    Enabled,
-    Disabled,
-    NotInstalled,
-    /// systemctl could not answer (no user manager reachable).
-    Unknown,
-}
 
 /// What the KWin effect check found. Only filled on KDE Plasma Wayland.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -78,18 +80,35 @@ pub struct Facts {
     pub script_loaded: Option<bool>,
     /// The installed focus script's main.js, if found.
     pub script_path: Option<PathBuf>,
+    /// Steam Game Mode: gamescope's color management is turned off
+    /// (`GAMESCOPE_COLOR_MANAGEMENT_DISABLE`), so it ignores every color
+    /// setting, Satur8's table included.
+    pub color_management_off: bool,
 }
 
-pub fn kde_wayland(env: &Environment) -> bool {
-    env.session == SessionType::Wayland && env.desktop == Desktop::Kde
+/// What the page says wherever gamescope's color management is off: the
+/// "Right now" card's small line and the Color control row.
+pub const COLOR_MANAGEMENT_OFF: &str =
+    "gamescope's color management is off, so Satur8's setting is not shown";
+
+impl Facts {
+    /// The part of the facts automatic per-game switching depends on.
+    pub fn switching(&self) -> SwitchFacts {
+        SwitchFacts {
+            env: self.env,
+            backend: self.backend.clone(),
+            daemon_running: self.daemon_running,
+            unit: self.unit,
+            script_enabled: self.script_enabled,
+            script_loaded: self.script_loaded,
+            script_path: self.script_path.clone(),
+        }
+    }
 }
 
-/// Steam Game Mode: the backend Satur8 selected is gamescope. Selection only
-/// reaches gamescope when no desktop backend answered, so this is never true
-/// in a KDE Plasma, GNOME, Hyprland or NVIDIA X11 session. There the daemon
-/// follows gamescope's focus by itself: no KWin effect, no KWin script.
+/// Steam Game Mode; see [`satur8_core::switching::game_mode`].
 pub fn game_mode(facts: &Facts) -> bool {
-    facts.backend.as_deref() == Some("gamescope")
+    switching::game_mode(facts.backend.as_deref())
 }
 
 /// KDE Plasma on Wayland, where the KWin effect and focus script apply.
@@ -160,6 +179,9 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
 
     // 1. Color backend.
     rows.push(match &facts.backend {
+        Some(_) if game && facts.color_management_off => {
+            row("Color control", Level::Problem, COLOR_MANAGEMENT_OFF)
+        }
         Some(name) => row("Color control", Level::Ok, backend_detail(name)),
         None if kde => row(
             "Color control",
@@ -333,183 +355,22 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
 
 // ------------------------------------------------- per-game switching toggle
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SwitchState {
-    /// The toggle can be used in this session.
-    pub available: bool,
-    /// Every part of per-game switching is on right now.
-    pub on: bool,
-    /// One line under the toggle.
-    pub detail: String,
-}
-
-/// The line under the toggle when switching is not fully on: what is done.
-fn partly_detail(done: &[&str]) -> String {
-    if done.is_empty() {
-        "Off. Game profiles are not applied automatically".to_string()
-    } else {
-        format!("Partly on ({}). Turn on to finish", done.join(", "))
-    }
-}
-
-/// The toggle in Steam Game Mode, where switching is only the user service.
-fn game_mode_switch_state(facts: &Facts) -> SwitchState {
-    if facts.unit == UnitState::NotInstalled {
-        return SwitchState {
-            available: false,
-            on: false,
-            detail: "The background service is not installed; reinstall Satur8".into(),
-        };
-    }
-    let running = facts.daemon_running == Some(true);
-    if running && facts.unit != UnitState::Disabled {
-        return SwitchState {
-            available: true,
-            on: true,
-            detail: "Each game's profile applies when its window is focused".into(),
-        };
-    }
-    let mut done = Vec::new();
-    if running {
-        done.push("service running");
-    }
-    if facts.unit == UnitState::Enabled {
-        done.push("service starts at login");
-    }
-    SwitchState {
-        available: true,
-        on: false,
-        detail: partly_detail(&done),
-    }
-}
-
 /// Derive the toggle from the real system state (never from a stored flag).
 pub fn switch_state(facts: &Facts) -> SwitchState {
-    if game_mode(facts) {
-        return game_mode_switch_state(facts);
-    }
-    if !kde_wayland(&facts.env) {
-        return SwitchState {
-            available: false,
-            on: false,
-            detail: format!(
-                "Needs KDE Plasma on Wayland; this session is {} / {}",
-                facts.env.session, facts.env.desktop
-            ),
-        };
-    }
-    if facts.script_path.is_none() {
-        return SwitchState {
-            available: false,
-            on: false,
-            detail: "The focus script is not installed; reinstall Satur8".into(),
-        };
-    }
-    if facts.unit == UnitState::NotInstalled {
-        return SwitchState {
-            available: false,
-            on: false,
-            detail: "The background service is not installed; reinstall Satur8".into(),
-        };
-    }
-
-    let running = facts.daemon_running == Some(true);
-    let at_login = facts.unit != UnitState::Disabled;
-    let loaded = facts.script_loaded == Some(true);
-    let on = running && at_login && facts.script_enabled && loaded;
-    if on {
-        return SwitchState {
-            available: true,
-            on: true,
-            detail: "Each game's profile applies when its window is focused".into(),
-        };
-    }
-
-    let mut done = Vec::new();
-    if running {
-        done.push("service running");
-    }
-    if facts.unit == UnitState::Enabled {
-        done.push("service starts at login");
-    }
-    if facts.script_enabled {
-        done.push("detection turned on");
-    }
-    if loaded {
-        done.push("detection running");
-    }
-    SwitchState {
-        available: true,
-        on: false,
-        detail: partly_detail(&done),
-    }
+    switching::switch_state(&facts.switching())
 }
 
 // ------------------------------------------------------------------ actions
 
-/// One system-changing step. Only [`RealSystem`] executes these for real.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Action {
-    /// What `satur8 repair` does (satur8_kwin::repair::repair).
-    RepairEffect,
-    /// `systemctl --user <args> satur8-daemon.service`.
-    Systemctl(Vec<&'static str>),
-    /// kwinrc [Plugins] satur8-focusEnabled = value, via kwriteconfig6.
-    SetFocusEnabled(bool),
-    /// Ask the running KWin to reread its configuration.
-    KwinReconfigure,
-    /// Load and start the focus script in the running KWin, unless loaded.
-    LoadScript(PathBuf),
-    /// Unload the focus script from the running KWin.
-    UnloadScript,
-}
-
-impl Action {
-    pub fn describe(&self) -> String {
-        match self {
-            Action::RepairEffect => "Check and repair the saturation effect".into(),
-            Action::Systemctl(args) => format!("systemctl --user {} {DAEMON_UNIT}", args.join(" ")),
-            Action::SetFocusEnabled(on) => {
-                format!("kwriteconfig6 --file kwinrc --group Plugins --key {FOCUS_KEY} {on}")
-            }
-            Action::KwinReconfigure => "Ask KDE to reload its settings".into(),
-            Action::LoadScript(_) => "Start game detection in KDE".into(),
-            Action::UnloadScript => "Stop game detection in KDE".into(),
-        }
-    }
-}
-
 /// The installer's three steps, plus loading the script into the running
-/// KWin (reconfigure alone does not hot-load it). In Game Mode only the
-/// service step applies.
+/// KWin. In Game Mode only the service step applies.
 pub fn plan_enable(facts: &Facts) -> Vec<Action> {
-    if game_mode(facts) {
-        return vec![Action::Systemctl(vec!["enable", "--now"])];
-    }
-    let mut plan = vec![
-        Action::Systemctl(vec!["enable", "--now"]),
-        Action::SetFocusEnabled(true),
-        Action::KwinReconfigure,
-    ];
-    if facts.script_loaded != Some(true) {
-        if let Some(path) = &facts.script_path {
-            plan.push(Action::LoadScript(path.clone()));
-        }
-    }
-    plan
+    switching::plan_enable(&facts.switching())
 }
 
 /// The reverse of [`plan_enable`].
 pub fn plan_disable(facts: &Facts) -> Vec<Action> {
-    if game_mode(facts) {
-        return vec![Action::Systemctl(vec!["disable", "--now"])];
-    }
-    vec![
-        Action::SetFocusEnabled(false),
-        Action::KwinReconfigure,
-        Action::UnloadScript,
-        Action::Systemctl(vec!["disable", "--now"]),
-    ]
+    switching::plan_disable(&facts.switching())
 }
 
 /// `satur8 repair`, plus starting the daemon and loading the focus script when
@@ -534,133 +395,13 @@ pub fn plan_repair(facts: &Facts) -> Vec<Action> {
     plan
 }
 
-/// Whether a plan starts the background service. `systemctl start` returns
-/// once the process is forked, before the daemon has claimed its bus name, so
-/// a re-check right after it would still report "Not running".
-pub fn plan_starts_daemon(plan: &[Action]) -> bool {
-    plan.iter().any(|action| match action {
-        Action::Systemctl(args) => {
-            args.contains(&"start") || (args.contains(&"enable") && args.contains(&"--now"))
-        }
-        _ => false,
-    })
-}
-
-/// Wait until org.satur8.Daemon has an owner, up to `timeout`. Read-only.
-pub fn wait_for_daemon(timeout: std::time::Duration) -> bool {
-    let Ok(conn) = session() else {
-        return false;
-    };
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        if name_has_owner(&conn, DAEMON_BUS) == Some(true) {
-            return true;
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(250));
-    }
-}
-
-/// Something that can carry out an [`Action`].
-pub trait System {
-    fn run(&mut self, action: &Action) -> Result<String, String>;
-}
-
-/// Run every step, in order, and return one log line per step. A failed step
-/// does not stop the later ones; each one reports for itself.
-pub fn execute(system: &mut dyn System, plan: &[Action]) -> Vec<(bool, String)> {
-    plan.iter()
-        .map(|action| match system.run(action) {
-            Ok(note) if note.is_empty() => (true, action.describe()),
-            Ok(note) => (true, format!("{}: {note}", action.describe())),
-            Err(error) => (false, format!("{} failed: {error}", action.describe())),
-        })
+/// The rows the Game Mode layout lists: what is checked there. The KDE
+/// effect and the KDE focus script belong to Desktop Mode, so their rows are
+/// left out while they do not apply; the background service always shows.
+pub fn game_mode_rows(rows: Vec<HealthRow>) -> Vec<HealthRow> {
+    rows.into_iter()
+        .filter(|row| row.level != Level::NotApplicable || row.label == "Background service")
         .collect()
-}
-
-/// The real thing. Spawns systemctl and kwriteconfig6 (system tools, not a
-/// satur8 binary) and talks to KWin over D-Bus.
-pub struct RealSystem;
-
-impl System for RealSystem {
-    fn run(&mut self, action: &Action) -> Result<String, String> {
-        match action {
-            Action::RepairEffect => satur8_kwin::repair::repair().map(|outcome| outcome.describe()),
-            Action::Systemctl(args) => {
-                let mut cmd = Command::new("systemctl");
-                cmd.arg("--user").args(args).arg(DAEMON_UNIT);
-                run_command(cmd)
-            }
-            Action::SetFocusEnabled(on) => {
-                let mut cmd = Command::new("kwriteconfig6");
-                cmd.args(["--file", "kwinrc", "--group", "Plugins", "--key", FOCUS_KEY])
-                    .arg(if *on { "true" } else { "false" });
-                run_command(cmd)
-            }
-            Action::KwinReconfigure => {
-                let conn = session()?;
-                // reconfigure is declared Q_NOREPLY; a normal call would wait
-                // for a reply that never comes.
-                let msg = zbus::Message::method_call("/KWin", "reconfigure")
-                    .and_then(|b| b.destination(KWIN_BUS))
-                    .and_then(|b| b.interface("org.kde.KWin"))
-                    .and_then(|b| b.with_flags(zbus::message::Flags::NoReplyExpected))
-                    .and_then(|b| b.build(&()))
-                    .map_err(|e| e.to_string())?;
-                conn.send(&msg).map_err(|e| e.to_string())?;
-                Ok(String::new())
-            }
-            Action::LoadScript(path) => {
-                let conn = session()?;
-                if script_loaded(&conn) == Some(true) {
-                    return Ok("already running".into());
-                }
-                let id: i32 = call(
-                    &conn,
-                    KWIN_BUS,
-                    "/Scripting",
-                    "org.kde.kwin.Scripting",
-                    "loadScript",
-                    &(path.to_string_lossy().as_ref(), FOCUS_SCRIPT),
-                )?;
-                if id < 0 {
-                    return Err(format!("KDE refused to load the script (id {id})"));
-                }
-                call::<()>(
-                    &conn,
-                    KWIN_BUS,
-                    "/Scripting",
-                    "org.kde.kwin.Scripting",
-                    "start",
-                    &(),
-                )?;
-                Ok(String::new())
-            }
-            Action::UnloadScript => {
-                let conn = session()?;
-                let _: bool = call(
-                    &conn,
-                    KWIN_BUS,
-                    "/Scripting",
-                    "org.kde.kwin.Scripting",
-                    "unloadScript",
-                    &(FOCUS_SCRIPT,),
-                )?;
-                Ok(String::new())
-            }
-        }
-    }
-}
-
-fn run_command(mut cmd: Command) -> Result<String, String> {
-    let out = cmd.output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(String::new())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
 }
 
 // ------------------------------------------------------------ read-only probe
@@ -686,30 +427,6 @@ where
     reply.body().deserialize::<R>().map_err(|e| e.to_string())
 }
 
-fn name_has_owner(conn: &Connection, name: &str) -> Option<bool> {
-    call(
-        conn,
-        "org.freedesktop.DBus",
-        "/org/freedesktop/DBus",
-        "org.freedesktop.DBus",
-        "NameHasOwner",
-        &(name,),
-    )
-    .ok()
-}
-
-fn script_loaded(conn: &Connection) -> Option<bool> {
-    call(
-        conn,
-        KWIN_BUS,
-        "/Scripting",
-        "org.kde.kwin.Scripting",
-        "isScriptLoaded",
-        &(FOCUS_SCRIPT,),
-    )
-    .ok()
-}
-
 fn get_property<R>(conn: &Connection, dest: &str, path: &str, iface: &str, name: &str) -> Option<R>
 where
     R: TryFrom<zbus::zvariant::OwnedValue>,
@@ -724,84 +441,6 @@ where
     )
     .ok()?;
     R::try_from(value).ok()
-}
-
-fn unit_state() -> UnitState {
-    let Ok(out) = Command::new("systemctl")
-        .args(["--user", "is-enabled", DAEMON_UNIT])
-        .output()
-    else {
-        return UnitState::Unknown;
-    };
-    parse_unit_state(
-        &String::from_utf8_lossy(&out.stdout),
-        &String::from_utf8_lossy(&out.stderr),
-    )
-}
-
-/// Map `systemctl --user is-enabled` output to a [`UnitState`].
-pub fn parse_unit_state(stdout: &str, stderr: &str) -> UnitState {
-    match stdout.trim() {
-        "enabled" | "enabled-runtime" | "static" | "linked" | "linked-runtime" | "alias" => {
-            UnitState::Enabled
-        }
-        "disabled" | "indirect" | "masked" | "masked-runtime" => UnitState::Disabled,
-        "not-found" => UnitState::NotInstalled,
-        // Older systemd: "Failed to get unit file state for X: No such file
-        // or directory". A failed connection to the user manager also says
-        // "No such file or directory", so only this exact phrase counts.
-        _ if stderr.contains("Failed to get unit file state") => UnitState::NotInstalled,
-        _ => UnitState::Unknown,
-    }
-}
-
-fn config_home() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-}
-
-/// Read kwinrc [Plugins] satur8-focusEnabled.
-pub fn focus_enabled_in(kwinrc: &str) -> bool {
-    let mut in_plugins = false;
-    for line in kwinrc.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            in_plugins = line == "[Plugins]";
-            continue;
-        }
-        if !in_plugins {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once('=') {
-            if key.trim() == FOCUS_KEY {
-                return value.trim().eq_ignore_ascii_case("true");
-            }
-        }
-    }
-    false
-}
-
-fn find_script() -> Option<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Some(data) = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()) {
-        dirs.push(PathBuf::from(data));
-    } else if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(PathBuf::from(home).join(".local/share"));
-    }
-    let system = std::env::var("XDG_DATA_DIRS")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-    dirs.extend(system.split(':').map(PathBuf::from));
-    dirs.into_iter()
-        .map(|d| {
-            d.join("kwin/scripts")
-                .join(FOCUS_SCRIPT)
-                .join("contents/code/main.js")
-        })
-        .find(|p| p.is_file())
 }
 
 /// Pull "KWin version: x.y.z" out of KWin's support information.
@@ -887,10 +526,12 @@ pub fn probe() -> Facts {
         (None, None, None)
     };
 
-    let script_enabled = config_home()
-        .and_then(|d| std::fs::read_to_string(d.join("kwinrc")).ok())
-        .map(|text| focus_enabled_in(&text))
-        .unwrap_or(false);
+    let script_enabled = script_enabled();
+    // Steam Game Mode: whether gamescope is ignoring its color settings.
+    let color_management_off = backend.as_deref() == Some("gamescope")
+        && satur8_gamescope::session::find_session()
+            .and_then(|(_, root)| satur8_gamescope::session::read_color_state(&root).ok())
+            .is_some_and(|state| state.color_management_disabled);
 
     Facts {
         env,
@@ -902,6 +543,7 @@ pub fn probe() -> Facts {
         script_enabled,
         script_loaded,
         script_path: find_script(),
+        color_management_off,
     }
 }
 
@@ -915,9 +557,15 @@ pub struct Live {
     pub active_profile: Option<String>,
     /// Daemon LastFocused; `None` when the daemon lacks that property.
     pub last_focused: Option<String>,
-    /// Saturation the KWin effect reports (1.0 when it is not loaded);
-    /// `None` when that cannot be read on this session.
+    /// Saturation the KWin effect reports (1.0 when it is not loaded), or
+    /// in Steam Game Mode the one gamescope's loaded table says; `None` when
+    /// that cannot be read on this session.
     pub applied: Option<f32>,
+    /// Steam Game Mode: gamescope's own session was found.
+    pub game_mode: bool,
+    /// Steam Game Mode: gamescope's color management is turned off, so it
+    /// ignores every color setting, Satur8's table included.
+    pub color_management_off: bool,
 }
 
 /// Light, read-only poll for the "Right now" card.
@@ -941,14 +589,60 @@ pub fn probe_live() -> Live {
                 Err(_) => None,
             };
         }
+    } else if let Some((_, root)) = satur8_gamescope::session::find_session() {
+        // Steam Game Mode: the table gamescope has loaded says it.
+        live.game_mode = true;
+        let state = satur8_gamescope::session::read_color_state(&root).ok();
+        live.color_management_off = state
+            .as_ref()
+            .is_some_and(|state| state.color_management_disabled);
+        live.applied = state.as_ref().and_then(applied_in_game_mode);
     }
     live
 }
 
-/// "Active profile" line.
-pub fn describe_active(live: &Live) -> String {
+/// The saturation on screen in Steam Game Mode. While gamescope's color
+/// management is turned off (`GAMESCOPE_COLOR_MANAGEMENT_DISABLE`) it ignores
+/// every color setting, so the screen shows normal colors whatever table is
+/// loaded; otherwise the loaded look says it.
+pub fn applied_in_game_mode(state: &satur8_gamescope::session::ColorState) -> Option<f32> {
+    if state.color_management_disabled {
+        return Some(1.0);
+    }
+    applied_from_look(&state.look)
+}
+
+/// What the "applied" value's small line says.
+pub fn applied_note(saturation: f32, color_management_off: bool) -> &'static str {
+    if color_management_off {
+        COLOR_MANAGEMENT_OFF
+    } else if (saturation - 1.0).abs() < 1e-3 {
+        "normal colors, read from the compositor"
+    } else {
+        "read from the compositor"
+    }
+}
+
+/// The saturation gamescope shows, from the look it has loaded: Satur8's
+/// table says its own value, no table is normal colors, and a table something
+/// else loaded cannot be read as a saturation.
+pub fn applied_from_look(look: &satur8_gamescope::session::Look) -> Option<f32> {
+    use satur8_gamescope::session::Look;
+    match look {
+        Look::None => Some(1.0),
+        Look::Satur8(saturation) => Some(saturation.get()),
+        Look::Foreign(_) => None,
+    }
+}
+
+/// "Active profile" line. `off` says the active profile is turned off: it is
+/// still its game's profile, and the game shows normal colors.
+pub fn describe_active(live: &Live, game_mode: bool, off: bool) -> String {
     match live.active_profile.as_deref() {
+        Some(name) if !name.is_empty() && off => format!("{name}, off: normal colors"),
         Some(name) if !name.is_empty() => name.to_string(),
+        // Steam Game Mode has no desktop: its first row is "General".
+        _ if game_mode => "None, General".to_string(),
         _ => "None, desktop default".to_string(),
     }
 }
@@ -1099,7 +793,7 @@ pub fn bug_report_url() -> String {
     let body = "## What happened\n\n\n\n## What you expected\n\n\n\n## Steps to reproduce\n\n1.\n2.\n\n\
                 ## Environment\n\nInstall method: \n\n\
                 <!-- Paste here: Report a bug copied your system info to the clipboard. -->\n\n\
-                ## Diagnostics\n\n<!-- If you can, paste the output of `satur8 doctor` and `satur8 status`. -->\n";
+                ## Diagnostics\n\n<!-- Only if you have a terminal at hand: the output of `satur8 doctor` and `satur8 status`. -->\n";
     format!("{NEW_ISSUE}?body={}", percent_encode(body))
 }
 
@@ -1151,6 +845,7 @@ mod tests {
             script_path: Some(PathBuf::from(
                 "/usr/share/kwin/scripts/satur8-focus/contents/code/main.js",
             )),
+            color_management_off: false,
         }
     }
 
@@ -1181,6 +876,7 @@ mod tests {
             script_enabled: false,
             script_loaded: None,
             script_path: None,
+            color_management_off: false,
         };
         assert_eq!(
             levels(&facts),
@@ -1350,9 +1046,46 @@ mod tests {
         let mut facts = healthy();
         facts.unit = UnitState::Disabled;
         assert!(!switch_state(&facts).on);
-        // systemctl unreachable: judge by what is running.
+        // Whether it starts at login could not be read: everything runs,
+        // but that is not "on", which promises the next login too.
         facts.unit = UnitState::Unknown;
+        let switch = switch_state(&facts);
+        assert!(switch.available && !switch.on && switch.login_unchecked);
+        assert!(
+            switch.detail.contains("could not be checked"),
+            "{}",
+            switch.detail
+        );
+        // Confirmed: on.
+        facts.unit = UnitState::Enabled;
         assert!(switch_state(&facts).on);
+    }
+
+    /// The same in Steam Game Mode, where switching is the service alone.
+    #[test]
+    fn game_mode_is_on_only_when_the_service_is_known_to_start_at_login() {
+        assert!(switch_state(&game(Some(true), UnitState::Enabled)).on);
+        let unchecked = switch_state(&game(Some(true), UnitState::Unknown));
+        assert!(unchecked.available && !unchecked.on && unchecked.login_unchecked);
+        assert_eq!(
+            unchecked.detail,
+            "Running now, but whether it starts at login could not be checked. Turn on to make sure"
+        );
+        assert!(
+            unchecked.detail.contains("could not be checked"),
+            "{}",
+            unchecked.detail
+        );
+        // Not running and not readable is simply off, as before.
+        let off = switch_state(&game(Some(false), UnitState::Unknown));
+        assert!(off.available && !off.on && !off.login_unchecked);
+        assert!(off.detail.starts_with("Off"));
+        // Turning it on from there runs the enable step, which does no harm
+        // to a service that is already enabled.
+        assert_eq!(
+            plan_enable(&game(Some(true), UnitState::Unknown)),
+            vec![Action::Systemctl(vec!["enable", "--now"])]
+        );
     }
 
     #[test]
@@ -1428,9 +1161,26 @@ mod tests {
         assert_eq!(log.len(), 4);
         assert!(log[0].0 && !log[1].0 && log[2].0 && log[3].0);
         assert!(log[1].1.ends_with("failed: boom"));
+        // Plain words, not the command behind the step.
         assert_eq!(
             log[3].1,
-            "systemctl --user disable --now satur8-daemon.service"
+            "Turn off the background service, now and at every start"
+        );
+        assert_eq!(log[0].1, "Turn off game detection in KDE's settings");
+        for (_, line) in &log {
+            assert!(!line.contains("systemctl") && !line.contains("kwriteconfig"));
+        }
+        assert_eq!(
+            Action::Systemctl(vec!["enable", "--now"]).describe(),
+            "Turn on the background service, now and at every start"
+        );
+        assert_eq!(
+            Action::Systemctl(vec!["start"]).describe(),
+            "Start the background service"
+        );
+        assert_eq!(
+            Action::SetFocusEnabled(true).describe(),
+            "Turn on game detection in KDE's settings"
         );
     }
 
@@ -1532,11 +1282,18 @@ mod tests {
     #[test]
     fn live_descriptions() {
         let mut live = Live::default();
-        assert_eq!(describe_active(&live), "None, desktop default");
+        assert_eq!(
+            describe_active(&live, false, false),
+            "None, desktop default"
+        );
         assert_eq!(describe_focused(&live), None);
         live.active_profile = Some("cs2".into());
         live.last_focused = Some(String::new());
-        assert_eq!(describe_active(&live), "cs2");
+        assert_eq!(describe_active(&live, false, false), "cs2");
+        assert_eq!(
+            describe_active(&live, false, true),
+            "cs2, off: normal colors"
+        );
         assert_eq!(
             describe_focused(&live).as_deref(),
             Some("Desktop or nothing reported yet")
@@ -1629,6 +1386,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: true,
+                login_unchecked: false,
                 detail: "Each game's profile applies when its window is focused".into(),
             }
         );
@@ -1711,6 +1469,7 @@ mod tests {
             script_enabled: false,
             script_loaded: None,
             script_path: None,
+            color_management_off: false,
         }
     }
 
@@ -1762,6 +1521,7 @@ mod tests {
                 SwitchState {
                     available: false,
                     on: false,
+                    login_unchecked: false,
                     detail: format!(
                         "Needs KDE Plasma on Wayland; this session is {} / {}",
                         facts.env.session, facts.env.desktop
@@ -1774,6 +1534,185 @@ mod tests {
             running.unit = UnitState::Enabled;
             assert_eq!(details(&running)[2], "Running");
             assert!(plan_repair(&running).is_empty());
+        }
+    }
+
+    #[test]
+    fn game_mode_names_the_first_row_when_no_profile_is_active() {
+        let mut live = Live {
+            daemon_running: true,
+            active_profile: Some(String::new()),
+            ..Live::default()
+        };
+        assert_eq!(describe_active(&live, true, false), "None, General");
+        assert_eq!(
+            describe_active(&live, false, false),
+            "None, desktop default"
+        );
+        // No active profile is never "off", whatever the caller passes.
+        assert_eq!(describe_active(&live, true, true), "None, General");
+        live.active_profile = Some("ELDEN RING".into());
+        assert_eq!(describe_active(&live, true, false), "ELDEN RING");
+        assert_eq!(
+            describe_active(&live, true, true),
+            "ELDEN RING, off: normal colors"
+        );
+    }
+
+    #[test]
+    fn the_loaded_gamescope_table_says_what_is_applied() {
+        use satur8_gamescope::session::Look;
+        assert_eq!(applied_from_look(&Look::None), Some(1.0));
+        assert_eq!(
+            applied_from_look(&Look::Satur8(satur8_core::Saturation::new(1.75))),
+            Some(1.75)
+        );
+        assert_eq!(
+            applied_from_look(&Look::Foreign("/x/steam.cube".into())),
+            None
+        );
+    }
+
+    /// With `GAMESCOPE_COLOR_MANAGEMENT_DISABLE` set, gamescope ignores the
+    /// look, so a loaded Satur8 table is not what the screen shows.
+    #[test]
+    fn a_loaded_table_is_not_applied_while_color_management_is_off() {
+        use satur8_gamescope::session::{ColorState, Look};
+        let state = |disabled: bool, look: Look| ColorState {
+            pid: Some(6366),
+            color_management_disabled: disabled,
+            look,
+            sdr_gamut_wideness: None,
+            virtual_white: None,
+            night_mode: None,
+        };
+        let table = || Look::Satur8(satur8_core::Saturation::new(1.75));
+        // Color management on: the table's value, as before.
+        assert_eq!(applied_in_game_mode(&state(false, table())), Some(1.75));
+        assert_eq!(applied_in_game_mode(&state(false, Look::None)), Some(1.0));
+        assert_eq!(
+            applied_in_game_mode(&state(false, Look::Foreign("/x/steam.cube".into()))),
+            None
+        );
+        // Off: normal colors, whatever is loaded.
+        assert_eq!(applied_in_game_mode(&state(true, table())), Some(1.0));
+        assert_eq!(applied_in_game_mode(&state(true, Look::None)), Some(1.0));
+        assert_eq!(
+            applied_in_game_mode(&state(true, Look::Foreign("/x/steam.cube".into()))),
+            Some(1.0)
+        );
+        // And the line under the value says why.
+        assert_eq!(
+            applied_note(1.0, true),
+            "gamescope's color management is off, so Satur8's setting is not shown"
+        );
+        assert_eq!(
+            applied_note(1.0, false),
+            "normal colors, read from the compositor"
+        );
+        assert_eq!(applied_note(1.75, false), "read from the compositor");
+    }
+
+    /// With gamescope's color management off, Satur8's table changes nothing
+    /// on screen, so the first Health row must not say it is working.
+    #[test]
+    fn color_control_is_not_working_while_gamescopes_color_management_is_off() {
+        let mut facts = game(Some(true), UnitState::Enabled);
+        let color = |facts: &Facts| health_rows(facts).remove(0);
+        // On: as before.
+        let row = color(&facts);
+        assert_eq!(row.label, "Color control");
+        assert_eq!(row.level, Level::Ok);
+        assert_eq!(row.detail, "Working through Steam Game Mode (gamescope)");
+
+        facts.color_management_off = true;
+        let row = color(&facts);
+        assert_eq!(row.label, "Color control");
+        assert_eq!(row.level, Level::Problem);
+        assert!(!row.detail.contains("Working"));
+        assert_eq!(
+            row.detail,
+            "gamescope's color management is off, so Satur8's setting is not shown"
+        );
+        // The same words as the line under the "Right now" value.
+        assert_eq!(row.detail, applied_note(1.0, true));
+        // The Game Mode page lists the row.
+        assert_eq!(game_mode_rows(health_rows(&facts))[0], row);
+
+        // The flag is gamescope's; a desktop session's row does not change.
+        let mut kde = healthy();
+        kde.color_management_off = true;
+        assert_eq!(color(&kde).level, Level::Ok);
+    }
+
+    #[test]
+    fn the_game_mode_page_keeps_the_service_row_and_drops_kdes() {
+        let labels = |facts: &Facts| -> Vec<&'static str> {
+            game_mode_rows(health_rows(facts))
+                .into_iter()
+                .map(|row| row.label)
+                .collect()
+        };
+        // Service off and not asked for: still listed, so it can be seen.
+        assert_eq!(
+            labels(&game(Some(false), UnitState::Disabled)),
+            ["Color control", "Background service"]
+        );
+        assert_eq!(
+            labels(&game(Some(false), UnitState::Unknown)),
+            ["Color control", "Background service"]
+        );
+        // Running: the detection row applies and shows.
+        assert_eq!(
+            labels(&game(Some(true), UnitState::Enabled)),
+            ["Color control", "Background service", "Game detection"]
+        );
+    }
+
+    // ------------------------------------------- systemd without systemctl
+
+    /// systemd's answers on the session bus, read on 2026-11-22: the state
+    /// word for an installed unit, an error for one that does not exist.
+    #[test]
+    fn systemds_own_answer_maps_like_systemctls() {
+        assert_eq!(unit_state_from_manager(Ok("enabled")), UnitState::Enabled);
+        assert_eq!(unit_state_from_manager(Ok("disabled")), UnitState::Disabled);
+        assert_eq!(unit_state_from_manager(Ok("masked")), UnitState::Disabled);
+        assert_eq!(
+            unit_state_from_manager(Err("No such file or directory")),
+            UnitState::NotInstalled
+        );
+        assert_eq!(
+            unit_state_from_manager(Err(
+                "org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable"
+            )),
+            UnitState::Unknown
+        );
+        assert_eq!(unit_state_from_manager(Ok("")), UnitState::Unknown);
+    }
+
+    #[test]
+    fn the_systemctl_steps_have_the_same_calls_on_the_bus() {
+        use ManagerStep::*;
+        assert_eq!(manager_steps(&["enable", "--now"]), [Enable, Reload, Start]);
+        assert_eq!(
+            manager_steps(&["disable", "--now"]),
+            [Disable, Reload, Stop]
+        );
+        assert_eq!(manager_steps(&["start"]), [Start]);
+        assert_eq!(manager_steps(&["enable"]), [Enable, Reload]);
+        // Every argument list a plan is built with is covered.
+        let facts = game(Some(false), UnitState::Disabled);
+        for plan in [
+            plan_enable(&facts),
+            plan_disable(&facts),
+            plan_repair(&facts),
+        ] {
+            for action in plan {
+                if let Action::Systemctl(args) = action {
+                    assert!(!manager_steps(&args).is_empty(), "{args:?}");
+                }
+            }
         }
     }
 
@@ -1796,6 +1735,7 @@ mod tests {
             script_enabled: false,
             script_loaded: None,
             script_path: Some(script_path()),
+            color_management_off: false,
         }
     }
 
@@ -1831,6 +1771,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: false,
+                login_unchecked: false,
                 detail: "Off. Game profiles are not applied automatically".into(),
             }
         );
@@ -1857,6 +1798,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: false,
+                login_unchecked: false,
                 detail: "Partly on (service starts at login). Turn on to finish".into(),
             }
         );
@@ -1881,6 +1823,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: true,
+                login_unchecked: false,
                 detail: "Each game's profile applies when its window is focused".into(),
             }
         );

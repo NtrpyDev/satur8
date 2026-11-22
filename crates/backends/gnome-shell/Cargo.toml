@@ -9,4 +9,3 @@ description = "GNOME Shell backend (B4) for Satur8: drives the shipped shell ext
 [dependencies]
 satur8-core = { workspace = true }
 zbus = { workspace = true }
-anyhow = { workspace = true }

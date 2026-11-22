@@ -1,5 +1,7 @@
 //! Shared backend selection and temporary-application lifecycle.
 
+pub mod switching;
+
 use std::io;
 use std::thread::{self, JoinHandle};
 

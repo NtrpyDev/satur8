@@ -206,11 +206,25 @@ pub fn settings_section(view: Result<&BackendView, &str>, profiles: &Profiles) -
 /// than the base value right now, for example after `satur8 set VALUE --output
 /// NAME`. Empty when every output shows the base value, so status prints
 /// nothing new then.
-pub fn current_output_lines(levels: &Levels) -> Vec<String> {
+///
+/// The backend keeps a level for an output that was unplugged, so it comes
+/// back as it was. Such a level changes nothing on screen now, and its line
+/// ends in `(not connected)`. `connected` is the backend's own list; when it
+/// is only the every-output entry, the backend did not list real outputs and
+/// nothing is labelled.
+pub fn current_output_lines(levels: &Levels, connected: &[Output]) -> Vec<String> {
+    let lists_real_outputs = connected.iter().any(|output| output.id != ALL_OUTPUTS);
     levels
         .outputs
         .iter()
-        .map(|(name, saturation)| format!("  output {name}: saturation {:.2}", saturation.get()))
+        .map(|(name, saturation)| {
+            let absent = lists_real_outputs && !connected.iter().any(|output| &output.id == name);
+            format!(
+                "  output {name}: saturation {:.2}{}",
+                saturation.get(),
+                if absent { " (not connected)" } else { "" }
+            )
+        })
         .collect()
 }
 
@@ -465,7 +479,8 @@ mod tests {
     #[test]
     fn status_names_only_the_outputs_that_differ_from_the_base() {
         let uniform = Levels::uniform(Saturation::new(1.5));
-        assert!(current_output_lines(&uniform).is_empty());
+        let connected = [output("eDP-1", "Built-in"), output("DP-2", "Dell")];
+        assert!(current_output_lines(&uniform, &connected).is_empty());
         let mixed = Levels::new(
             Saturation::IDENTITY,
             [
@@ -475,11 +490,41 @@ mod tests {
             ],
         );
         assert_eq!(
-            current_output_lines(&mixed),
+            current_output_lines(&mixed, &connected),
             vec![
                 "  output DP-2: saturation 2.00".to_string(),
                 "  output eDP-1: saturation 0.00".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn status_labels_a_level_kept_for_an_output_that_is_not_connected() {
+        let kept = Levels::new(
+            Saturation::IDENTITY,
+            [
+                ("eDP-1".to_string(), Saturation::new(1.2)),
+                ("HDMI-A-1".to_string(), Saturation::new(0.85)),
+            ],
+        );
+        // HDMI-A-1 was unplugged; the backend still holds its level.
+        assert_eq!(
+            current_output_lines(&kept, &[output("eDP-1", "Built-in")]),
+            vec![
+                "  output HDMI-A-1: saturation 0.85 (not connected)".to_string(),
+                "  output eDP-1: saturation 1.20".to_string(),
+            ]
+        );
+        // A backend that lists no real outputs cannot say which are
+        // connected, so nothing is labelled.
+        assert_eq!(
+            current_output_lines(&kept, &[all_outputs()]),
+            vec![
+                "  output HDMI-A-1: saturation 0.85".to_string(),
+                "  output eDP-1: saturation 1.20".to_string(),
+            ]
+        );
+        assert_eq!(current_output_lines(&kept, &[]).len(), 2);
+        assert!(!current_output_lines(&kept, &[])[0].contains("not connected"));
     }
 }
