@@ -310,9 +310,14 @@ impl BackendState {
 /// The last focus a focus source reported, kept so a profile reload can match
 /// it again without waiting for the next focus change.
 struct Activation {
+    /// The window's own class, as the focus source reported it.
     class: String,
     /// The pid resolved to its program name when the focus was reported.
     exe: Option<String>,
+    /// The Steam AppID the focused window's process carries, if any. Kept
+    /// because a profile that knows only the AppID can be added while the
+    /// game stays in front, and class and program name alone do not find it.
+    app_id: Option<u32>,
     /// The output the focused window is on, when the focus source said.
     output: Option<String>,
 }
@@ -404,17 +409,31 @@ impl Daemon {
             }
         }
         let exe = (pid != 0).then(|| satur8_core::resolve_exe(pid)).flatten();
-        self.last_focused = exe.clone().unwrap_or_else(|| class.to_string());
-        let by_app_id = (pid != 0)
+        let app_id = (pid != 0)
             .then(|| satur8_core::proc::steam_app_id_of(pid))
-            .flatten()
-            .and_then(|app_id| class_to_match(&self.profiles, class, exe.as_deref(), Some(app_id)));
-        let class = by_app_id.as_deref().unwrap_or(class);
+            .flatten();
+        self.react_resolved(class, exe, app_id, output, per_output);
+    }
+
+    /// The rest of a focus report, once the pid is resolved to the program's
+    /// name and its Steam AppID.
+    fn react_resolved(
+        &mut self,
+        class: &str,
+        exe: Option<String>,
+        app_id: Option<u32>,
+        output: Option<&str>,
+        per_output: bool,
+    ) {
+        self.last_focused = exe.clone().unwrap_or_else(|| class.to_string());
         self.last_activation = Some(Activation {
             class: class.to_string(),
             exe: exe.clone(),
+            app_id,
             output: output.map(str::to_string),
         });
+        let by_app_id = class_to_match(&self.profiles, class, exe.as_deref(), app_id);
+        let class = by_app_id.as_deref().unwrap_or(class);
         let current = Current {
             profile: self.current.as_deref(),
             output: self.current_output.as_deref(),
@@ -596,12 +615,17 @@ impl Daemon {
         let Some((old_desktop, new_desktop)) = desktops else {
             return;
         };
+        // Match the focused window again from what was reported, AppID
+        // included: the profile for it may be the one this reload brought.
         let activation = self.last_activation.as_ref().map(|activation| {
-            (
-                activation.class.clone(),
-                activation.exe.clone(),
-                activation.output.clone(),
+            let class = class_to_match(
+                &self.profiles,
+                &activation.class,
+                activation.exe.as_deref(),
+                activation.app_id,
             )
+            .unwrap_or_else(|| activation.class.clone());
+            (class, activation.exe.clone(), activation.output.clone())
         });
         let (class, exe, output) = activation.clone().unwrap_or_default();
         let target = activation
@@ -1450,6 +1474,52 @@ mod tests {
 
         assert_eq!(daemon.current.as_deref(), Some("cs2"));
         assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 2.0)]);
+    }
+
+    /// A native Steam game on a desktop: its window class and program name
+    /// are its own (`cs2`), and only its process says which Steam app it is.
+    /// A profile that knows just the AppID, as one added from the app's list
+    /// of installed games does, must apply when it is added while the game
+    /// is already in front.
+    #[test]
+    fn a_profile_added_by_app_id_for_the_native_game_in_front_applies_on_reload() {
+        let mut empty = steam_profiles();
+        empty.profiles.clear();
+        let (mut daemon, calls, _) = setup_with(empty);
+        daemon.react_resolved("cs2", Some("cs2".into()), Some(730), None, false);
+        assert_eq!(daemon.current, None);
+        assert!(calls.lock().unwrap().is_empty());
+
+        // The app writes the new profile; the daemon reloads. No new focus
+        // report arrives, because the game never lost focus.
+        daemon.replace_profiles(steam_profiles());
+
+        assert_eq!(daemon.current.as_deref(), Some("cs2"));
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 2.0)]);
+
+        // Removing it again puts the general value back, also without a
+        // focus change.
+        let mut none = steam_profiles();
+        none.profiles.clear();
+        daemon.replace_profiles(none);
+        assert_eq!(daemon.current, None);
+        assert_eq!(calls.lock().unwrap().last(), Some(&Call::Reset));
+    }
+
+    /// The AppID belongs to the window it was reported for: the next window
+    /// without one must not inherit it.
+    #[test]
+    fn the_app_id_kept_for_a_reload_is_the_focused_windows_own() {
+        let mut empty = steam_profiles();
+        empty.profiles.clear();
+        let (mut daemon, calls, _) = setup_with(empty);
+        daemon.react_resolved("cs2", Some("cs2".into()), Some(730), None, false);
+        daemon.react_resolved("konsole", Some("konsole".into()), None, None, false);
+
+        daemon.replace_profiles(steam_profiles());
+
+        assert_eq!(daemon.current, None);
+        assert!(calls.lock().unwrap().is_empty());
     }
 
     #[test]
