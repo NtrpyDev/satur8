@@ -6,13 +6,14 @@
 
 mod config;
 mod games_cmd;
+mod gnome_report;
 mod profile_cmd;
 mod run;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use satur8_backend::{all_outputs, select_backend};
-use satur8_core::{CostNote, Environment, Gpu, Saturation};
+use satur8_core::{CostNote, Desktop, Environment, Gpu, Saturation, SessionType};
 use satur8_gamescope::session::{self, ColorState, Focus, Look, X11Root};
 use satur8_kwin::KwinBackend;
 
@@ -233,26 +234,30 @@ fn cmd_off() -> Result<()> {
 }
 
 fn cmd_status() -> Result<()> {
-    if let Some((display, root)) = game_mode_session(
+    let envr = Environment::detect();
+    let report = choose_report(
         satur8_backend::desktop_backend_present,
         session::find_session,
-    ) {
+        KwinBackend::connect,
+        envr.session,
+        envr.desktop,
+    );
+    if let Report::GameMode((display, root)) = &report {
         println!("satur8 status");
-        for line in gamescope_lines(&display, &root) {
+        for line in gamescope_lines(display, root) {
             println!("{line}");
         }
         return Ok(());
     }
 
-    let envr = Environment::detect();
     println!("environment:");
     println!("  session:  {}", envr.session);
     println!("  desktop:  {}", envr.desktop);
     println!("  gpu:      {}", envr.gpu);
     println!("  prefers:  {} backend", envr.preferred_backend());
 
-    match KwinBackend::connect() {
-        Some(kwin) => {
+    match report {
+        Report::Kwin(kwin) => {
             let supported = kwin.is_supported().unwrap_or(false);
             let loaded = kwin.is_loaded().unwrap_or(false);
             print!(
@@ -277,7 +282,10 @@ fn cmd_status() -> Result<()> {
             }
             println!();
         }
-        None => println!("backend kwin: not available in this session"),
+        Report::Gnome => println!("{}", gnome_report::status_line(&gnome_report::gather())),
+        Report::GameMode(_) | Report::NoDesktopBackend => {
+            println!("backend kwin: not available in this session")
+        }
     }
     Ok(())
 }
@@ -293,18 +301,22 @@ fn cmd_repair() -> Result<()> {
 }
 
 fn cmd_doctor() -> Result<()> {
-    if let Some((display, root)) = game_mode_session(
+    let envr = Environment::detect();
+    let report = choose_report(
         satur8_backend::desktop_backend_present,
         session::find_session,
-    ) {
+        KwinBackend::connect,
+        envr.session,
+        envr.desktop,
+    );
+    if let Report::GameMode((display, root)) = &report {
         println!("satur8 doctor");
-        for line in gamescope_lines(&display, &root) {
+        for line in gamescope_lines(display, root) {
             println!("{line}");
         }
         return print_profiles_summary();
     }
 
-    let envr = Environment::detect();
     println!("satur8 doctor");
     println!("  session type : {}", envr.session);
     println!("  desktop      : {}", envr.desktop);
@@ -312,8 +324,8 @@ fn cmd_doctor() -> Result<()> {
     println!("  preferred    : {}", envr.preferred_backend());
     println!();
 
-    match KwinBackend::connect() {
-        Some(kwin) => {
+    match report {
+        Report::Kwin(kwin) => {
             println!("  [ok] KWin reachable over D-Bus");
             match kwin.is_supported() {
                 Ok(true) => {
@@ -360,7 +372,12 @@ fn cmd_doctor() -> Result<()> {
                 Err(e) => println!("  [!!] couldn't query effect state: {e}"),
             }
         }
-        None => {
+        Report::Gnome => {
+            for line in gnome_report::doctor_lines(&gnome_report::gather()) {
+                println!("{line}");
+            }
+        }
+        Report::GameMode(_) | Report::NoDesktopBackend => {
             println!("  [!!] KWin backend unavailable.");
             println!(
                 "       Expected a KDE Plasma Wayland session. Detected {} / {}.",
@@ -465,6 +482,42 @@ fn game_mode_session<T>(
         None
     } else {
         find_session()
+    }
+}
+
+/// Which report `satur8 doctor` and `satur8 status` print.
+#[derive(Debug, PartialEq)]
+enum Report<S, K> {
+    /// Steam Game Mode, with the gamescope session found.
+    GameMode(S),
+    /// KDE Plasma, with the KWin connection.
+    Kwin(K),
+    /// GNOME on Wayland without KWin: the GNOME Shell extension block.
+    Gnome,
+    /// Anything else keeps the "KWin backend unavailable" lines.
+    NoDesktopBackend,
+}
+
+/// Pick the report in backend selection order: Game Mode only when no desktop
+/// backend comes first, then KWin, then the GNOME block for a GNOME Wayland
+/// session. Each probe runs only when the earlier ones did not decide.
+fn choose_report<S, K>(
+    desktop_present: impl FnOnce() -> bool,
+    find_session: impl FnOnce() -> Option<S>,
+    connect_kwin: impl FnOnce() -> Option<K>,
+    session: SessionType,
+    desktop: Desktop,
+) -> Report<S, K> {
+    if let Some(found) = game_mode_session(desktop_present, find_session) {
+        return Report::GameMode(found);
+    }
+    if let Some(kwin) = connect_kwin() {
+        return Report::Kwin(kwin);
+    }
+    if session == SessionType::Wayland && desktop == Desktop::Gnome {
+        Report::Gnome
+    } else {
+        Report::NoDesktopBackend
     }
 }
 
@@ -794,6 +847,97 @@ mod tests {
             "  [ok] satur8 effect matches the running KWin ABI"
         );
         assert_eq!(lines.len(), 2);
+    }
+
+    fn no_kwin() -> Option<()> {
+        None
+    }
+
+    #[test]
+    fn kde_keeps_the_kwin_report() {
+        let report = choose_report(
+            || true,
+            || -> Option<&str> { panic!("gamescope must not be probed on a KDE desktop") },
+            || Some(()),
+            SessionType::Wayland,
+            Desktop::Kde,
+        );
+        assert_eq!(report, Report::Kwin(()));
+        // KWin reachable wins over a GNOME desktop name, as before.
+        let report = choose_report(
+            || true,
+            || None::<&str>,
+            || Some(()),
+            SessionType::Wayland,
+            Desktop::Gnome,
+        );
+        assert_eq!(report, Report::Kwin(()));
+        // KDE whose KWin does not answer keeps the old "unavailable" lines.
+        let report = choose_report(
+            || false,
+            || None::<&str>,
+            no_kwin,
+            SessionType::Wayland,
+            Desktop::Kde,
+        );
+        assert_eq!(report, Report::NoDesktopBackend);
+    }
+
+    #[test]
+    fn game_mode_keeps_its_report() {
+        let report = choose_report(
+            || false,
+            || Some(":0"),
+            || -> Option<()> { panic!("KWin must not be probed in Game Mode") },
+            SessionType::X11,
+            Desktop::Other,
+        );
+        assert_eq!(report, Report::GameMode(":0"));
+        // A GNOME desktop whose extension is not running finds no desktop
+        // backend, so a gamescope session there still gets the Game Mode report.
+        let report = choose_report(
+            || false,
+            || Some(":1"),
+            no_kwin,
+            SessionType::Wayland,
+            Desktop::Gnome,
+        );
+        assert_eq!(report, Report::GameMode(":1"));
+    }
+
+    #[test]
+    fn gnome_wayland_gets_the_gnome_report() {
+        // Extension running: the GNOME probe counts as a desktop backend.
+        let report = choose_report(
+            || true,
+            || -> Option<&str> { panic!("gamescope must not be probed") },
+            no_kwin,
+            SessionType::Wayland,
+            Desktop::Gnome,
+        );
+        assert_eq!(report, Report::Gnome);
+        // Extension missing or off, no gamescope: still the GNOME report.
+        let report = choose_report(
+            || false,
+            || None::<&str>,
+            no_kwin,
+            SessionType::Wayland,
+            Desktop::Gnome,
+        );
+        assert_eq!(report, Report::Gnome);
+    }
+
+    #[test]
+    fn other_sessions_keep_the_old_lines() {
+        for (session, desktop) in [
+            (SessionType::X11, Desktop::Gnome),
+            (SessionType::Wayland, Desktop::Hyprland),
+            (SessionType::X11, Desktop::Other),
+            (SessionType::Tty, Desktop::Other),
+        ] {
+            let report = choose_report(|| false, || None::<&str>, no_kwin, session, desktop);
+            assert_eq!(report, Report::NoDesktopBackend, "{session:?} {desktop:?}");
+        }
     }
 
     /// Over SSH on the Deck no desktop backend is reachable, so the probe runs.

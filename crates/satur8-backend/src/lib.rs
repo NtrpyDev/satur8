@@ -13,6 +13,12 @@ use satur8_kwin::KwinBackend;
 use satur8_nv_control::NvControlBackend;
 use signal_hook::iterator::{Handle, Signals};
 
+/// The GNOME extension's names, for reports that check it without the backend.
+pub use satur8_gnome::{
+    EXTENSION_UUID as GNOME_EXTENSION_UUID, IFACE as GNOME_IFACE, PATH as GNOME_PATH,
+    SERVICE as GNOME_SERVICE,
+};
+
 /// Sentinel used when an operation targets every output.
 pub fn all_outputs() -> Output {
     Output {

@@ -14,9 +14,13 @@ use satur8_core::{
 };
 use zbus::blocking::Connection;
 
-const SERVICE: &str = "org.satur8.GnomeShell";
-const PATH: &str = "/org/satur8/GnomeShell";
-const IFACE: &str = "org.satur8.GnomeShell";
+/// The bus name, object path and interface the extension exports when enabled.
+pub const SERVICE: &str = "org.satur8.GnomeShell";
+pub const PATH: &str = "/org/satur8/GnomeShell";
+pub const IFACE: &str = "org.satur8.GnomeShell";
+/// The extension's UUID: its folder name under `gnome-shell/extensions` and the
+/// name `gnome-extensions` and GNOME Shell's D-Bus interface use for it.
+pub const EXTENSION_UUID: &str = "satur8@satur8.github.io";
 
 pub struct GnomeBackend {
     conn: Connection,
