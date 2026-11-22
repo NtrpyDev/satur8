@@ -6,7 +6,8 @@
 #
 # Environment, optional:
 #   GLIBC_FLOOR  oldest glibc the binaries must run on (default: 2.35, the
-#                glibc of Ubuntu 22.04, the oldest supported system we target)
+#                glibc of Ubuntu 22.04, the oldest supported system we target;
+#                the default lives in packaging/abi-floors.sh)
 #
 # Two checks per binary, both read from the file with objdump (binutils):
 #   1. The highest GLIBC_x.y symbol version it asks for, weak references
@@ -23,7 +24,9 @@ set -euo pipefail
 usage() { sed -n '2,20p' "$0"; exit 2; }
 [ "$#" -eq 1 ] || usage
 bin_dir="$1"
-floor="${GLIBC_FLOOR:-2.35}"
+# shellcheck source=packaging/abi-floors.sh
+. "$(cd "$(dirname "$0")" && pwd)/abi-floors.sh"
+floor="$GLIBC_FLOOR"
 case "$floor" in
     [0-9]*.[0-9]*) ;;
     *) echo "FAIL: GLIBC_FLOOR must look like 2.35, got '$floor'" >&2; exit 2 ;;
@@ -34,11 +37,6 @@ command -v objdump >/dev/null 2>&1 || { echo "FAIL: needs objdump (binutils)" >&
 binaries="satur8 satur8-daemon satur8-tray satur8-gui"
 base_allowed="libc.so.6 libm.so.6 libgcc_s.so.1"
 failed=0
-
-# True when version $1 is above version $2 (sort -V orders 2.9 before 2.10).
-version_above() {
-    [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
-}
 
 echo "==> Checking the release binaries in $bin_dir against glibc $floor"
 for name in $binaries; do
