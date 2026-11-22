@@ -1,7 +1,8 @@
 //! `satur8-gui` - the Satur8 desktop app (Slint).
 //!
 //! Main page: the desktop vibrance strip and per-game cards with the game's
-//! real Steam icon, a saturation slider and an enable toggle. Status page:
+//! real Steam icon, a saturation slider and an enable toggle; games are added
+//! from the running programs or from the installed Steam games. Status page:
 //! health checks, repair, per-game switching and an activity log. About page.
 //! Reads/writes the same `profiles.toml` the CLI and daemon use.
 //!
@@ -9,6 +10,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod picker;
 mod status;
 mod steam;
 
@@ -374,7 +376,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let state = state.clone();
         let games = games.clone();
         let activity = activity.clone();
+        let w = ui.as_weak();
         move |i| {
+            // Indices shift, so the card the Steam picker marked is no longer known.
+            if let Some(ui) = w.upgrade() {
+                ui.set_picked_index(-1);
+            }
             let name;
             {
                 let mut st = state.borrow_mut();
@@ -401,7 +408,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let apps = apps.clone();
         let activity = activity.clone();
         let gui_config = gui_config.clone();
+        let w = ui.as_weak();
         move |i| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_picked_index(-1);
+            }
             let app = apps
                 .borrow()
                 .get(i as usize)
@@ -424,6 +435,128 @@ fn main() -> Result<(), slint::PlatformError> {
         move || {
             *apps.borrow_mut() = proc::running_apps();
             running.set_vec(running_strings(&apps.borrow()));
+        }
+    });
+
+    // ---------------- "Add Steam game" picker ----------------
+    // The library is read when the picker opens and on its Refresh button,
+    // never on a timer.
+    let library = Rc::new(RefCell::new(picker::Library::Games(Vec::new())));
+    let steam_query = Rc::new(RefCell::new(String::new()));
+    let steam_rows = Rc::new(VecModel::<SteamRow>::default());
+    ui.set_steam_rows(ModelRc::from(steam_rows.clone()));
+    let show_picker = {
+        let w = ui.as_weak();
+        let state = state.clone();
+        let library = library.clone();
+        let steam_query = steam_query.clone();
+        let steam_rows = steam_rows.clone();
+        move || {
+            let view = picker::view(
+                &library.borrow(),
+                &state.borrow().profiles,
+                &steam_query.borrow(),
+            );
+            steam_rows.set_vec(steam_rows_ui(&view));
+            if let Some(ui) = w.upgrade() {
+                ui.set_steam_message(view.message.into());
+                ui.set_steam_filter_shown(view.show_filter);
+            }
+        }
+    };
+    let show_picker = Rc::new(show_picker);
+    ui.on_steam_picker_opened({
+        let w = ui.as_weak();
+        let library = library.clone();
+        let steam_query = steam_query.clone();
+        let show_picker = show_picker.clone();
+        move || {
+            // The filter field starts empty each time the picker opens.
+            steam_query.borrow_mut().clear();
+            *library.borrow_mut() = read_steam_library();
+            if let Some(ui) = w.upgrade() {
+                ui.set_picked_index(-1);
+            }
+            show_picker();
+        }
+    });
+    ui.on_steam_refresh({
+        let library = library.clone();
+        let show_picker = show_picker.clone();
+        move || {
+            *library.borrow_mut() = read_steam_library();
+            show_picker();
+        }
+    });
+    ui.on_steam_filter_changed({
+        let steam_query = steam_query.clone();
+        let show_picker = show_picker.clone();
+        move |text| {
+            *steam_query.borrow_mut() = text.to_string();
+            show_picker();
+        }
+    });
+    let pick_steam = {
+        let w = ui.as_weak();
+        let state = state.clone();
+        let games = games.clone();
+        let library = library.clone();
+        let activity = activity.clone();
+        let gui_config = gui_config.clone();
+        move |app_id: u32| {
+            let game = match &*library.borrow() {
+                picker::Library::Games(list) => list.iter().find(|g| g.app_id == app_id).cloned(),
+                picker::Library::NoSteam => None,
+            };
+            let Some(game) = game else { return };
+            let (index, text, ok) = {
+                let mut st = state.borrow_mut();
+                let saturation = gui_config.borrow().new_game_saturation();
+                let choice = picker::pick(&st.profiles, &game, saturation);
+                let created = matches!(choice, picker::Pick::Create(_));
+                let (index, changed) = picker::apply(&mut st.profiles, &game, choice);
+                if changed {
+                    save(&st.profiles);
+                }
+                let text = picker::log_line(&st.profiles, index, changed, created);
+                (index, text, changed)
+            };
+            rebuild_games(&games, &state.borrow().profiles);
+            log(&activity, ok, &text);
+            if let Some(ui) = w.upgrade() {
+                ui.set_picked_index(index as i32);
+                ui.set_picked_serial(ui.get_picked_serial().wrapping_add(1));
+            }
+        }
+    };
+    let pick_steam = Rc::new(pick_steam);
+    ui.on_pick_steam({
+        let pick_steam = pick_steam.clone();
+        move |app_id| {
+            if let Ok(app_id) = u32::try_from(app_id) {
+                pick_steam(app_id);
+            }
+        }
+    });
+    ui.on_steam_filter_accepted({
+        let state = state.clone();
+        let library = library.clone();
+        let steam_query = steam_query.clone();
+        let pick_steam = pick_steam.clone();
+        move || {
+            let view = picker::view(
+                &library.borrow(),
+                &state.borrow().profiles,
+                &steam_query.borrow(),
+            );
+            // True closes the picker.
+            match picker::enter_pick(&view) {
+                Some(app_id) => {
+                    pick_steam(app_id);
+                    true
+                }
+                None => false,
+            }
         }
     });
 
@@ -664,7 +797,7 @@ fn rebuild_games(model: &VecModel<GameRow>, profiles: &Profiles) {
         .profiles
         .iter()
         .map(|p| {
-            let exe = p.match_rule.exe.clone().unwrap_or_else(|| p.name.clone());
+            let exe = picker::card_subtitle(p);
             let icon = profile_app_id(p)
                 .and_then(steam::icon_path)
                 .and_then(|path| load_icon(&path));
@@ -814,6 +947,29 @@ fn satur8_tray_is_running() -> bool {
             && std::fs::metadata(&path).is_ok_and(|meta| meta.uid() == uid)
             && std::fs::read(path.join("environ")).is_ok_and(|environ| display.matches(&environ))
     })
+}
+
+/// What the Steam library holds right now: no install, or its games.
+fn read_steam_library() -> picker::Library {
+    if satur8_core::steam::steam_roots().is_empty() {
+        picker::Library::NoSteam
+    } else {
+        picker::Library::Games(satur8_core::steam::installed_games())
+    }
+}
+
+fn steam_rows_ui(view: &picker::View) -> Vec<SteamRow> {
+    view.rows
+        .iter()
+        .filter_map(|row| {
+            Some(SteamRow {
+                app_id: i32::try_from(row.app_id).ok()?,
+                name: row.name.clone().into(),
+                detail: row.detail.clone().into(),
+                has_profile: row.has_profile,
+            })
+        })
+        .collect()
 }
 
 fn running_strings(apps: &[proc::RunningApp]) -> Vec<SharedString> {
