@@ -15,7 +15,8 @@ which claims are honest today.
   installs prebuilt binaries. They can trail the latest release; both were at
   v0.3.3 when checked on 2026-11-21.
 - Release tarball: GitHub release artifact for Linux x86_64, installed with
-  `packaging/install.sh`.
+  `packaging/install.sh`. Since v0.4.0 this is also the install path on SteamOS
+  (tested on a Steam Deck in Game Mode).
 - Debian/Ubuntu, SteamOS, and Bazzite packages are not shipped yet.
 
 Use `vX.Y.Z` for public Satur8 releases. Only use Arch-style `X.Y.Z-1` when
@@ -195,5 +196,7 @@ the deterministic source archive, install the same runtime files, and document
 any target-specific limitations in plain language.
 
 For immutable or gaming-focused distros, do not promise support before hardware
-testing. SteamOS and Bazzite are the v0.4 target because they depend on
-gamescope behavior on real systems, not just on the package format.
+testing, because they depend on gamescope behavior on real systems, not just on
+the package format. SteamOS is supported since v0.4.0 through the release
+tarball's per-user installer, tested on a Steam Deck in Game Mode. Bazzite has
+not been tested on real hardware.
