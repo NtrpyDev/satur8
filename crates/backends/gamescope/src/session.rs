@@ -97,12 +97,15 @@ fn first(values: Option<Vec<u32>>) -> Option<u32> {
     values.and_then(|v| v.first().copied())
 }
 
-/// Whether this root belongs to gamescope's first Xwayland server, the one
-/// Steam Game Mode reports focus on.
+/// Whether this root belongs to the first Xwayland server of a Steam-mode
+/// gamescope, the one Steam Game Mode reports focus on. gamescope writes
+/// `GAMESCOPE_FOCUSED_APP_GFX` only with `--steam`, so a gamescope nested in a
+/// desktop, which has no Steam focus to follow, does not count.
 pub fn is_root_server(props: &dyn RootProps) -> Result<bool> {
     let has_pid = props.cardinals(PID)?.is_some_and(|v| !v.is_empty());
     let server_zero = first(props.cardinals(SERVER_ID)?) == Some(0);
-    Ok(has_pid && server_zero)
+    let steam_mode = props.cardinals(FOCUSED_APP_GFX)?.is_some();
+    Ok(has_pid && server_zero && steam_mode)
 }
 
 /// The focused app, with its pid taken from the `[window, appid, pid]`
@@ -486,7 +489,10 @@ mod tests {
     /// `:0` and `:1` as read on the Deck, plus a plain X server.
     #[test]
     fn only_server_zero_of_gamescope_is_the_root_server() {
-        let display0 = root().with(PID, &[6366]).with(SERVER_ID, &[0]);
+        let display0 = root()
+            .with(PID, &[6366])
+            .with(SERVER_ID, &[0])
+            .with(FOCUSED_APP_GFX, &[769]);
         let display1 = root().with(PID, &[6366]).with(SERVER_ID, &[1]);
         let plain = FakeRoot::default();
         let no_pid = root().with(SERVER_ID, &[0]);
@@ -494,6 +500,25 @@ mod tests {
         assert!(!is_root_server(&display1).unwrap());
         assert!(!is_root_server(&plain).unwrap());
         assert!(!is_root_server(&no_pid).unwrap());
+    }
+
+    /// A gamescope nested in a desktop runs without `--steam`, so its server 0
+    /// root has no `GAMESCOPE_FOCUSED_APP_GFX`.
+    #[test]
+    fn a_gamescope_without_steam_mode_is_not_the_root_server() {
+        let nested = root().with(PID, &[4242]).with(SERVER_ID, &[0]);
+        assert!(!is_root_server(&nested).unwrap());
+    }
+
+    /// gamescope writes the property with no value when nothing is focused;
+    /// it is still present, so the session still counts.
+    #[test]
+    fn steam_mode_with_nothing_focused_is_still_the_root_server() {
+        let idle = root()
+            .with(PID, &[6366])
+            .with(SERVER_ID, &[0])
+            .with(FOCUSED_APP_GFX, &[]);
+        assert!(is_root_server(&idle).unwrap());
     }
 
     #[test]
