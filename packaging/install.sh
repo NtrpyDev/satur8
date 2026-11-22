@@ -301,11 +301,28 @@ install_all() {
 Installed. Next steps:
   * GUI:      satur8-gui
   * Manual:   satur8 on 1.5      (load + boost)   /   satur8 off
-  * Per-game focus mode:
+EOF
+    # Per-game switching is set up differently in Steam Game Mode and on KDE
+    # Plasma; a Steam Deck has both sessions, so it gets both blocks.
+    if has_gamescope_session; then
+        echo "  * Per-game switching in Steam Game Mode:"
+        if [ "$enable_daemon" != true ]; then
+            echo "      systemctl --user enable --now satur8-daemon"
+        fi
+        echo "      satur8 profile add NAME 1.5 --steam-app-id APPID"
+    fi
+    if kwin_present || ! has_gamescope_session; then
+        cat <<EOF
+  * Per-game focus mode on KDE Plasma:
       systemctl --user enable --now satur8-daemon
       kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
       qdbus6 org.kde.KWin /KWin reconfigure
 EOF
+    fi
+    case ":$PATH:" in
+        *":$bindir:"*) ;;
+        *) echo "  $bindir is not on your PATH here; run the commands as $bindir/satur8." ;;
+    esac
 
     if [ -n "$effect_skip_reason" ] && has_gamescope_session; then
         echo
@@ -353,7 +370,9 @@ uninstall_all() {
     rm -f "$qt_plugin_user/satur8.so" "$env_dir/60-satur8.conf"
     rm -rf "$kwin_script_dir" "$gnome_ext_dir" "$effect_src_dir" "$state_dir"
     rm -f "$unit_dir/satur8-daemon.service" "$data/applications/satur8.desktop"
-    echo "    (system-installed effect at $qt_plugin_sys left alone; remove with sudo if needed)"
+    if [ -e "$qt_plugin_sys/satur8.so" ]; then
+        echo "    (system-installed effect at $qt_plugin_sys left alone; remove with sudo if needed)"
+    fi
 }
 
 case "$action" in
