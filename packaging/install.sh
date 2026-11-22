@@ -662,7 +662,7 @@ steam_library_entry() {
         echo "  add it later with: $bindir/satur8 steam-shortcut add"
         return 0
     fi
-    say "Steam library: the app is opened from there in Steam Game Mode"
+    say "Steam library: in Steam Game Mode, open Satur8 from there (the Non-Steam section); games and their saturation are set in the app, with no commands"
     "$bindir/satur8" steam-shortcut add || {
         echo "  Could not ask Steam. Add it later with: $bindir/satur8 steam-shortcut add"
     }

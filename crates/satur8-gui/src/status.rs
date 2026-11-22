@@ -748,7 +748,7 @@ pub fn bug_report_url() -> String {
     let body = "## What happened\n\n\n\n## What you expected\n\n\n\n## Steps to reproduce\n\n1.\n2.\n\n\
                 ## Environment\n\nInstall method: \n\n\
                 <!-- Paste here: Report a bug copied your system info to the clipboard. -->\n\n\
-                ## Diagnostics\n\n<!-- If you can, paste the output of `satur8 doctor` and `satur8 status`. -->\n";
+                ## Diagnostics\n\n<!-- Only if you have a terminal at hand: the output of `satur8 doctor` and `satur8 status`. -->\n";
     format!("{NEW_ISSUE}?body={}", percent_encode(body))
 }
 
@@ -1077,9 +1077,26 @@ mod tests {
         assert_eq!(log.len(), 4);
         assert!(log[0].0 && !log[1].0 && log[2].0 && log[3].0);
         assert!(log[1].1.ends_with("failed: boom"));
+        // Plain words, not the command behind the step.
         assert_eq!(
             log[3].1,
-            "systemctl --user disable --now satur8-daemon.service"
+            "Turn off the background service, now and at every start"
+        );
+        assert_eq!(log[0].1, "Turn off game detection in KDE's settings");
+        for (_, line) in &log {
+            assert!(!line.contains("systemctl") && !line.contains("kwriteconfig"));
+        }
+        assert_eq!(
+            Action::Systemctl(vec!["enable", "--now"]).describe(),
+            "Turn on the background service, now and at every start"
+        );
+        assert_eq!(
+            Action::Systemctl(vec!["start"]).describe(),
+            "Start the background service"
+        );
+        assert_eq!(
+            Action::SetFocusEnabled(true).describe(),
+            "Turn on game detection in KDE's settings"
         );
     }
 

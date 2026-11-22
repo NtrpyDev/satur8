@@ -187,13 +187,27 @@ pub enum Action {
 }
 
 impl Action {
+    /// The step in plain words: a line of the app's activity list and of
+    /// `satur8 auto`. The commands behind the steps are in the README.
     pub fn describe(&self) -> String {
         match self {
             Action::RepairEffect => "Check and repair the saturation effect".into(),
-            Action::Systemctl(args) => format!("systemctl --user {} {DAEMON_UNIT}", args.join(" ")),
-            Action::SetFocusEnabled(on) => {
-                format!("kwriteconfig6 --file kwinrc --group Plugins --key {FOCUS_KEY} {on}")
+            Action::Systemctl(args) => {
+                let now = args.contains(&"--now");
+                match args.first().copied() {
+                    Some("enable") if now => {
+                        "Turn on the background service, now and at every start".into()
+                    }
+                    Some("disable") if now => {
+                        "Turn off the background service, now and at every start".into()
+                    }
+                    Some("start") => "Start the background service".into(),
+                    Some("stop") => "Stop the background service".into(),
+                    _ => format!("Background service: {}", args.join(" ")),
+                }
             }
+            Action::SetFocusEnabled(true) => "Turn on game detection in KDE's settings".into(),
+            Action::SetFocusEnabled(false) => "Turn off game detection in KDE's settings".into(),
             Action::KwinReconfigure => "Ask KDE to reload its settings".into(),
             Action::LoadScript(_) => "Start game detection in KDE".into(),
             Action::UnloadScript => "Stop game detection in KDE".into(),
