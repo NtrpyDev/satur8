@@ -4111,6 +4111,7 @@ dependencies = [
  "anyhow",
  "satur8-backend",
  "satur8-core",
+ "satur8-gamescope",
  "zbus",
 ]
 
