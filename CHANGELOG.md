@@ -62,8 +62,9 @@ Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.
   uninstall left no table. Install from the release tarball without `--system`. Known gaps:
   the KDE desktop effect cannot be rebuilt on Bazzite after a KWin update
   because the image has no build tools, the GNOME images run GNOME 51, which
-  the GNOME Shell extension does not list yet, and the COPR package is not
-  built for Fedora 45, which current Bazzite is based on.
+  the GNOME Shell extension does not list yet, and layering the COPR package
+  with `rpm-ostree` is untested (a Fedora 45 build target, what current Bazzite
+  is based on, was added to the COPR project on 2026-11-22).
 - The Deck's Desktop Mode does not work yet. It runs KDE Plasma with KWin
   6.7.3, the KWin effect bundled in the release tarball is built for a
   different KWin, and SteamOS has no build tools to rebuild it, so the service

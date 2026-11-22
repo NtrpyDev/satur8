@@ -188,8 +188,9 @@ and Bazzite is Fedora-based (the live COPR work carries over).
         an image with no `cmake` or KWin headers.
   - [ ] GNOME images: add GNOME 51 to the Shell extension once it is tested on
         GNOME 51.
-  - [ ] Decide on a Fedora 45 COPR build and whether to document `rpm-ostree`
-        layering.
+  - [ ] Fedora 45 COPR package: the build target was added on 2026-11-22.
+        Still open: test layering it on Bazzite with `rpm-ostree` and decide
+        whether to document that.
   - [ ] NVIDIA and Intel Game Mode: check on hardware whether the look applies
         when gamescope scans a game out directly.
 - [ ] Document clearly what works and what does not on each. SteamOS is done in

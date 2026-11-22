@@ -207,9 +207,10 @@ not been tested on real hardware.
 Bazzite specifics (stable 45.20261117.1, checked 2026-11-21 from source and in a
 container, not on a Bazzite device):
 
-- It is Fedora 45 based. The COPR project builds Fedora 43 and 44 only, so a
-  COPR package cannot be layered on Bazzite until a Fedora 45 build exists, and
-  Bazzite's documentation calls `rpm-ostree` layering a last resort.
+- It is Fedora 45 based. A Fedora 45 build target was added to the COPR project
+  on 2026-11-22 (it built Fedora 43 and 44 only before). Layering that package
+  on Bazzite has not been tested, and Bazzite's documentation calls
+  `rpm-ostree` layering a last resort.
 - `/usr` is read-only, so `install.sh --system` cannot work there and the
   installer refuses it; the per-user install writes only under `$HOME`, which
   persists.

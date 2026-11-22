@@ -90,7 +90,7 @@ Satur8 has not been run on a Bazzite device. Use the release tarball above witho
 - Steam Game Mode (the `bazzite-deck` images) uses the same gamescope color and focus features as the Steam Deck. The v0.4.0 installer and background service were run against Bazzite's own gamescope build (3.17.0-ogc1, in Bazzite stable 45.20261117.1) in a container, not on a Bazzite device: the service found gamescope, loaded a profile's table when that app took focus, and removed it at the home window and when stopped. Setup is the same as on the [Steam Deck](#steam-deck).
 - KDE Plasma Desktop Mode uses the KWin effect bundled in the tarball when it matches your KWin version. Bazzite has no build tools for rebuilding it, so after a KWin update the effect stays off until you install a Satur8 release built for that KWin.
 - The GNOME images run GNOME 51, which the Satur8 GNOME Shell extension does not list yet.
-- The Fedora COPR package is not built for Fedora 45, which current Bazzite is based on.
+- A Fedora 45 build target (what current Bazzite is based on) was added to the COPR project on 2026-11-22. Installing that package on Bazzite by layering it with `rpm-ostree` has not been tested, and Bazzite's documentation treats layering as a last resort.
 
 ## Quick start
 
