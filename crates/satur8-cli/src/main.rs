@@ -565,6 +565,47 @@ mod tests {
     }
 
     #[test]
+    fn profile_add_takes_steam_game_query() {
+        let cli = Cli::try_parse_from([
+            "satur8",
+            "profile",
+            "add",
+            "sushiamo",
+            "1.75",
+            "--steam-game",
+            "sushi",
+        ]);
+        assert!(matches!(
+            cli.map(|cli| cli.command),
+            Ok(Command::Profile {
+                cmd: profile_cmd::ProfileCmd::Add {
+                    steam_game: Some(ref query),
+                    steam_app_id: None,
+                    ..
+                }
+            }) if query == "sushi"
+        ));
+    }
+
+    #[test]
+    fn steam_game_conflicts_with_steam_app_id() {
+        let error = Cli::try_parse_from([
+            "satur8",
+            "profile",
+            "add",
+            "sushiamo",
+            "1.75",
+            "--steam-game",
+            "sushi",
+            "--steam-app-id",
+            "4555040",
+        ])
+        .err()
+        .map(|error| error.kind());
+        assert_eq!(error, Some(clap::error::ErrorKind::ArgumentConflict));
+    }
+
+    #[test]
     fn linear_flag_is_set_before_apply_when_supported() {
         let mut backend = FakeBackend {
             supports_linear: true,

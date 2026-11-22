@@ -1,7 +1,8 @@
-//! `satur8 games` - list the installed Steam games and the profile each one uses.
+//! `satur8 games` - list the installed Steam games and the profile each one
+//! uses, and resolve `profile add --steam-game` to one of them.
 
 use anyhow::Result;
-use satur8_core::steam::{self, SteamGame};
+use satur8_core::steam::{self, GameQuery, SteamGame};
 use satur8_core::{Profile, Profiles};
 
 use crate::config;
@@ -137,6 +138,36 @@ fn json_string(text: &str) -> String {
     out
 }
 
+/// Resolve a `--steam-game` query to one installed game, or the message that
+/// explains why it could not be resolved.
+pub fn resolve_game(games: &[SteamGame], query: &str) -> Result<SteamGame, String> {
+    match steam::find_game(games, query) {
+        GameQuery::Found(game) => Ok(game),
+        GameQuery::Ambiguous(candidates) => Err(ambiguous_message(query, &candidates)),
+        GameQuery::NotFound => Err(format!(
+            "no installed Steam game matches '{query}'; run `satur8 games` to see the installed games"
+        )),
+    }
+}
+
+/// The candidates as `APPID  NAME` lines between an opening and a closing sentence.
+fn ambiguous_message(query: &str, candidates: &[SteamGame]) -> String {
+    let id_width = candidates
+        .iter()
+        .map(|game| game.app_id.to_string().len())
+        .fold(0, usize::max);
+    let mut lines = vec![format!(
+        "'{query}' matches more than one installed Steam game:"
+    )];
+    lines.extend(
+        candidates
+            .iter()
+            .map(|game| format!("{:<id_w$}  {}", game.app_id, game.name, id_w = id_width)),
+    );
+    lines.push("Pass a longer name or the AppID to --steam-game.".to_string());
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +276,41 @@ mod tests {
         assert_eq!(json_string("line\nnext\ttab\r"), "\"line\\nnext\\ttab\\r\"");
         assert_eq!(json_string("bell\u{7}"), "\"bell\\u0007\"");
         assert_eq!(json_string("Ōkami"), "\"Ōkami\"");
+    }
+
+    #[test]
+    fn resolve_finds_one_game() {
+        assert_eq!(
+            resolve_game(&games(), "sushiamo"),
+            Ok(game(4555040, "Sushiamo"))
+        );
+        assert_eq!(
+            resolve_game(&games(), "2868840"),
+            Ok(game(2868840, "Slay the Spire 2"))
+        );
+    }
+
+    #[test]
+    fn resolve_lists_candidates_when_ambiguous() {
+        assert_eq!(
+            resolve_game(&games(), "a"),
+            Err("'a' matches more than one installed Steam game:\n\
+                 1086940  Baldur's Gate 3\n\
+                 2868840  Slay the Spire 2\n\
+                 4555040  Sushiamo\n\
+                 105600   Terraria\n\
+                 Pass a longer name or the AppID to --steam-game."
+                .to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_points_at_satur8_games_when_nothing_matches() {
+        assert_eq!(
+            resolve_game(&games(), "zelda"),
+            Err("no installed Steam game matches 'zelda'; \
+                 run `satur8 games` to see the installed games"
+                .to_string())
+        );
     }
 }
