@@ -3,9 +3,10 @@
 use std::io;
 use std::thread::{self, JoinHandle};
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use satur8_core::{Backend, BackendError, Environment, Output, Saturation};
 use satur8_drm_ctm::DrmCtmBackend;
+use satur8_gamescope::GamescopeBackend;
 use satur8_gnome::GnomeBackend;
 use satur8_hyprland::HyprlandBackend;
 use satur8_kwin::KwinBackend;
@@ -41,34 +42,106 @@ pub fn apply_to_outputs(
     Ok(())
 }
 
+/// One step of backend selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Probe {
+    Kwin,
+    Gnome,
+    Hyprland,
+    NvControl,
+    /// KWin is running but rejects our effect: that is the exact-version plugin
+    /// mismatch after a KWin update, not a missing backend. Say so, instead of
+    /// pointing a KDE user at another backend.
+    KwinRejectsEffect,
+    /// Steam Game Mode. After every desktop compositor, so desktops behave as
+    /// before; before DRM CTM, which cannot work while gamescope owns the display.
+    Gamescope,
+    DrmCtm,
+}
+
+/// The order `select_backend` tries backends in.
+const SELECTION_ORDER: [Probe; 7] = [
+    Probe::Kwin,
+    Probe::Gnome,
+    Probe::Hyprland,
+    Probe::NvControl,
+    Probe::KwinRejectsEffect,
+    Probe::Gamescope,
+    Probe::DrmCtm,
+];
+
+enum ProbeResult {
+    Found(Box<dyn Backend>),
+    /// Stop selecting and report this instead.
+    Refused(anyhow::Error),
+    Absent,
+}
+
+fn found<B: Backend + 'static>(backend: Option<B>) -> ProbeResult {
+    match backend {
+        Some(backend) => ProbeResult::Found(Box::new(backend)),
+        None => ProbeResult::Absent,
+    }
+}
+
+fn run_probe(probe: Probe) -> ProbeResult {
+    match probe {
+        Probe::Kwin => found(KwinBackend::detect()),
+        Probe::Gnome => found(GnomeBackend::detect()),
+        Probe::Hyprland => found(HyprlandBackend::detect()),
+        Probe::NvControl => found(NvControlBackend::detect()),
+        Probe::KwinRejectsEffect => {
+            if KwinBackend::connect().is_some() {
+                ProbeResult::Refused(anyhow!(
+                    "the Satur8 KWin effect is missing or was built for a different KWin \
+                     version than the one running. Run `satur8 repair` to rebuild it."
+                ))
+            } else {
+                ProbeResult::Absent
+            }
+        }
+        Probe::Gamescope => found(GamescopeBackend::detect()),
+        Probe::DrmCtm => found(DrmCtmBackend::detect()),
+    }
+}
+
+/// Run `probes` in order and stop at the first backend found or refusal.
+fn select_in_order(
+    probes: &[Probe],
+    mut run: impl FnMut(Probe) -> ProbeResult,
+) -> Result<Option<Box<dyn Backend>>> {
+    for &probe in probes {
+        match run(probe) {
+            ProbeResult::Found(backend) => return Ok(Some(backend)),
+            ProbeResult::Refused(error) => return Err(error),
+            ProbeResult::Absent => {}
+        }
+    }
+    Ok(None)
+}
+
+/// Whether any probe ahead of gamescope in `probes` finds or refuses.
+fn desktop_present_in_order(probes: &[Probe], mut run: impl FnMut(Probe) -> ProbeResult) -> bool {
+    probes
+        .iter()
+        .take_while(|&&probe| probe != Probe::Gamescope)
+        .any(|&probe| !matches!(run(probe), ProbeResult::Absent))
+}
+
+/// Whether selection would stop at a desktop backend before reaching
+/// gamescope: KWin (also when it rejects the effect), GNOME, Hyprland or
+/// NV-CONTROL. Reports use this to pick the desktop or the Game Mode view.
+pub fn desktop_backend_present() -> bool {
+    desktop_present_in_order(&SELECTION_ORDER, run_probe)
+}
+
 /// Resolve the best reachable apply/reset backend in canonical cost order.
 ///
-/// Gamescope is launch-only and is intentionally not part of this selector.
+/// The nested gamescope launch and the `gamescope-native` override are
+/// launch-only and are not part of this selector; Steam Game Mode is.
 pub fn select_backend() -> Result<Box<dyn Backend>> {
-    if let Some(backend) = KwinBackend::detect() {
-        return Ok(Box::new(backend));
-    }
-    if let Some(backend) = GnomeBackend::detect() {
-        return Ok(Box::new(backend));
-    }
-    if let Some(backend) = HyprlandBackend::detect() {
-        return Ok(Box::new(backend));
-    }
-    if let Some(backend) = NvControlBackend::detect() {
-        return Ok(Box::new(backend));
-    }
-    if let Some(backend) = DrmCtmBackend::detect() {
-        return Ok(Box::new(backend));
-    }
-
-    // KWin is running but rejects our effect: that is the exact-version plugin
-    // mismatch after a KWin update, not a missing backend. Say so, instead of
-    // pointing a KDE user at the gamescope fallback.
-    if KwinBackend::connect().is_some() {
-        bail!(
-            "the Satur8 KWin effect is missing or was built for a different KWin \
-             version than the one running. Run `satur8 repair` to rebuild it."
-        );
+    if let Some(backend) = select_in_order(&SELECTION_ORDER, run_probe)? {
+        return Ok(backend);
     }
 
     let environment = Environment::detect();
@@ -189,4 +262,154 @@ where
         handle,
         thread: Some(thread),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use satur8_core::CostNote;
+
+    struct Named(&'static str);
+
+    impl Backend for Named {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+
+        fn cost(&self) -> CostNote {
+            CostNote::ZeroCost
+        }
+
+        fn outputs(&self) -> Vec<Output> {
+            vec![all_outputs()]
+        }
+
+        fn apply(&mut self, _output: &Output, _saturation: Saturation) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        fn reset(&mut self, _output: &Output) -> Result<(), BackendError> {
+            Ok(())
+        }
+    }
+
+    fn name_of(probe: Probe) -> &'static str {
+        match probe {
+            Probe::Kwin => "kwin",
+            Probe::Gnome => "gnome-shell",
+            Probe::Hyprland => "hyprland",
+            Probe::NvControl => "nv-control",
+            Probe::KwinRejectsEffect => "kwin-rejects-effect",
+            Probe::Gamescope => "gamescope",
+            Probe::DrmCtm => "drm-ctm",
+        }
+    }
+
+    #[test]
+    fn gamescope_comes_after_the_desktops_and_the_kwin_bail_and_before_drm_ctm() {
+        assert_eq!(
+            SELECTION_ORDER,
+            [
+                Probe::Kwin,
+                Probe::Gnome,
+                Probe::Hyprland,
+                Probe::NvControl,
+                Probe::KwinRejectsEffect,
+                Probe::Gamescope,
+                Probe::DrmCtm,
+            ]
+        );
+    }
+
+    #[test]
+    fn the_first_backend_found_wins_and_later_probes_never_run() {
+        let mut ran = Vec::new();
+        let picked = select_in_order(&SELECTION_ORDER, |probe| {
+            ran.push(probe);
+            match probe {
+                Probe::Gamescope | Probe::DrmCtm => {
+                    ProbeResult::Found(Box::new(Named(name_of(probe))))
+                }
+                _ => ProbeResult::Absent,
+            }
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(picked.name(), "gamescope");
+        assert_eq!(ran.last(), Some(&Probe::Gamescope));
+        assert!(!ran.contains(&Probe::DrmCtm));
+    }
+
+    #[test]
+    fn a_desktop_backend_is_picked_before_gamescope() {
+        let picked = select_in_order(&SELECTION_ORDER, |probe| match probe {
+            Probe::Kwin | Probe::Gamescope => ProbeResult::Found(Box::new(Named(name_of(probe)))),
+            _ => ProbeResult::Absent,
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(picked.name(), "kwin");
+    }
+
+    #[test]
+    fn kwin_rejecting_the_effect_stops_selection_before_gamescope() {
+        let mut ran = Vec::new();
+        let result = select_in_order(&SELECTION_ORDER, |probe| {
+            ran.push(probe);
+            match probe {
+                Probe::KwinRejectsEffect => ProbeResult::Refused(anyhow!("rejected")),
+                Probe::Gamescope => ProbeResult::Found(Box::new(Named(name_of(probe)))),
+                _ => ProbeResult::Absent,
+            }
+        });
+        assert!(result.is_err());
+        assert!(!ran.contains(&Probe::Gamescope));
+    }
+
+    #[test]
+    fn a_desktop_backend_ahead_of_gamescope_is_present() {
+        for desktop in [Probe::Kwin, Probe::Gnome, Probe::Hyprland, Probe::NvControl] {
+            assert!(desktop_present_in_order(&SELECTION_ORDER, |probe| {
+                if probe == desktop {
+                    ProbeResult::Found(Box::new(Named(name_of(probe))))
+                } else {
+                    ProbeResult::Absent
+                }
+            }));
+        }
+    }
+
+    #[test]
+    fn kwin_rejecting_the_effect_counts_as_a_desktop() {
+        assert!(desktop_present_in_order(&SELECTION_ORDER, |probe| {
+            match probe {
+                Probe::KwinRejectsEffect => ProbeResult::Refused(anyhow!("rejected")),
+                _ => ProbeResult::Absent,
+            }
+        }));
+    }
+
+    #[test]
+    fn gamescope_and_drm_ctm_are_not_desktops_and_are_never_probed() {
+        let mut ran = Vec::new();
+        let present = desktop_present_in_order(&SELECTION_ORDER, |probe| {
+            ran.push(probe);
+            match probe {
+                Probe::Gamescope | Probe::DrmCtm => {
+                    ProbeResult::Found(Box::new(Named(name_of(probe))))
+                }
+                _ => ProbeResult::Absent,
+            }
+        });
+        assert!(!present);
+        assert!(!ran.contains(&Probe::Gamescope));
+        assert!(!ran.contains(&Probe::DrmCtm));
+    }
+
+    #[test]
+    fn nothing_found_is_none() {
+        assert!(select_in_order(&SELECTION_ORDER, |_| ProbeResult::Absent)
+            .unwrap()
+            .is_none());
+    }
 }

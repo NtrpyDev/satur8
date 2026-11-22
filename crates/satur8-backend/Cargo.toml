@@ -10,6 +10,7 @@ description = "Shared backend selection and restoration lifecycle for Satur8."
 satur8-core = { workspace = true }
 satur8-kwin = { workspace = true }
 satur8-drm-ctm = { workspace = true }
+satur8-gamescope = { workspace = true }
 satur8-hyprland = { workspace = true }
 satur8-nv-control = { workspace = true }
 satur8-gnome = { workspace = true }
