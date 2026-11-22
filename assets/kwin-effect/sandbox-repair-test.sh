@@ -14,6 +14,9 @@
 # installs it from there), one without (repair fails and says so). A fake curl
 # first on that PATH must never run.
 #
+# Each case gets its own XDG_RUNTIME_DIR under the sandbox folder (mode 700),
+# so the test KWin never puts a Wayland socket in the real session's folder.
+#
 # Usage: assets/kwin-effect/sandbox-repair-test.sh [path/to/satur8]
 set -uo pipefail
 
@@ -22,6 +25,14 @@ SATUR8="${1:-$repo/target/debug/satur8}"
 work="$repo/target/sandbox-repair"
 rm -rf "$work"
 mkdir -p "$work"
+
+# A private runtime folder for one case: KWin creates its Wayland socket there.
+private_runtime() { # private_runtime <case name>
+    local dir="$work/$1/runtime"
+    mkdir -p "$dir"
+    chmod 700 "$dir"
+    printf '%s' "$dir"
+}
 
 # A plugin whose embedded KWin version can never match: the real build with its
 # version tag rewritten in place (same length, so the file stays well-formed).
@@ -58,6 +69,8 @@ run_case() { # run_case <name> <with_plugin_path: yes|no>
     [ "$with_path" = yes ] || plugin_path="$work/$name/not-on-the-path"
     mkdir -p "$plugin_path"
 
+    local runtime; runtime="$(private_runtime "$name")"
+    XDG_RUNTIME_DIR="$runtime" \
     HOME="$home" SATUR8="$SATUR8" REPO="$repo" KWIN_PLUGIN_PATH="$plugin_path" \
     WITH_PATH="$with_path" REAL_ABI="$real_abi" LOG="$work/$name/kwin.log" \
     dbus-run-session -- bash -s <<'INNER' > "$work/$name/out.txt" 2>&1
@@ -176,6 +189,8 @@ run_store_case() { # run_store_case <name> <set has a match: yes|no>
     rm -f "$curl_marker"
 
     echo "== $name"
+    local runtime; runtime="$(private_runtime "$name")"
+    XDG_RUNTIME_DIR="$runtime" \
     HOME="$home" SATUR8="$SATUR8" REPO="$repo" KWIN_PLUGIN_PATH="$plugins" \
     NOBUILD="$nobuild" STORE="$store_override" OS_RELEASE="$work/$name/os-release" \
     LOG="$work/$name/kwin.log" \
