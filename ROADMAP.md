@@ -7,14 +7,16 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.5.0 is the current release. Seven of the eight backend paths are verified on
+v0.5.1 is the current release. All eight backend paths are verified on
 real hardware: KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland,
 NVIDIA X11 NV-CONTROL, automatic per-game switching in Steam Game Mode through
 gamescope's look table (verified on a Steam Deck OLED with SteamOS 3.9.5 and
 gamescope 3.16.30.1), the gamescope-native launch option for a running
-full-screen gamescope compositor, and the nested gamescope fallback for
-unsupported Wayland sessions. The remaining implemented-but-unverified path is
-DRM/KMS. Since v0.4.1 the release tarball needs glibc 2.35 or newer (checked
+full-screen gamescope compositor, the nested gamescope fallback for
+unsupported Wayland sessions, and DRM/KMS on a console with no display server
+(verified on a Steam Deck OLED's AMD GPU). Still Implemented rather than
+Verified: a different value per monitor on KDE Plasma, and Steam Game Mode on
+Bazzite. Since v0.4.1 the release tarball needs glibc 2.35 or newer (checked
 by starting each program in containers of Ubuntu 22.04, Debian 12, Ubuntu
 24.04, openSUSE Leap 16.0 and Fedora 43) and carries prebuilt KWin effects for
 SteamOS 3.9 (KWin 6.7.3), SteamOS 3.10 (KWin 6.8.2), and Fedora 44 and 45
@@ -121,6 +123,15 @@ other backends.
       implemented and unit-tested; the read-only probe already passes (see
       PLAN.md section 10), but real apply/off verification is deferred and the
       backend remains honestly listed as Implemented.
+- [x] Verify the DRM/KMS path on real hardware. Done 2026-11-22 on a Steam
+      Deck OLED (AMD, SteamOS 3.9.5, v0.5.0) with its session held open and no
+      compositor running, color bars on screen, read with a camera: `satur8
+      doctor` chose `drm-ctm`; `satur8 set 0` turned the picture gray (0.82 to
+      0.22), 0.5 and 2.0 landed in between and above, `satur8 off` put it
+      back; `satur8 set 0 --output 118` changed that CRTC and an unknown ID
+      was refused. The background service, started by hand on that console,
+      showed the desktop saturation at start, followed a change to it, and
+      restored it when stopped.
 - [x] Verify the GNOME Wayland Shell-extension backend on real GNOME (GNOME
       50.2, NVIDIA Wayland). Required fixes: shell-version range and the
       Clutter.ShaderType enum removed in Mutter 18.
@@ -191,8 +202,13 @@ and Bazzite is Fedora-based (the live COPR work carries over).
   - [ ] KDE Desktop Mode: keep the KWin effect working across KWin updates on
         an image with no `cmake` or KWin headers. Partly done in v0.4.1: the
         tarball bundles `fedora45-6.8.3`, built in Fedora 45's packages for
-        the KWin Bazzite stable uses, and the installer picked it in the
-        Bazzite container (not run on a Bazzite desktop). After a KWin update
+        the KWin Bazzite stable uses. Run on a real Bazzite KDE install in a
+        virtual machine on 2026-11-22 (stable 45.20261117.1, KWin 6.8.3,
+        software rendering) with v0.4.0 and v0.4.1: the installer picked the
+        effect, on, set 0 and off changed a test window in pixels, per-game
+        switching followed focus with the installed service, repair restored
+        the effect after a wrong file, and service and effect came back after
+        an untouched reboot. After a KWin update
         the effect stays off until a newer Satur8 release includes that KWin.
         Still open, and waiting on the owner's decision: whether Satur8 may
         fetch an effect for a newer KWin when the user asks for it with a
@@ -259,8 +275,15 @@ Not blocking the packaging spine; picked up as time allows.
       typing its AppID, on the command line: `satur8 games` lists them and
       `satur8 profile add NAME SATURATION --steam-game NAME` adds a profile by
       the game's name. Done in v0.4.0 and run on a Steam Deck.
-- [ ] Steam Deck: the same installed-games picker in the desktop app.
-- [ ] Steam Deck: the desktop app in Game Mode.
+- [x] The same list of games in the app: Add game lists the installed Steam
+      games by name, with any that is running first, in the desktop layout and
+      in Game Mode. Done in v0.5.1; run headless, not on a Deck.
+- [ ] Steam Deck: the app in Game Mode. Built in v0.5.1: its own layout for
+      the Deck's screen, touch and buttons, opened from an entry in the Steam
+      library that the installer asks Steam to add. Run on a virtual 1280x800
+      screen with the Deck's Game Mode environment and inside the Steam Linux
+      Runtime container. Stays open until it has been run on a Deck, with
+      touch and with the controller.
 - [ ] Steam Deck: click through the desktop app in Desktop Mode. In v0.4.1 it
       starts there and shows the KWin backend active; nothing more was run.
 - [ ] Steam Deck: a Decky panel.
