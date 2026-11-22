@@ -225,7 +225,10 @@ fn cmd_off() -> Result<()> {
 }
 
 fn cmd_status() -> Result<()> {
-    if let Some((display, root)) = session::find_session() {
+    if let Some((display, root)) = game_mode_session(
+        satur8_backend::desktop_backend_present,
+        session::find_session,
+    ) {
         println!("satur8 status");
         for line in gamescope_lines(&display, &root) {
             println!("{line}");
@@ -282,7 +285,10 @@ fn cmd_repair() -> Result<()> {
 }
 
 fn cmd_doctor() -> Result<()> {
-    if let Some((display, root)) = session::find_session() {
+    if let Some((display, root)) = game_mode_session(
+        satur8_backend::desktop_backend_present,
+        session::find_session,
+    ) {
         println!("satur8 doctor");
         for line in gamescope_lines(&display, &root) {
             println!("{line}");
@@ -374,6 +380,20 @@ fn print_profiles_summary() -> Result<()> {
     println!("  profiles file: {}", config::profiles_path()?.display());
     println!("  profiles loaded: {}", profiles.profiles.len());
     Ok(())
+}
+
+/// The gamescope session to report on, in backend selection order: only when
+/// no desktop backend would be chosen ahead of gamescope, so a desktop with a
+/// gamescope nested in it still gets the desktop report.
+fn game_mode_session<T>(
+    desktop_present: impl FnOnce() -> bool,
+    find_session: impl FnOnce() -> Option<T>,
+) -> Option<T> {
+    if desktop_present() {
+        None
+    } else {
+        find_session()
+    }
 }
 
 /// The Game Mode report for the gamescope session on `display`.
@@ -568,6 +588,24 @@ mod tests {
         assert!(!active);
         assert_eq!(backend.set_calls, vec![false]);
         assert_eq!(backend.linear_at_apply, Some(false));
+    }
+
+    #[test]
+    fn a_desktop_backend_gets_the_desktop_report_even_with_gamescope_running() {
+        let session = game_mode_session(
+            || true,
+            || -> Option<&str> {
+                panic!("gamescope must not be probed when a desktop backend is present")
+            },
+        );
+        assert_eq!(session, None);
+    }
+
+    /// Over SSH on the Deck no desktop backend is reachable, so the probe runs.
+    #[test]
+    fn without_a_desktop_backend_the_gamescope_session_is_reported() {
+        assert_eq!(game_mode_session(|| false, || Some(":0")), Some(":0"));
+        assert_eq!(game_mode_session(|| false, || None::<&str>), None);
     }
 
     /// Steam's values as read on the Deck, 2026-11-21.

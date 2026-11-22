@@ -120,6 +120,21 @@ fn select_in_order(
     Ok(None)
 }
 
+/// Whether any probe ahead of gamescope in `probes` finds or refuses.
+fn desktop_present_in_order(probes: &[Probe], mut run: impl FnMut(Probe) -> ProbeResult) -> bool {
+    probes
+        .iter()
+        .take_while(|&&probe| probe != Probe::Gamescope)
+        .any(|&probe| !matches!(run(probe), ProbeResult::Absent))
+}
+
+/// Whether selection would stop at a desktop backend before reaching
+/// gamescope: KWin (also when it rejects the effect), GNOME, Hyprland or
+/// NV-CONTROL. Reports use this to pick the desktop or the Game Mode view.
+pub fn desktop_backend_present() -> bool {
+    desktop_present_in_order(&SELECTION_ORDER, run_probe)
+}
+
 /// Resolve the best reachable apply/reset backend in canonical cost order.
 ///
 /// The nested gamescope launch and the `gamescope-native` override are
@@ -349,6 +364,46 @@ mod tests {
         });
         assert!(result.is_err());
         assert!(!ran.contains(&Probe::Gamescope));
+    }
+
+    #[test]
+    fn a_desktop_backend_ahead_of_gamescope_is_present() {
+        for desktop in [Probe::Kwin, Probe::Gnome, Probe::Hyprland, Probe::NvControl] {
+            assert!(desktop_present_in_order(&SELECTION_ORDER, |probe| {
+                if probe == desktop {
+                    ProbeResult::Found(Box::new(Named(name_of(probe))))
+                } else {
+                    ProbeResult::Absent
+                }
+            }));
+        }
+    }
+
+    #[test]
+    fn kwin_rejecting_the_effect_counts_as_a_desktop() {
+        assert!(desktop_present_in_order(&SELECTION_ORDER, |probe| {
+            match probe {
+                Probe::KwinRejectsEffect => ProbeResult::Refused(anyhow!("rejected")),
+                _ => ProbeResult::Absent,
+            }
+        }));
+    }
+
+    #[test]
+    fn gamescope_and_drm_ctm_are_not_desktops_and_are_never_probed() {
+        let mut ran = Vec::new();
+        let present = desktop_present_in_order(&SELECTION_ORDER, |probe| {
+            ran.push(probe);
+            match probe {
+                Probe::Gamescope | Probe::DrmCtm => {
+                    ProbeResult::Found(Box::new(Named(name_of(probe))))
+                }
+                _ => ProbeResult::Absent,
+            }
+        });
+        assert!(!present);
+        assert!(!ran.contains(&Probe::Gamescope));
+        assert!(!ran.contains(&Probe::DrmCtm));
     }
 
     #[test]
