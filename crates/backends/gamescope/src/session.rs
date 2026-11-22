@@ -271,6 +271,17 @@ impl X11Root {
         })
     }
 
+    /// The root window's size in pixels right now. In a gamescope session
+    /// this is the size games are given, which is what a window has to fit.
+    pub fn size(&self) -> Result<(u32, u32)> {
+        let geometry = self
+            .conn
+            .get_geometry(self.root)?
+            .reply()
+            .context("reading the root window's size")?;
+        Ok((u32::from(geometry.width), u32::from(geometry.height)))
+    }
+
     fn atom(&self, name: &str) -> Result<Atom> {
         let cached = self.atoms.borrow().get(name).copied();
         if let Some(atom) = cached {

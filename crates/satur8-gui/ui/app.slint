@@ -397,9 +397,14 @@ export component AppWindow inherits Window {
     icon: @image-url("icon.png");
     default-font-family: "Hanken Grotesk";
     default-font-size: 14px;
-    preferred-width: 1140px;
-    preferred-height: 700px;
-    min-width: 1040px;
+    // The size the window opens at. In a Steam gaming session main.rs sets
+    // these to the whole output before the window is shown (src/mode.rs).
+    in property <length> open-width: 1140px;
+    in property <length> open-height: 700px;
+    preferred-width: root.open-width;
+    preferred-height: root.open-height;
+    // Also the layout width in a Steam gaming session (src/mode.rs).
+    min-width: 1024px;
     min-height: 560px;
     background: Pal.bg;
 

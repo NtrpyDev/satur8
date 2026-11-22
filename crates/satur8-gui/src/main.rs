@@ -10,6 +10,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod mode;
 mod picker;
 mod status;
 mod steam;
@@ -99,7 +100,12 @@ thread_local! {
 }
 
 fn main() -> Result<(), slint::PlatformError> {
+    // Before the window exists: Slint reads the scale when it creates it.
+    let sizing = gamescope_sizing();
     let ui = AppWindow::new()?;
+    if let Some(sizing) = sizing {
+        fit_window(&ui, sizing);
+    }
     // After AppWindow::new(), which creates Slint's platform (before that
     // set_xdg_app_id only returns NoPlatform), and before ui.run() shows the
     // window, which is when the ID is read. A failure only costs the icon.
@@ -578,6 +584,68 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     ui.run()
+}
+
+/// In a gamescope session (Steam Game Mode), fit the window to the output:
+/// read the size games are given from the X display this window opens on, set
+/// the scale Slint draws at unless the user set one, and return the window
+/// size to ask for. `None` anywhere else, and when the size cannot be read.
+fn gamescope_sizing() -> Option<mode::Sizing> {
+    if !mode::in_gamescope_session(|name| std::env::var(name).ok()) {
+        return None;
+    }
+    let output = std::env::var("DISPLAY").ok().and_then(|display| {
+        satur8_gamescope::session::X11Root::connect(&display)
+            .and_then(|root| root.size())
+            .map_err(|error| eprintln!("satur8-gui: could not read the screen size: {error:#}"))
+            .ok()
+    });
+    let user_scale = std::env::var_os("SLINT_SCALE_FACTOR").is_some_and(|value| !value.is_empty());
+    let sizing = mode::window_sizing(output, user_scale)?;
+    if let Some(scale) = sizing.scale {
+        // Slint's winit backend reads this when it creates the window
+        // (i-slint-backend-winit, winitwindowadapter.rs). No other thread
+        // exists yet.
+        std::env::set_var("SLINT_SCALE_FACTOR", mode::scale_text(scale));
+        // winit sizes a window it has not created yet with its own X11 scale
+        // (winit, x11/util/randr.rs); give it the same one, or the window
+        // opens larger than the output and is only then resized.
+        if std::env::var_os("WINIT_X11_SCALE_FACTOR").is_none() {
+            std::env::set_var("WINIT_X11_SCALE_FACTOR", mode::scale_text(scale));
+        }
+    }
+    Some(sizing)
+}
+
+/// Make the window the whole output, so a touch lands on what is drawn under
+/// it. Asked for twice: before the window exists, so it opens at that size,
+/// and once it is on screen, in device pixels, which is exact whatever scale
+/// is in use.
+fn fit_window(ui: &AppWindow, sizing: mode::Sizing) {
+    let window = ui.window();
+    window.set_position(slint::PhysicalPosition::new(0, 0));
+    if let Some(scale) = sizing.scale {
+        // Before the window exists Slint keeps a requested size in logical
+        // pixels and applies the scale when it creates the window.
+        let (width, height) = (sizing.width as f32 / scale, sizing.height as f32 / scale);
+        ui.set_open_width(width);
+        ui.set_open_height(height);
+        window.set_size(slint::LogicalSize::new(width, height));
+    }
+    let weak = ui.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let wanted = slint::PhysicalSize::new(sizing.width, sizing.height);
+        let opened = ui.window().size();
+        if opened != wanted {
+            eprintln!(
+                "satur8-gui: window opened at {}x{}, resizing to the {}x{} output",
+                opened.width, opened.height, wanted.width, wanted.height
+            );
+            ui.window().set_size(wanted);
+        }
+        ui.window().set_position(slint::PhysicalPosition::new(0, 0));
+    });
 }
 
 // ---------------- Status page helpers ----------------

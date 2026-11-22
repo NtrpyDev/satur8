@@ -4150,6 +4150,7 @@ dependencies = [
  "libc",
  "satur8-backend",
  "satur8-core",
+ "satur8-gamescope",
  "satur8-kwin",
  "serde",
  "slint",
