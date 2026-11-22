@@ -7,6 +7,7 @@
 mod config;
 mod games_cmd;
 mod gnome_report;
+mod outputs_report;
 mod profile_cmd;
 mod run;
 
@@ -217,11 +218,51 @@ fn apply_with_linear_flag(
 
 fn cmd_outputs() -> Result<()> {
     let backend = select_backend()?;
-    println!("outputs on the {} backend:", backend.name());
-    for o in backend.outputs() {
-        println!("  {:<8} {}", o.id, o.human_name);
+    let profiles = config::load_profiles().unwrap_or_default();
+    let outputs = backend.outputs();
+    let current = backend.current_levels();
+    let view = outputs_report::BackendView {
+        name: backend.name(),
+        per_output: backend.per_output(),
+        outputs: &outputs,
+        current: current.as_ref(),
+    };
+    for line in outputs_report::outputs_lines(&view, &profiles) {
+        println!("{line}");
     }
     Ok(())
+}
+
+/// The per-output part of `satur8 doctor` and `satur8 status`, after a blank
+/// line. Prints nothing, and selects no backend, unless the file uses the
+/// per-output settings.
+fn print_per_output_settings() {
+    let profiles = config::load_profiles().unwrap_or_default();
+    if !outputs_report::uses_per_output_settings(&profiles) {
+        return;
+    }
+    let lines = match select_backend() {
+        Ok(backend) => {
+            let outputs = backend.outputs();
+            let current = backend.current_levels();
+            let view = outputs_report::BackendView {
+                name: backend.name(),
+                per_output: backend.per_output(),
+                outputs: &outputs,
+                current: current.as_ref(),
+            };
+            outputs_report::settings_section(Ok(&view), &profiles)
+        }
+        Err(error) => {
+            let reason = error.to_string();
+            let first_line = reason.lines().next().unwrap_or("").trim_end_matches('.');
+            outputs_report::settings_section(Err(first_line), &profiles)
+        }
+    };
+    println!();
+    for line in lines {
+        println!("{line}");
+    }
 }
 
 fn cmd_off() -> Result<()> {
@@ -247,6 +288,7 @@ fn cmd_status() -> Result<()> {
         for line in gamescope_lines(display, root) {
             println!("{line}");
         }
+        print_per_output_settings();
         return Ok(());
     }
 
@@ -287,6 +329,7 @@ fn cmd_status() -> Result<()> {
             println!("backend kwin: not available in this session")
         }
     }
+    print_per_output_settings();
     Ok(())
 }
 
@@ -314,6 +357,7 @@ fn cmd_doctor() -> Result<()> {
         for line in gamescope_lines(display, root) {
             println!("{line}");
         }
+        print_per_output_settings();
         return print_profiles_summary();
     }
 
@@ -399,6 +443,7 @@ fn cmd_doctor() -> Result<()> {
         Err(e) => println!("  DRM CTM: not available ({e})"),
     }
 
+    print_per_output_settings();
     println!();
     print_profiles_summary()
 }

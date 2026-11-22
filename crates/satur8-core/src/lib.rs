@@ -146,6 +146,12 @@ pub trait Backend: Send {
         false
     }
 
+    /// What every output shows right now, when the backend can tell.
+    /// Default: unknown.
+    fn current_levels(&self) -> Option<Levels> {
+        None
+    }
+
     /// Show `levels`. The default handles a picture that is the same on every
     /// output through [`apply`](Backend::apply) on [`all_outputs`], and refuses
     /// any other.
