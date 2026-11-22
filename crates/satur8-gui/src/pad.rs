@@ -434,7 +434,7 @@ mod device {
                 match self.file.read(&mut buffer) {
                     Ok(0) => return Ok(events),
                     Ok(read) => {
-                        for chunk in buffer[..read].chunks_exact(SIZE) {
+                        for chunk in buffer[..read].as_chunks::<SIZE>().0 {
                             // The last eight bytes: type, code, value.
                             let tail = &chunk[SIZE - 8..];
                             events.push(RawEvent {

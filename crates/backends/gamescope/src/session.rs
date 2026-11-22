@@ -136,7 +136,7 @@ pub fn read_focus(props: &dyn RootProps) -> Result<Focus> {
 pub fn running_apps(props: &dyn RootProps) -> Result<Vec<u32>> {
     let mut apps = props.cardinals(FOCUSABLE_APPS)?.unwrap_or_default();
     if let Some(triplets) = props.cardinals(FOCUSABLE_WINDOWS)? {
-        apps.extend(triplets.chunks_exact(3).map(|triplet| triplet[1]));
+        apps.extend(triplets.as_chunks::<3>().0.iter().map(|triplet| triplet[1]));
     }
     let mut seen = Vec::new();
     apps.retain(|app| {
