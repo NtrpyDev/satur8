@@ -127,6 +127,9 @@ sed 's|%%h/.local/bin/|%{_bindir}/|g' \
 
 install -Dm0644 packaging/satur8.desktop \
     %{buildroot}%{_datadir}/applications/satur8.desktop
+# App icon, named as the desktop entry's Icon= (256x256).
+install -Dm0644 crates/satur8-gui/ui/icon.png \
+    %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/satur8.png
 
 %files
 %license LICENSE
@@ -143,6 +146,7 @@ install -Dm0644 packaging/satur8.desktop \
 %{_datadir}/gamescope/reshade/Shaders/Satur8.fx
 %{_userunitdir}/satur8-daemon.service
 %{_datadir}/applications/satur8.desktop
+%{_datadir}/icons/hicolor/256x256/apps/satur8.png
 
 %changelog
 * Wed Jun 24 2026 Satur8 <ntrpydev@pm.me> - 0.3.0-1
