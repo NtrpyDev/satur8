@@ -1,0 +1,23 @@
+Satur8 Decky plugin
+Copyright (C) 2026 NtrpyDev
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The full text of the GNU General Public License, version 3, is the LICENSE
+file at the root of the Satur8 repository
+(https://github.com/NtrpyDev/satur8/blob/main/LICENSE). The plugin ZIP carries
+it below this notice.
+
+The plugin's build setup (package.json, tsconfig.json, rollup.config.js) and
+the outline of main.py and src/index.tsx started from decky-plugin-template
+(https://github.com/SteamDeckHomebrew/decky-plugin-template), which is under
+the BSD 3-Clause License. That license is kept in
+LICENSE.decky-plugin-template, and the plugin ZIP carries it at the end of its
+LICENSE file.
