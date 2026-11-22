@@ -3,7 +3,7 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
-## v0.3.6 - RELEASE_DATE
+## v0.3.6 - 2026-11-22
 
 Redesigned desktop app with a new Status tab, plus documentation fixes.
 
