@@ -59,13 +59,16 @@ pub trait RootProps {
 /// that window's process id. `None` where gamescope reports nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Focus {
+    /// `GAMESCOPE_FOCUSED_APP_GFX`: 769 is the Steam UI.
     pub app_id: Option<u32>,
+    /// The focused window's process, for matching by executable.
     pub pid: Option<u32>,
 }
 
 /// Who owns the look property right now.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Look {
+    /// No look, or an empty path.
     None,
     /// A table Satur8 wrote, with the saturation its name records.
     Satur8(Saturation),
@@ -76,8 +79,11 @@ pub enum Look {
 /// gamescope's color settings as `satur8 doctor` reports them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColorState {
+    /// `GAMESCOPE_PID`.
     pub pid: Option<u32>,
+    /// gamescope ignores every color setting, the look included, while set.
     pub color_management_disabled: bool,
+    /// Who set `GAMESCOPE_COLOR_LOOK_G22`.
     pub look: Look,
     /// Steam's vibrancy slider.
     pub sdr_gamut_wideness: Option<f32>,
