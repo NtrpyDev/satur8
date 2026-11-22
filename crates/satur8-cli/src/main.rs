@@ -6,13 +6,14 @@
 
 mod config;
 mod games_cmd;
+mod gnome_report;
 mod profile_cmd;
 mod run;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use satur8_backend::{all_outputs, select_backend};
-use satur8_core::{CostNote, Environment, Gpu, Saturation};
+use satur8_core::{CostNote, Desktop, Environment, Gpu, Saturation, SessionType};
 use satur8_gamescope::session::{self, ColorState, Focus, Look, X11Root};
 use satur8_kwin::KwinBackend;
 
@@ -233,26 +234,30 @@ fn cmd_off() -> Result<()> {
 }
 
 fn cmd_status() -> Result<()> {
-    if let Some((display, root)) = game_mode_session(
+    let envr = Environment::detect();
+    let report = choose_report(
         satur8_backend::desktop_backend_present,
         session::find_session,
-    ) {
+        KwinBackend::connect,
+        envr.session,
+        envr.desktop,
+    );
+    if let Report::GameMode((display, root)) = &report {
         println!("satur8 status");
-        for line in gamescope_lines(&display, &root) {
+        for line in gamescope_lines(display, root) {
             println!("{line}");
         }
         return Ok(());
     }
 
-    let envr = Environment::detect();
     println!("environment:");
     println!("  session:  {}", envr.session);
     println!("  desktop:  {}", envr.desktop);
     println!("  gpu:      {}", envr.gpu);
     println!("  prefers:  {} backend", envr.preferred_backend());
 
-    match KwinBackend::connect() {
-        Some(kwin) => {
+    match report {
+        Report::Kwin(kwin) => {
             let supported = kwin.is_supported().unwrap_or(false);
             let loaded = kwin.is_loaded().unwrap_or(false);
             print!(
@@ -277,7 +282,10 @@ fn cmd_status() -> Result<()> {
             }
             println!();
         }
-        None => println!("backend kwin: not available in this session"),
+        Report::Gnome => println!("{}", gnome_report::status_line(&gnome_report::gather())),
+        Report::GameMode(_) | Report::NoDesktopBackend => {
+            println!("backend kwin: not available in this session")
+        }
     }
     Ok(())
 }
@@ -293,18 +301,22 @@ fn cmd_repair() -> Result<()> {
 }
 
 fn cmd_doctor() -> Result<()> {
-    if let Some((display, root)) = game_mode_session(
+    let envr = Environment::detect();
+    let report = choose_report(
         satur8_backend::desktop_backend_present,
         session::find_session,
-    ) {
+        KwinBackend::connect,
+        envr.session,
+        envr.desktop,
+    );
+    if let Report::GameMode((display, root)) = &report {
         println!("satur8 doctor");
-        for line in gamescope_lines(&display, &root) {
+        for line in gamescope_lines(display, root) {
             println!("{line}");
         }
         return print_profiles_summary();
     }
 
-    let envr = Environment::detect();
     println!("satur8 doctor");
     println!("  session type : {}", envr.session);
     println!("  desktop      : {}", envr.desktop);
@@ -312,11 +324,21 @@ fn cmd_doctor() -> Result<()> {
     println!("  preferred    : {}", envr.preferred_backend());
     println!();
 
-    match KwinBackend::connect() {
-        Some(kwin) => {
+    match report {
+        Report::Kwin(kwin) => {
             println!("  [ok] KWin reachable over D-Bus");
             match kwin.is_supported() {
-                Ok(true) => println!("  [ok] satur8 effect matches the running KWin ABI"),
+                Ok(true) => {
+                    let state = satur8_kwin::repair::EffectState {
+                        running: kwin.running_version(),
+                        ..satur8_kwin::repair::inspect(true)
+                    };
+                    let step = satur8_kwin::repair::decide(&state);
+                    let advice = satur8_kwin::repair::advice_for(&state);
+                    for line in supported_effect_lines(&state, step, &advice) {
+                        println!("{line}");
+                    }
+                }
                 Ok(false) => {
                     let state = satur8_kwin::repair::inspect(false);
                     let built_for = |abi: &Option<String>| match abi {
@@ -326,6 +348,7 @@ fn cmd_doctor() -> Result<()> {
                     println!("  [!!] the running KWin rejects the satur8 effect.");
                     println!("       system effect  : {}", built_for(&state.system));
                     println!("       per-user effect: {}", built_for(&state.user));
+                    println!("       effect origin  : {}", effect_origin(&state));
                     println!(
                         "       installed KWin : {}",
                         state
@@ -333,7 +356,7 @@ fn cmd_doctor() -> Result<()> {
                             .as_deref()
                             .unwrap_or("unknown (no KWin headers)")
                     );
-                    println!("       Run `satur8 repair` to rebuild it for this KWin version.");
+                    println!("       Next step: {}.", satur8_kwin::repair::advice_here());
                     return Ok(());
                 }
                 Err(error) => {
@@ -349,7 +372,12 @@ fn cmd_doctor() -> Result<()> {
                 Err(e) => println!("  [!!] couldn't query effect state: {e}"),
             }
         }
-        None => {
+        Report::Gnome => {
+            for line in gnome_report::doctor_lines(&gnome_report::gather()) {
+                println!("{line}");
+            }
+        }
+        Report::GameMode(_) | Report::NoDesktopBackend => {
             println!("  [!!] KWin backend unavailable.");
             println!(
                 "       Expected a KDE Plasma Wayland session. Detected {} / {}.",
@@ -366,21 +394,86 @@ fn cmd_doctor() -> Result<()> {
             for l in lines {
                 println!("    {l}");
             }
-            match envr.session {
-                satur8_core::SessionType::Tty => {
-                    println!("    -> usable now: no display server owns DRM master")
-                }
-                other => println!(
-                    "    -> on {other} the display server owns DRM master; CTM is reached \
-                     through its backend (KWin here), not directly"
-                ),
-            }
+            println!("    -> {}", ctm_route_note(envr.session, envr.desktop));
         }
         Err(e) => println!("  DRM CTM: not available ({e})"),
     }
 
     println!();
     print_profiles_summary()
+}
+
+/// How the DRM CTM is reached in this session, for `satur8 doctor`: only a
+/// bare console owns DRM master; otherwise the display server does.
+fn ctm_route_note(session: SessionType, desktop: Desktop) -> String {
+    match (session, desktop) {
+        (SessionType::Tty, _) => "usable now: no display server owns DRM master".to_string(),
+        (SessionType::Wayland, Desktop::Kde) => format!(
+            "on {session} the display server owns DRM master; CTM is reached through its \
+             backend (KWin here), not directly"
+        ),
+        (SessionType::Wayland, Desktop::Gnome) => format!(
+            "on {session} GNOME Shell owns DRM master; Satur8 does not reach CTM there and \
+             uses the GNOME Shell extension's shader instead"
+        ),
+        (other, _) => format!(
+            "on {other} the display server owns DRM master; CTM is only reachable through \
+             it, not directly"
+        ),
+    }
+}
+
+/// Where the effect KWin loads came from, for `satur8 doctor`. KWin searches
+/// the per-user plugin dir ahead of the system one, so a per-user copy is the
+/// one named when both exist.
+fn effect_origin(state: &satur8_kwin::repair::EffectState) -> String {
+    match (&state.user, &state.user_from_set, &state.system) {
+        (Some(version), Some(key), _) => format!(
+            "per-user copy from the set that came with Satur8 ({key}), built for KWin {version}"
+        ),
+        (Some(version), None, _) => format!(
+            "per-user copy built for KWin {version}, not from the set that came with Satur8 \
+             (a local build or an earlier install)"
+        ),
+        (None, _, Some(version)) => format!(
+            "system-wide copy (a package or `install.sh --system`), built for KWin {version}"
+        ),
+        (None, _, None) => "no effect file found".to_string(),
+    }
+}
+
+/// Doctor's lines when KWin says it supports the effect. KWin keeps answering
+/// yes for an effect it loaded earlier, so a per-user file on disk for another
+/// KWin is reported the way `satur8 repair` treats it (`step`, `advice`).
+fn supported_effect_lines(
+    state: &satur8_kwin::repair::EffectState,
+    step: satur8_kwin::repair::Step,
+    advice: &str,
+) -> Vec<String> {
+    use satur8_kwin::repair::Step;
+    let Some(on_disk) = satur8_kwin::repair::stale_user_file(state) else {
+        return vec![
+            "  [ok] satur8 effect matches the running KWin ABI".to_string(),
+            format!("       effect origin: {}", effect_origin(state)),
+        ];
+    };
+    let running = state.running.as_deref().unwrap_or("unknown");
+    let fix = match step {
+        Step::InstallFromSet | Step::Build => "; `satur8 repair` will replace it",
+        Step::DropUserCopy => "; `satur8 repair` will remove it",
+        _ => "",
+    };
+    vec![
+        format!(
+            "  [!!] the per-user effect file on disk is for KWin {on_disk}, not the running \
+             KWin {running}{fix}."
+        ),
+        "       KWin still uses the copy it loaded earlier; the file on disk fails at the next \
+         session start."
+            .to_string(),
+        format!("       effect origin: {}", effect_origin(state)),
+        format!("       Next step: {advice}."),
+    ]
 }
 
 fn print_profiles_summary() -> Result<()> {
@@ -401,6 +494,42 @@ fn game_mode_session<T>(
         None
     } else {
         find_session()
+    }
+}
+
+/// Which report `satur8 doctor` and `satur8 status` print.
+#[derive(Debug, PartialEq)]
+enum Report<S, K> {
+    /// Steam Game Mode, with the gamescope session found.
+    GameMode(S),
+    /// KDE Plasma, with the KWin connection.
+    Kwin(K),
+    /// GNOME on Wayland without KWin: the GNOME Shell extension block.
+    Gnome,
+    /// Anything else keeps the "KWin backend unavailable" lines.
+    NoDesktopBackend,
+}
+
+/// Pick the report in backend selection order: Game Mode only when no desktop
+/// backend comes first, then KWin, then the GNOME block for a GNOME Wayland
+/// session. Each probe runs only when the earlier ones did not decide.
+fn choose_report<S, K>(
+    desktop_present: impl FnOnce() -> bool,
+    find_session: impl FnOnce() -> Option<S>,
+    connect_kwin: impl FnOnce() -> Option<K>,
+    session: SessionType,
+    desktop: Desktop,
+) -> Report<S, K> {
+    if let Some(found) = game_mode_session(desktop_present, find_session) {
+        return Report::GameMode(found);
+    }
+    if let Some(kwin) = connect_kwin() {
+        return Report::Kwin(kwin);
+    }
+    if session == SessionType::Wayland && desktop == Desktop::Gnome {
+        Report::Gnome
+    } else {
+        Report::NoDesktopBackend
     }
 }
 
@@ -660,6 +789,192 @@ mod tests {
             },
         );
         assert_eq!(session, None);
+    }
+
+    #[test]
+    fn doctor_names_where_the_effect_came_from() {
+        use satur8_kwin::repair::EffectState;
+        let v = |s: &str| Some(s.to_string());
+        let from_set = EffectState {
+            user: v("6.7.3"),
+            user_from_set: v("steamos-6.7.3"),
+            ..EffectState::default()
+        };
+        assert_eq!(
+            effect_origin(&from_set),
+            "per-user copy from the set that came with Satur8 (steamos-6.7.3), built for KWin 6.7.3"
+        );
+        let built = EffectState {
+            user: v("6.8.3"),
+            system: v("6.8.2"),
+            ..EffectState::default()
+        };
+        assert!(effect_origin(&built)
+            .starts_with("per-user copy built for KWin 6.8.3, not from the set"));
+        let package = EffectState {
+            system: v("6.8.3"),
+            ..EffectState::default()
+        };
+        assert_eq!(
+            effect_origin(&package),
+            "system-wide copy (a package or `install.sh --system`), built for KWin 6.8.3"
+        );
+        assert_eq!(
+            effect_origin(&EffectState::default()),
+            "no effect file found"
+        );
+    }
+
+    #[test]
+    fn doctor_reports_a_wrong_file_on_disk_even_when_kwin_says_supported() {
+        use satur8_kwin::repair::{EffectState, Step};
+        let v = |s: &str| Some(s.to_string());
+        let wrong = EffectState {
+            headers: v("6.7.3"),
+            running: v("6.7.3"),
+            user: v("6.7.9"),
+            supported: true,
+            ..EffectState::default()
+        };
+        let advice =
+            "run `satur8 repair` to install the matching effect from the set that came with Satur8";
+        let lines = supported_effect_lines(&wrong, Step::InstallFromSet, advice);
+        assert_eq!(
+            lines[0],
+            "  [!!] the per-user effect file on disk is for KWin 6.7.9, not the running KWin \
+             6.7.3; `satur8 repair` will replace it."
+        );
+        assert!(lines
+            .iter()
+            .all(|line| !line.contains("matches the running KWin")));
+        assert_eq!(lines[3], format!("       Next step: {advice}."));
+
+        let right = EffectState {
+            user: v("6.7.3"),
+            ..wrong
+        };
+        let lines = supported_effect_lines(&right, Step::Healthy, "run `satur8 repair`");
+        assert_eq!(
+            lines[0],
+            "  [ok] satur8 effect matches the running KWin ABI"
+        );
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn ctm_note_names_the_compositor_that_owns_the_display() {
+        assert_eq!(
+            ctm_route_note(SessionType::Wayland, Desktop::Kde),
+            "on Wayland the display server owns DRM master; CTM is reached through its \
+             backend (KWin here), not directly"
+        );
+        let gnome = ctm_route_note(SessionType::Wayland, Desktop::Gnome);
+        assert!(gnome.contains("GNOME Shell owns DRM master"));
+        assert!(!gnome.contains("KWin"));
+        for (session, desktop) in [
+            (SessionType::Wayland, Desktop::Hyprland),
+            (SessionType::X11, Desktop::Gnome),
+            (SessionType::X11, Desktop::Kde),
+            (SessionType::Unknown, Desktop::Other),
+        ] {
+            let note = ctm_route_note(session, desktop);
+            assert!(!note.contains("KWin") && !note.contains("GNOME"), "{note}");
+        }
+        assert_eq!(
+            ctm_route_note(SessionType::Tty, Desktop::Other),
+            "usable now: no display server owns DRM master"
+        );
+    }
+
+    fn no_kwin() -> Option<()> {
+        None
+    }
+
+    #[test]
+    fn kde_keeps_the_kwin_report() {
+        let report = choose_report(
+            || true,
+            || -> Option<&str> { panic!("gamescope must not be probed on a KDE desktop") },
+            || Some(()),
+            SessionType::Wayland,
+            Desktop::Kde,
+        );
+        assert_eq!(report, Report::Kwin(()));
+        // KWin reachable wins over a GNOME desktop name, as before.
+        let report = choose_report(
+            || true,
+            || None::<&str>,
+            || Some(()),
+            SessionType::Wayland,
+            Desktop::Gnome,
+        );
+        assert_eq!(report, Report::Kwin(()));
+        // KDE whose KWin does not answer keeps the old "unavailable" lines.
+        let report = choose_report(
+            || false,
+            || None::<&str>,
+            no_kwin,
+            SessionType::Wayland,
+            Desktop::Kde,
+        );
+        assert_eq!(report, Report::NoDesktopBackend);
+    }
+
+    #[test]
+    fn game_mode_keeps_its_report() {
+        let report = choose_report(
+            || false,
+            || Some(":0"),
+            || -> Option<()> { panic!("KWin must not be probed in Game Mode") },
+            SessionType::X11,
+            Desktop::Other,
+        );
+        assert_eq!(report, Report::GameMode(":0"));
+        // A GNOME desktop whose extension is not running finds no desktop
+        // backend, so a gamescope session there still gets the Game Mode report.
+        let report = choose_report(
+            || false,
+            || Some(":1"),
+            no_kwin,
+            SessionType::Wayland,
+            Desktop::Gnome,
+        );
+        assert_eq!(report, Report::GameMode(":1"));
+    }
+
+    #[test]
+    fn gnome_wayland_gets_the_gnome_report() {
+        // Extension running: the GNOME probe counts as a desktop backend.
+        let report = choose_report(
+            || true,
+            || -> Option<&str> { panic!("gamescope must not be probed") },
+            no_kwin,
+            SessionType::Wayland,
+            Desktop::Gnome,
+        );
+        assert_eq!(report, Report::Gnome);
+        // Extension missing or off, no gamescope: still the GNOME report.
+        let report = choose_report(
+            || false,
+            || None::<&str>,
+            no_kwin,
+            SessionType::Wayland,
+            Desktop::Gnome,
+        );
+        assert_eq!(report, Report::Gnome);
+    }
+
+    #[test]
+    fn other_sessions_keep_the_old_lines() {
+        for (session, desktop) in [
+            (SessionType::X11, Desktop::Gnome),
+            (SessionType::Wayland, Desktop::Hyprland),
+            (SessionType::X11, Desktop::Other),
+            (SessionType::Tty, Desktop::Other),
+        ] {
+            let report = choose_report(|| false, || None::<&str>, no_kwin, session, desktop);
+            assert_eq!(report, Report::NoDesktopBackend, "{session:?} {desktop:?}");
+        }
     }
 
     /// Over SSH on the Deck no desktop backend is reachable, so the probe runs.

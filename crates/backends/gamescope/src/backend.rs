@@ -170,7 +170,7 @@ fn look_dir() -> Option<PathBuf> {
                 .filter(|home| !home.is_empty())
                 .map(|home| PathBuf::from(home).join(".local/state"))
         })?;
-    Some(base.join("satur8/gamescope"))
+    Some(base.join(look::DIR_SUFFIX))
 }
 
 /// Remove every other Satur8 table. gamescope reads a table only when the
@@ -184,7 +184,7 @@ fn prune_tables(dir: &Path, keep: &Path) {
         let ours = path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| look::saturation_from_path(name).is_some());
+            .is_some_and(|name| look::saturation_from_file_name(name).is_some());
         if ours && path != keep {
             let _ = fs::remove_file(&path);
         }
