@@ -4,15 +4,18 @@
 > boost, applied **outside** the game process so it cannot trip anti-cheat,
 > with as close to **zero CPU cost** as the hardware allows.
 
-Status: v0.3.2 is shipped and working. KDE Plasma Wayland, GNOME Wayland,
-Hyprland, NVIDIA X11 NV-CONTROL, and gamescope-native are verified; current
-v0.3.3 backend-sweep work has also verified the nested gamescope fallback. DRM
-CTM remains implemented with a passing read-only probe, while runtime apply/off
-verification is deferred. v0.2 widened distribution: a live Fedora package on
-COPR alongside the Arch package, and a tagged-release GitHub Actions workflow
-that builds the source and Linux tarballs with checksums so the packaging
-sources and the website download stay in sync. This file keeps the longer design
-notes and backend roadmap; the user-facing setup guide lives in `README.md`.
+Status: v0.3.5 is the current release. KDE Plasma Wayland, GNOME Wayland,
+Hyprland, NVIDIA X11 NV-CONTROL, gamescope-native, and the nested gamescope
+fallback are verified. DRM CTM remains implemented with a passing read-only
+probe, while runtime apply/off verification is deferred. The KWin effect is
+built against KWin 6.8, and since v0.3.4 `satur8 repair` rebuilds it at login
+when a KWin update rejects the installed copy. Distribution is a Linux x86_64
+release tarball, the Arch package in `packaging/`, a live Fedora package on COPR
+built for Fedora 43 and 44, and two community-maintained AUR packages (`satur8`
+and `satur8-bin`). A tagged-release GitHub Actions workflow builds the source
+and Linux tarballs with checksums so the packaging sources and the website
+download stay in sync. This file keeps the longer design notes and backend
+roadmap; the user-facing setup guide lives in `README.md`.
 
 ---
 

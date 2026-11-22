@@ -3,6 +3,11 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## Unreleased
+
+- ROADMAP.md and PLAN.md now name v0.3.5 as the current release and describe
+  the backends and distribution channels as they are today (#22).
+
 ## v0.3.5 - 2026-11-21
 
 Installer fix for machines without KDE.
