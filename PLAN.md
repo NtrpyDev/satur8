@@ -4,16 +4,19 @@
 > boost, applied **outside** the game process so it cannot trip anti-cheat,
 > with as close to **zero CPU cost** as the hardware allows.
 
-Status: v0.4.0 is the current release. KDE Plasma Wayland, GNOME Wayland,
+Status: v0.4.1 is the current release. KDE Plasma Wayland (including the
+Steam Deck's Desktop Mode on SteamOS 3.9.5 with KWin 6.7.3), GNOME Wayland,
 Hyprland, NVIDIA X11 NV-CONTROL, automatic per-game switching in Steam Game Mode
 (verified on a Steam Deck OLED with SteamOS 3.9.5 and gamescope 3.16.30.1),
-gamescope-native, and the nested gamescope fallback are verified. DRM CTM remains implemented with a passing read-only
-probe, while runtime apply/off verification is deferred. The KWin effect is
-built against KWin 6.8, and since v0.3.4 `satur8 repair` rebuilds it at login
-when a KWin update rejects the installed copy. Distribution is a Linux x86_64
+gamescope-native, and the nested gamescope fallback are verified. DRM CTM
+remains implemented with a passing read-only probe, while runtime apply/off
+verification is deferred. The release tarball's programs need glibc 2.35 or
+newer, and it carries prebuilt KWin effects built in each target system's own
+packages (B1); `satur8 repair` installs the matching one at login, and rebuilds
+the effect only where build tools exist. Distribution is a Linux x86_64
 release tarball, the Arch package in `packaging/`, a live Fedora package on COPR
-built for Fedora 43 and 44, and two community-maintained AUR packages (`satur8`
-and `satur8-bin`). A tagged-release GitHub Actions workflow builds the source
+built for Fedora 43, 44 and 45, and two community-maintained AUR packages
+(`satur8` and `satur8-bin`). A tagged-release GitHub Actions workflow builds the source
 and Linux tarballs with checksums so the packaging sources and the website
 download stay in sync. This file keeps the longer design notes and backend
 roadmap; the user-facing setup guide lives in `README.md`.
@@ -135,6 +138,41 @@ compositor. We ship our own minimal, single-purpose **saturation** effect
   sub-millisecond and CPU-free, but we document it.
 - Investigate whether recent KWin (6.x) exposes a per-output color/CTM path we
   can use instead of a shader - if so, KDE moves to zero-cost too. Track this.
+
+**How the effect reaches systems without build tools (since v0.4.1).**
+
+- *The compatibility key.* KWin loads an effect only when its embedded plugin
+  ID names KWin's exact x.y.z version, and Qt refuses a plugin built against a
+  newer Qt minor than the one installed (the effect requires one `Qt_6.x`
+  symbol version). So each effect is built inside the target system's own
+  package set, which gets the KWin headers, KWin's build options and the Qt
+  version exactly right. The key is the system family plus the KWin version:
+  `steamos-6.7.3`, `fedora45-6.8.3`.
+- *The bundled set.* `packaging/kwin-effect-targets.txt` lists the targets and
+  `packaging/build-kwin-effect.sh` builds each one: SteamOS branches against
+  Valve's package mirror, Fedora releases in a Fedora container. v0.4.1 carries
+  `steamos-6.7.3` (SteamOS 3.9), `steamos-6.8.2` (SteamOS 3.10), and
+  `fedora44-6.8.3` and `fedora45-6.8.3`. When two targets give the same key,
+  the first in the list wins, so the effect is built against the oldest Qt that
+  KWin version meets. The effect source builds against KWin 6.7 and 6.8; KWin
+  6.5 and older use a different `drawWindow` signature and are not covered.
+- *The picker order.* The installer (`packaging/install.sh`, which prints its
+  choice with `--pick-effect`) and `satur8 repair` decide the same way: the
+  set's effect for this family and KWin version; else a local build when the
+  effect source, `cmake`, a C++ compiler and the KWin headers are present;
+  else another family's effect for the same KWin version whose `Qt_6.x`
+  requirement is not above the installed Qt, with a printed note; else skip,
+  with the reason. An entry whose embedded ID disagrees with its folder name is
+  never used. Nothing is downloaded.
+- *Repair from the set.* The installer copies the whole set to
+  `~/.local/share/satur8/kwin-effects`, so `satur8 repair`, run by the daemon's
+  unit at every session start, can install the right effect after an OS update
+  with no network and no build tools. Repair also checks the per-user effect
+  file on disk against the running KWin, so a wrong file is replaced even while
+  KWin still uses the copy it loaded earlier. The new file is copied beside the
+  destination and renamed over it, never written in place, because KWin keeps
+  the loaded file mapped. `satur8 doctor` names where the loaded effect came
+  from, and the desktop app's Status page follows the same decision.
 
 ### B2. DRM CTM backend - **zero-cost, the ideal**
 Direct libdrm. Sets the `CTM` property on the CRTC. Works when we can hold or
