@@ -7,6 +7,8 @@
 mod config;
 mod games_cmd;
 mod gnome_report;
+mod outputs_cmd;
+mod outputs_report;
 mod profile_cmd;
 mod run;
 
@@ -49,9 +51,16 @@ enum Command {
         /// Blend in linear light (more correct) instead of gamma sRGB.
         #[arg(long)]
         linear: bool,
+        /// Target a specific output id (see `satur8 outputs`); default all.
+        #[arg(long)]
+        output: Option<String>,
     },
-    /// List the outputs the active backend can target.
-    Outputs,
+    /// List the outputs the active backend can target, or change the
+    /// per-output settings.
+    Outputs {
+        #[command(subcommand)]
+        cmd: Option<outputs_cmd::OutputsCmd>,
+    },
     /// Turn satur8 off and release any per-frame cost.
     Off,
     /// Apply satur8, launch a game, and restore on exit. The Steam launch
@@ -111,7 +120,7 @@ fn main() -> Result<()> {
     // default so they always reach their restore path.
     if matches!(
         cli.command,
-        Command::Status | Command::Doctor | Command::Outputs | Command::Games { .. }
+        Command::Status | Command::Doctor | Command::Outputs { cmd: None } | Command::Games { .. }
     ) {
         // SAFETY: called once at startup, before any other thread exists.
         unsafe {
@@ -124,8 +133,13 @@ fn main() -> Result<()> {
             linear,
             output,
         } => cmd_set(saturation, linear, output),
-        Command::On { saturation, linear } => cmd_set(saturation, linear, None),
-        Command::Outputs => cmd_outputs(),
+        Command::On {
+            saturation,
+            linear,
+            output,
+        } => cmd_set(saturation, linear, output),
+        Command::Outputs { cmd: None } => cmd_outputs(),
+        Command::Outputs { cmd: Some(cmd) } => outputs_cmd::run(cmd),
         Command::Off => cmd_off(),
         Command::Run {
             profile,
@@ -155,20 +169,7 @@ fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> 
     let clamped = Saturation::try_new(saturation)?;
     let mut backend = select_backend()?;
 
-    // Pick the target output: a named one (validated against the backend) or all.
-    let target = match &output {
-        Some(id) => backend
-            .outputs()
-            .into_iter()
-            .find(|o| &o.id == id)
-            .with_context(|| {
-                format!(
-                    "no output '{id}' on the {} backend (see `satur8 outputs`)",
-                    backend.name()
-                )
-            })?,
-        None => all_outputs(),
-    };
+    let target = set_target(backend.name(), &backend.outputs(), output.as_deref())?;
 
     let linear_active = apply_with_linear_flag(backend.as_mut(), &target, clamped, linear)?;
     if linear && !linear_active {
@@ -195,6 +196,28 @@ fn cmd_set(saturation: f32, linear: bool, output: Option<String>) -> Result<()> 
     Ok(())
 }
 
+/// The output `satur8 set` targets: every output with no `--output` or with
+/// `--output all`, else the named one, which must be in the backend's list. A
+/// backend that shows one saturation everywhere lists no single outputs, so a
+/// name there is refused rather than changing every screen.
+fn set_target(
+    backend: &str,
+    outputs: &[satur8_core::Output],
+    output: Option<&str>,
+) -> Result<satur8_core::Output> {
+    match output {
+        None => Ok(all_outputs()),
+        Some(id) if id == satur8_core::levels::ALL_OUTPUTS => Ok(all_outputs()),
+        Some(id) => outputs
+            .iter()
+            .find(|o| o.id == id)
+            .cloned()
+            .with_context(|| {
+                format!("no output '{id}' on the {backend} backend (see `satur8 outputs`)")
+            }),
+    }
+}
+
 fn apply_with_linear_flag(
     backend: &mut dyn satur8_core::Backend,
     target: &satur8_core::Output,
@@ -217,11 +240,55 @@ fn apply_with_linear_flag(
 
 fn cmd_outputs() -> Result<()> {
     let backend = select_backend()?;
-    println!("outputs on the {} backend:", backend.name());
-    for o in backend.outputs() {
-        println!("  {:<8} {}", o.id, o.human_name);
+    let profiles = config::load_profiles().unwrap_or_default();
+    let outputs = backend.outputs();
+    let current = backend.current_levels();
+    let reason = backend.per_output_reason();
+    let view = outputs_report::BackendView {
+        name: backend.name(),
+        per_output: backend.per_output(),
+        outputs: &outputs,
+        current: current.as_ref(),
+        reason: reason.as_deref(),
+    };
+    for line in outputs_report::outputs_lines(&view, &profiles) {
+        println!("{line}");
     }
     Ok(())
+}
+
+/// The per-output part of `satur8 doctor` and `satur8 status`, after a blank
+/// line. Prints nothing, and selects no backend, unless the file uses the
+/// per-output settings.
+fn print_per_output_settings() {
+    let profiles = config::load_profiles().unwrap_or_default();
+    if !outputs_report::uses_per_output_settings(&profiles) {
+        return;
+    }
+    let lines = match select_backend() {
+        Ok(backend) => {
+            let outputs = backend.outputs();
+            let current = backend.current_levels();
+            let reason = backend.per_output_reason();
+            let view = outputs_report::BackendView {
+                name: backend.name(),
+                per_output: backend.per_output(),
+                outputs: &outputs,
+                current: current.as_ref(),
+                reason: reason.as_deref(),
+            };
+            outputs_report::settings_section(Ok(&view), &profiles)
+        }
+        Err(error) => {
+            let reason = error.to_string();
+            let first_line = reason.lines().next().unwrap_or("").trim_end_matches('.');
+            outputs_report::settings_section(Err(first_line), &profiles)
+        }
+    };
+    println!();
+    for line in lines {
+        println!("{line}");
+    }
 }
 
 fn cmd_off() -> Result<()> {
@@ -247,6 +314,8 @@ fn cmd_status() -> Result<()> {
         for line in gamescope_lines(display, root) {
             println!("{line}");
         }
+        print_active_output();
+        print_per_output_settings();
         return Ok(());
     }
 
@@ -281,13 +350,53 @@ fn cmd_status() -> Result<()> {
                 }
             }
             println!();
+            // Outputs showing another value than the one above, whatever set
+            // them (a manual `set --output`, a profile, an output's default).
+            if loaded {
+                if let Some(levels) = satur8_core::Backend::current_levels(&kwin) {
+                    for line in outputs_report::current_output_lines(&levels) {
+                        println!("{line}");
+                    }
+                }
+            }
         }
         Report::Gnome => println!("{}", gnome_report::status_line(&gnome_report::gather())),
         Report::GameMode(_) | Report::NoDesktopBackend => {
             println!("backend kwin: not available in this session")
         }
     }
+    print_active_output();
+    print_per_output_settings();
     Ok(())
+}
+
+/// The `satur8 status` line for a profile limited to one output, from the
+/// daemon's `ActiveProfile` and `ActiveOutput` properties. None when no profile
+/// is applied or it changes every output.
+fn active_output_line(profile: &str, output: &str) -> Option<String> {
+    let output = output.trim();
+    (!profile.is_empty() && !output.is_empty())
+        .then(|| format!("active profile: {profile}, on output {output} only"))
+}
+
+/// Print [`active_output_line`] when the daemon is running and reports one.
+fn print_active_output() {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return;
+    };
+    let Ok(proxy) = zbus::blocking::Proxy::new(
+        &conn,
+        "org.satur8.Daemon",
+        "/org/satur8/Daemon",
+        "org.satur8.Daemon",
+    ) else {
+        return;
+    };
+    let profile: String = proxy.get_property("ActiveProfile").unwrap_or_default();
+    let output: String = proxy.get_property("ActiveOutput").unwrap_or_default();
+    if let Some(line) = active_output_line(&profile, &output) {
+        println!("{line}");
+    }
 }
 
 fn cmd_repair() -> Result<()> {
@@ -314,6 +423,7 @@ fn cmd_doctor() -> Result<()> {
         for line in gamescope_lines(display, root) {
             println!("{line}");
         }
+        print_per_output_settings();
         return print_profiles_summary();
     }
 
@@ -365,7 +475,12 @@ fn cmd_doctor() -> Result<()> {
                 }
             }
             match kwin.is_loaded() {
-                Ok(true) => println!("  [ok] satur8 effect is loaded"),
+                Ok(true) => {
+                    let profiles = config::load_profiles().unwrap_or_default();
+                    let state = outputs_report::uses_per_output_settings(&profiles)
+                        .then(|| kwin.effect_outputs());
+                    println!("{}", loaded_effect_line(state));
+                }
                 Ok(false) => {
                     println!("  [..] satur8 effect installed but not loaded (run `satur8 on`)")
                 }
@@ -399,6 +514,7 @@ fn cmd_doctor() -> Result<()> {
         Err(e) => println!("  DRM CTM: not available ({e})"),
     }
 
+    print_per_output_settings();
     println!();
     print_profiles_summary()
 }
@@ -474,6 +590,21 @@ fn supported_effect_lines(
         format!("       effect origin: {}", effect_origin(state)),
         format!("       Next step: {advice}."),
     ]
+}
+
+/// The `satur8 doctor` line for a loaded KWin effect. `state` is only asked
+/// for when the profiles file uses the per-output settings, so the line stays
+/// as before for every other file. A loaded effect from before per-output
+/// support gets "[..]" instead of "[ok]"; the per-output section below says
+/// why and what to do.
+fn loaded_effect_line(state: Option<satur8_kwin::EffectOutputs>) -> &'static str {
+    match state {
+        Some(satur8_kwin::EffectOutputs::OlderLoaded { .. }) => {
+            "  [..] satur8 effect is loaded, but it is one from before per-output \
+             support (see per-output settings below)"
+        }
+        _ => "  [ok] satur8 effect is loaded",
+    }
 }
 
 fn print_profiles_summary() -> Result<()> {
@@ -713,6 +844,174 @@ mod tests {
                     ..
                 }
             }) if query == "sushi"
+        ));
+    }
+
+    #[test]
+    fn doctor_marks_an_older_loaded_effect_only_when_the_file_asks_for_per_output() {
+        use satur8_kwin::EffectOutputs;
+        assert_eq!(loaded_effect_line(None), "  [ok] satur8 effect is loaded");
+        assert_eq!(
+            loaded_effect_line(Some(EffectOutputs::PerOutput)),
+            "  [ok] satur8 effect is loaded"
+        );
+        for installed_is_newer in [true, false] {
+            assert_eq!(
+                loaded_effect_line(Some(EffectOutputs::OlderLoaded { installed_is_newer })),
+                "  [..] satur8 effect is loaded, but it is one from before per-output support \
+                 (see per-output settings below)"
+            );
+        }
+    }
+
+    #[test]
+    fn status_names_the_output_only_for_a_profile_limited_to_one() {
+        assert_eq!(
+            active_output_line("couch", "HDMI-A-1").as_deref(),
+            Some("active profile: couch, on output HDMI-A-1 only")
+        );
+        assert_eq!(active_output_line("couch", ""), None);
+        assert_eq!(active_output_line("", "HDMI-A-1"), None);
+        assert_eq!(active_output_line("", ""), None);
+    }
+
+    #[test]
+    fn on_takes_an_output_like_set() {
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "on", "1.3", "--output", "DP-2"]).map(|cli| cli.command),
+            Ok(Command::On {
+                saturation,
+                output: Some(ref name),
+                ..
+            }) if saturation == 1.3 && name == "DP-2"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "on"]).map(|cli| cli.command),
+            Ok(Command::On {
+                saturation,
+                output: None,
+                ..
+            }) if saturation == 1.5
+        ));
+        // `off` takes no output: every output goes back to normal.
+        assert!(Cli::try_parse_from(["satur8", "off", "--output", "DP-2"]).is_err());
+    }
+
+    #[test]
+    fn set_targets_every_output_unless_one_is_named() {
+        let listed = [satur8_core::Output {
+            id: "DP-1".into(),
+            human_name: "Dell U2720Q".into(),
+        }];
+        assert_eq!(set_target("kwin", &listed, None).unwrap().id, "all");
+        assert_eq!(set_target("kwin", &listed, Some("all")).unwrap().id, "all");
+        assert_eq!(
+            set_target("kwin", &listed, Some("DP-1")).unwrap().id,
+            "DP-1"
+        );
+    }
+
+    /// The message v0.4.1 already printed for a name the backend does not
+    /// list: a per-output backend's unknown name, and any name on a backend
+    /// that shows one saturation everywhere.
+    #[test]
+    fn set_refuses_a_name_the_backend_does_not_list() {
+        let kwin = [satur8_core::Output {
+            id: "DP-1".into(),
+            human_name: "Dell U2720Q".into(),
+        }];
+        assert_eq!(
+            set_target("kwin", &kwin, Some("DP-9"))
+                .unwrap_err()
+                .to_string(),
+            "no output 'DP-9' on the kwin backend (see `satur8 outputs`)"
+        );
+        assert_eq!(
+            set_target("gnome-shell", &[all_outputs()], Some("DP-1"))
+                .unwrap_err()
+                .to_string(),
+            "no output 'DP-1' on the gnome-shell backend (see `satur8 outputs`)"
+        );
+        let drm = [satur8_core::Output {
+            id: "42".into(),
+            human_name: "CRTC 42".into(),
+        }];
+        assert_eq!(
+            set_target("drm-ctm", &drm, Some("999"))
+                .unwrap_err()
+                .to_string(),
+            "no output '999' on the drm-ctm backend (see `satur8 outputs`)"
+        );
+    }
+
+    #[test]
+    fn outputs_takes_default_and_follow() {
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "outputs"]).map(|cli| cli.command),
+            Ok(Command::Outputs { cmd: None })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "outputs", "default", "DP-2", "0.85"])
+                .map(|cli| cli.command),
+            Ok(Command::Outputs {
+                cmd: Some(outputs_cmd::OutputsCmd::Default {
+                    ref name,
+                    saturation: Some(value),
+                    unset: false,
+                })
+            }) if name == "DP-2" && value == 0.85
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "outputs", "default", "DP-2", "--unset"])
+                .map(|cli| cli.command),
+            Ok(Command::Outputs {
+                cmd: Some(outputs_cmd::OutputsCmd::Default {
+                    saturation: None,
+                    unset: true,
+                    ..
+                })
+            })
+        ));
+        for (word, mode) in [
+            ("all", outputs_cmd::FollowMode::All),
+            ("off", outputs_cmd::FollowMode::All),
+            ("focused", outputs_cmd::FollowMode::Focused),
+            ("on", outputs_cmd::FollowMode::Focused),
+        ] {
+            assert!(
+                matches!(
+                    Cli::try_parse_from(["satur8", "outputs", "follow", word])
+                        .map(|cli| cli.command),
+                    Ok(Command::Outputs {
+                        cmd: Some(outputs_cmd::OutputsCmd::Follow { mode: parsed })
+                    }) if parsed == mode
+                ),
+                "{word}"
+            );
+        }
+    }
+
+    #[test]
+    fn outputs_default_needs_a_value_or_unset_but_not_both() {
+        for args in [
+            &["satur8", "outputs", "default", "DP-2"][..],
+            &["satur8", "outputs", "default", "DP-2", "0.85", "--unset"][..],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn profile_add_takes_repeated_outputs() {
+        let cli = Cli::try_parse_from([
+            "satur8", "profile", "add", "couch", "1.3", "--exe", "hades", "--output", "HDMI-A-1",
+            "--output", "DP-2",
+        ]);
+        assert!(matches!(
+            cli.map(|cli| cli.command),
+            Ok(Command::Profile {
+                cmd: profile_cmd::ProfileCmd::Add { ref outputs, .. }
+            }) if outputs == &["HDMI-A-1", "DP-2"]
         ));
     }
 

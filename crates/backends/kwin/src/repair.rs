@@ -559,6 +559,25 @@ fn plugin_abi(path: &Path) -> Option<String> {
     abi_in_plugin(&fs::read(path).ok()?)
 }
 
+/// A method only an effect with per-output support has. Qt keeps method names
+/// as plain text in the plugin, so the file can be checked without loading it.
+const PER_OUTPUT_MARKER: &[u8] = b"setSaturations";
+
+/// Whether plugin bytes carry the per-output calls.
+pub fn has_per_output_calls(bytes: &[u8]) -> bool {
+    find(bytes, PER_OUTPUT_MARKER).is_some()
+}
+
+/// Whether the effect file KWin loads at the next login (the per-user copy when
+/// there is one, else the system copy) has the per-output calls; `None` when no
+/// effect file is found.
+pub fn installed_effect_has_per_output() -> Option<bool> {
+    let path = user_plugin_path()
+        .filter(|path| path.is_file())
+        .or_else(system_plugin_path)?;
+    Some(has_per_output_calls(&fs::read(path).ok()?))
+}
+
 /// This system's family, from os-release. `SATUR8_OS_RELEASE` names another
 /// file, for tests.
 fn system_family() -> Family {

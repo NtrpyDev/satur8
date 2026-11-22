@@ -215,6 +215,7 @@ mod tests {
                 profile("sushiamo", 1.75, true, 4555040),
                 profile("spire", 1.4, false, 2868840),
             ],
+            ..Profiles::default()
         }
     }
 
@@ -238,6 +239,7 @@ mod tests {
                 profile("old", 1.2, false, 4555040),
                 profile("current", 1.9, true, 4555040),
             ],
+            ..Profiles::default()
         };
         assert_eq!(
             profile_for(&profiles, 4555040).map(profile_label),

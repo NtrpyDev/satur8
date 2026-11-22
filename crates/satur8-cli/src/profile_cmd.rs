@@ -31,6 +31,10 @@ pub enum ProfileCmd {
         /// Match by an installed Steam game, by name or AppID (see `satur8 games`).
         #[arg(long, conflicts_with = "steam_app_id")]
         steam_game: Option<String>,
+        /// Change only this output while the profile is applied, by the name
+        /// `satur8 outputs` lists; repeat for more. `all` means every output.
+        #[arg(long = "output", value_name = "NAME")]
+        outputs: Vec<String>,
     },
     /// Remove a profile by name.
     Remove { name: String },
@@ -53,6 +57,7 @@ pub fn run(cmd: ProfileCmd) -> Result<()> {
             window_class,
             steam_app_id,
             steam_game,
+            outputs,
         } => {
             let game = match steam_game {
                 Some(query) => Some(
@@ -68,6 +73,7 @@ pub fn run(cmd: ProfileCmd) -> Result<()> {
                 exe,
                 window_class,
                 steam_app_id,
+                outputs,
                 game.as_ref(),
             )
         }
@@ -89,15 +95,26 @@ fn list() -> Result<()> {
         return Ok(());
     }
     for p in &profiles.profiles {
-        println!(
-            "  {:<16} {:<8} sat {:.2}  {}",
-            p.name,
-            if p.enabled { "enabled" } else { "disabled" },
-            p.saturation,
-            describe_match(&p.match_rule)
-        );
+        println!("{}", list_row(p));
     }
     Ok(())
+}
+
+/// One `satur8 profile list` row. The outputs a profile names come last, and
+/// only when it names any, so other rows are as they always were.
+fn list_row(p: &Profile) -> String {
+    let row = format!(
+        "  {:<16} {:<8} sat {:.2}  {}",
+        p.name,
+        if p.enabled { "enabled" } else { "disabled" },
+        p.saturation,
+        describe_match(&p.match_rule)
+    );
+    if p.outputs.is_empty() {
+        row
+    } else {
+        format!("{row} outputs={}", p.outputs.join(","))
+    }
 }
 
 fn show(name: &str) -> Result<()> {
@@ -117,16 +134,19 @@ fn show(name: &str) -> Result<()> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add(
     name: String,
     saturation: f32,
     exe: Option<String>,
     window_class: Option<String>,
     steam_app_id: Option<u32>,
+    outputs: Vec<String>,
     game: Option<&SteamGame>,
 ) -> Result<()> {
     let mut profiles = config::load_profiles()?;
-    let profile = build_profile(name.clone(), saturation, exe, window_class, steam_app_id)?;
+    let mut profile = build_profile(name.clone(), saturation, exe, window_class, steam_app_id)?;
+    profile.outputs = profile_outputs(outputs)?;
     let updated = add_or_replace_profile(&mut profiles, profile);
     println!("{}", added_line(&name, updated, game));
     config::save_profiles(&profiles)?;
@@ -187,6 +207,21 @@ fn build_profile(
         },
         outputs: vec![],
     })
+}
+
+/// The `--output` names, trimmed, each once, in the order given.
+fn profile_outputs(names: Vec<String>) -> Result<Vec<String>> {
+    let mut outputs: Vec<String> = Vec::new();
+    for name in names {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            bail!("--output needs an output name, as `satur8 outputs` lists it, or `all`");
+        }
+        if !outputs.contains(&name) {
+            outputs.push(name);
+        }
+    }
+    Ok(outputs)
 }
 
 fn add_or_replace_profile(profiles: &mut Profiles, profile: Profile) -> bool {
@@ -306,6 +341,7 @@ mod tests {
         let mut profiles = Profiles {
             default_saturation: 1.0,
             profiles: vec![profile("CS2", 1.6)],
+            ..Profiles::default()
         };
 
         let updated = add_or_replace_profile(&mut profiles, profile("cs2", 1.9));
@@ -321,6 +357,7 @@ mod tests {
         let mut profiles = Profiles {
             default_saturation: 1.0,
             profiles: vec![profile("CS2", 1.6), profile("Dota2", 1.4)],
+            ..Profiles::default()
         };
 
         remove_profile_by_name(&mut profiles, "cs2").unwrap();
@@ -334,6 +371,7 @@ mod tests {
         let mut profiles = Profiles {
             default_saturation: 1.0,
             profiles: vec![profile("CS2", 1.6)],
+            ..Profiles::default()
         };
 
         assert!(remove_profile_by_name(&mut profiles, "missing").is_err());
@@ -345,6 +383,7 @@ mod tests {
         let mut profiles = Profiles {
             default_saturation: 1.0,
             profiles: vec![profile("CS2", 1.6)],
+            ..Profiles::default()
         };
 
         set_profile_enabled(&mut profiles, "cs2", false).unwrap();
@@ -352,5 +391,80 @@ mod tests {
         set_profile_enabled(&mut profiles, "CS2", true).unwrap();
         assert!(profiles.profiles[0].enabled);
         assert!(set_profile_enabled(&mut profiles, "missing", false).is_err());
+    }
+
+    #[test]
+    fn profile_outputs_are_trimmed_and_each_kept_once() {
+        assert_eq!(
+            profile_outputs(vec![" HDMI-A-1 ".into(), "DP-2".into(), "HDMI-A-1".into()]).unwrap(),
+            ["HDMI-A-1", "DP-2"]
+        );
+        assert!(profile_outputs(vec![" ".into()]).is_err());
+        assert!(profile_outputs(vec![]).unwrap().is_empty());
+    }
+
+    /// From an empty file to the design's per-output example through the
+    /// commands' own edits, and back through the file.
+    #[test]
+    fn per_output_settings_from_an_empty_file_round_trip() {
+        use crate::outputs_cmd::{set_follow, set_output_default, FollowMode};
+
+        let mut profiles = Profiles::from_toml("").unwrap();
+        set_output_default(&mut profiles, "HDMI-A-1", Some(0.85)).unwrap();
+        set_follow(&mut profiles, FollowMode::Focused);
+        let mut couch =
+            build_profile("couch".into(), 1.3, Some("hades".into()), None, None).unwrap();
+        couch.outputs = profile_outputs(vec!["HDMI-A-1".into()]).unwrap();
+        add_or_replace_profile(&mut profiles, couch);
+
+        let written = profiles.to_toml().unwrap();
+        assert_eq!(
+            written,
+            "default_saturation = 1.0\n\
+             profile_outputs = \"focused\"\n\
+             \n\
+             [output.HDMI-A-1]\n\
+             default_saturation = 0.8500000238418579\n\
+             \n\
+             [[profile]]\n\
+             name = \"couch\"\n\
+             enabled = true\n\
+             saturation = 1.2999999523162842\n\
+             exe = \"hades\"\n\
+             outputs = [\"HDMI-A-1\"]\n"
+        );
+        assert_eq!(Profiles::from_toml(&written).unwrap(), profiles);
+
+        // Clearing both settings writes the file as before they existed.
+        set_output_default(&mut profiles, "HDMI-A-1", None).unwrap();
+        set_follow(&mut profiles, FollowMode::All);
+        let cleared = profiles.to_toml().unwrap();
+        assert!(!cleared.contains("profile_outputs"), "{cleared}");
+        assert!(!cleared.contains("[output"), "{cleared}");
+    }
+
+    #[test]
+    fn list_rows_show_outputs_only_when_a_profile_names_any() {
+        let mut cs2 =
+            build_profile("cs2".into(), 1.6, Some("cs2".into()), None, Some(730)).unwrap();
+        assert_eq!(
+            list_row(&cs2),
+            "  cs2              enabled  sat 1.60  exe=cs2 appid=730"
+        );
+        cs2.outputs = vec!["HDMI-A-1".into(), "DP-2".into()];
+        cs2.enabled = false;
+        assert_eq!(
+            list_row(&cs2),
+            "  cs2              disabled sat 1.60  exe=cs2 appid=730 outputs=HDMI-A-1,DP-2"
+        );
+    }
+
+    #[test]
+    fn profile_add_rejects_an_empty_output_name() {
+        let err = profile_outputs(vec!["".into()]).unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "--output needs an output name, as `satur8 outputs` lists it, or `all`"
+        );
     }
 }

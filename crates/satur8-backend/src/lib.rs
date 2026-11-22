@@ -4,7 +4,7 @@ use std::io;
 use std::thread::{self, JoinHandle};
 
 use anyhow::{anyhow, bail, Result};
-use satur8_core::{Backend, BackendError, Environment, Output, Saturation};
+use satur8_core::{Backend, BackendError, Environment, Levels};
 use satur8_drm_ctm::DrmCtmBackend;
 use satur8_gamescope::GamescopeBackend;
 use satur8_gnome::GnomeBackend;
@@ -20,33 +20,7 @@ pub use satur8_gnome::{
 };
 
 /// Sentinel used when an operation targets every output.
-pub fn all_outputs() -> Output {
-    Output {
-        id: "all".into(),
-        human_name: "All outputs".into(),
-    }
-}
-
-/// Apply saturation to configured output ids, or every output when none are set.
-pub fn apply_to_outputs(
-    backend: &mut dyn Backend,
-    outputs: &[String],
-    saturation: Saturation,
-) -> Result<(), BackendError> {
-    if outputs.is_empty() {
-        return backend.apply(&all_outputs(), saturation);
-    }
-    for id in outputs {
-        let output = Output {
-            id: id.clone(),
-            human_name: id.clone(),
-        };
-        backend.apply(&output, saturation).map_err(|error| {
-            BackendError::Apply(format!("backend rejected profile output '{id}': {error}"))
-        })?;
-    }
-    Ok(())
-}
+pub use satur8_core::all_outputs;
 
 /// One step of backend selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,12 +140,13 @@ pub fn select_backend() -> Result<Box<dyn Backend>> {
 /// Owns a backend and restores its configured desktop state when dropped.
 pub struct RestoreGuard {
     backend: Box<dyn Backend>,
-    restore_to: Saturation,
+    /// The desktop picture to put back.
+    restore_to: Levels,
     armed: bool,
 }
 
 impl RestoreGuard {
-    pub fn new(backend: Box<dyn Backend>, restore_to: Saturation) -> Self {
+    pub fn new(backend: Box<dyn Backend>, restore_to: Levels) -> Self {
         Self {
             backend,
             restore_to,
@@ -179,7 +154,7 @@ impl RestoreGuard {
         }
     }
 
-    pub fn inactive(backend: Box<dyn Backend>, restore_to: Saturation) -> Self {
+    pub fn inactive(backend: Box<dyn Backend>, restore_to: Levels) -> Self {
         Self {
             backend,
             restore_to,
@@ -195,8 +170,8 @@ impl RestoreGuard {
         self.backend.as_mut()
     }
 
-    pub fn set_restore_to(&mut self, saturation: Saturation) {
-        self.restore_to = saturation;
+    pub fn set_restore_to(&mut self, levels: Levels) {
+        self.restore_to = levels;
     }
 
     pub fn arm(&mut self) {
@@ -208,7 +183,7 @@ impl RestoreGuard {
     }
 
     pub fn restore_now(&mut self) -> Result<(), BackendError> {
-        let result = restore_backend(self.backend.as_mut(), self.restore_to);
+        let result = restore_backend(self.backend.as_mut(), &self.restore_to);
         if result.is_ok() {
             self.armed = false;
         }
@@ -219,18 +194,20 @@ impl RestoreGuard {
 impl Drop for RestoreGuard {
     fn drop(&mut self) {
         if self.armed {
-            if let Err(error) = restore_backend(self.backend.as_mut(), self.restore_to) {
+            if let Err(error) = restore_backend(self.backend.as_mut(), &self.restore_to) {
                 eprintln!("satur8: warning, failed to restore saturation: {error}");
             }
         }
     }
 }
 
-fn restore_backend(backend: &mut dyn Backend, restore_to: Saturation) -> Result<(), BackendError> {
+/// An unchanged desktop is restored with `reset`, which lets backends release
+/// their per-frame cost; any other desktop is shown with `apply_levels`.
+fn restore_backend(backend: &mut dyn Backend, restore_to: &Levels) -> Result<(), BackendError> {
     if restore_to.is_identity() {
         backend.reset(&all_outputs())
     } else {
-        backend.apply(&all_outputs(), restore_to)
+        backend.apply_levels(restore_to)
     }
 }
 
@@ -274,7 +251,62 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use satur8_core::CostNote;
+    use std::sync::{Arc, Mutex};
+
+    use satur8_core::{CostNote, Output, Saturation};
+
+    /// Records every `apply` and `reset` as "apply all 1.25" or "reset all".
+    struct Recording(Arc<Mutex<Vec<String>>>);
+
+    impl Backend for Recording {
+        fn name(&self) -> &'static str {
+            "recording"
+        }
+
+        fn cost(&self) -> CostNote {
+            CostNote::ZeroCost
+        }
+
+        fn outputs(&self) -> Vec<Output> {
+            vec![all_outputs()]
+        }
+
+        fn apply(&mut self, output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("apply {} {}", output.id, saturation.get()));
+            Ok(())
+        }
+
+        fn reset(&mut self, output: &Output) -> Result<(), BackendError> {
+            self.0.lock().unwrap().push(format!("reset {}", output.id));
+            Ok(())
+        }
+    }
+
+    fn restored_calls(desktop: Levels) -> Vec<String> {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut guard = RestoreGuard::new(Box::new(Recording(calls.clone())), desktop);
+        guard.restore_now().unwrap();
+        drop(guard);
+        let calls = calls.lock().unwrap().clone();
+        calls
+    }
+
+    /// The same calls as v0.4.1: an unchanged desktop is a reset, any other
+    /// desktop one apply on every output, and nothing more when dropped.
+    #[test]
+    fn restore_guard_resets_an_unchanged_desktop_and_applies_any_other() {
+        assert_eq!(
+            restored_calls(Levels::uniform(Saturation::IDENTITY)),
+            ["reset all"]
+        );
+        assert_eq!(
+            restored_calls(Levels::uniform(Saturation::new(1.25))),
+            ["apply all 1.25"]
+        );
+    }
 
     struct Named(&'static str);
 

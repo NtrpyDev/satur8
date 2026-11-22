@@ -16,7 +16,7 @@
 //! still enumerate which CRTCs expose a CTM property - useful for diagnostics
 //! and for answering "does this GPU honor DRM CTM?".
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::os::fd::{AsFd, BorrowedFd};
 
@@ -27,7 +27,9 @@ use drm::control::{
 use drm::{ClientCapability, Device as BasicDevice};
 
 use satur8_core::ctm::drm_ctm_blob_bytes;
-use satur8_core::{Backend, BackendError, CostNote, Environment, Output, Saturation, SessionType};
+use satur8_core::{
+    Backend, BackendError, CostNote, Environment, Levels, Output, Saturation, SessionType,
+};
 
 /// A DRM device node we can talk modesetting to.
 struct Card(File);
@@ -61,6 +63,10 @@ pub struct DrmCtmBackend {
     card: Card,
     /// crtc id (u32) -> how to set its CTM.
     crtcs: HashMap<u32, CtmCrtc>,
+    /// CRTCs this backend has left at a level other than 1.0. An inactive one
+    /// is not reached by "all", so it is put back explicitly when a picture
+    /// stops naming it.
+    managed: BTreeSet<u32>,
 }
 
 impl DrmCtmBackend {
@@ -120,7 +126,11 @@ impl DrmCtmBackend {
         card.set_client_capability(ClientCapability::Atomic, true)
             .with_context(|| format!("enabling atomic modesetting on {path}"))?;
         let crtcs = discover_ctm_crtcs(&card)?;
-        Ok(DrmCtmBackend { card, crtcs })
+        Ok(DrmCtmBackend {
+            card,
+            crtcs,
+            managed: BTreeSet::new(),
+        })
     }
 
     fn set_crtc_ctm(&self, target: &CtmCrtc, saturation: Saturation) -> Result<()> {
@@ -241,6 +251,88 @@ where
     Ok(())
 }
 
+/// The CRTC and saturation each commit of `levels` sets, sorted by CRTC id.
+///
+/// Each named output that is a CTM-capable CRTC id gets its own level, active or
+/// not, as a numeric `--output` always has. Every other CRTC that the `"all"`
+/// sentinel reaches (the active ones, or all of them when none is active) gets
+/// `base`. A name that is not a CTM-capable CRTC here, such as an unplugged
+/// screen or a connector name, is skipped. Each `managed` CRTC (one this
+/// backend left at another level) that the picture no longer names gets
+/// `base` too, even when it is not active, so no stale level stays behind for
+/// when it turns on; one that no longer exists on the device is skipped.
+fn plan_levels<I, F>(
+    levels: &Levels,
+    ids: I,
+    is_active: F,
+    managed: &BTreeSet<u32>,
+) -> Result<Vec<(u32, Saturation)>, BackendError>
+where
+    I: IntoIterator<Item = u32>,
+    F: FnMut(u32) -> bool,
+{
+    let mut ids: Vec<u32> = ids.into_iter().collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let known = ids.clone();
+    let named: Vec<(u32, Saturation)> = levels
+        .outputs
+        .iter()
+        .filter_map(|(name, saturation)| {
+            let id: u32 = name.parse().ok()?;
+            ids.binary_search(&id).ok().map(|_| (id, *saturation))
+        })
+        .collect();
+    let rest = resolve_target_ids(&satur8_core::all_outputs(), ids, is_active)?;
+    let mut plan: Vec<(u32, Saturation)> = rest
+        .into_iter()
+        .filter(|id| !named.iter().any(|(named_id, _)| named_id == id))
+        .map(|id| (id, levels.base))
+        .collect();
+    plan.extend(named);
+    for &id in managed {
+        if known.binary_search(&id).is_ok() && !plan.iter().any(|(planned, _)| *planned == id) {
+            plan.push((id, levels.base));
+        }
+    }
+    plan.sort_by_key(|(id, _)| *id);
+    Ok(plan)
+}
+
+/// Record what was committed: a CRTC at 1.0 needs no more care, any other
+/// level is remembered so a later picture can put it back.
+fn remember(managed: &mut BTreeSet<u32>, committed: &[(u32, Saturation)]) {
+    for &(id, saturation) in committed {
+        if saturation.is_identity() {
+            managed.remove(&id);
+        } else {
+            managed.insert(id);
+        }
+    }
+}
+
+/// Commit each planned level, trying every CRTC even when one fails.
+fn apply_plan<F>(plan: Vec<(u32, Saturation)>, mut set_ctm: F) -> Result<(), BackendError>
+where
+    F: FnMut(u32, Saturation) -> Result<()>,
+{
+    let failures: Vec<String> = plan
+        .into_iter()
+        .filter_map(|(id, saturation)| {
+            set_ctm(id, saturation)
+                .err()
+                .map(|error| format!("CRTC {id}: {error:#}"))
+        })
+        .collect();
+    if !failures.is_empty() {
+        return Err(BackendError::Apply(format!(
+            "CTM commit failed for {}",
+            failures.join("; ")
+        )));
+    }
+    Ok(())
+}
+
 /// Walk every CRTC and keep the ones exposing a "CTM" property.
 fn discover_ctm_crtcs(card: &Card) -> Result<HashMap<u32, CtmCrtc>> {
     let resources = card
@@ -289,17 +381,61 @@ impl Backend for DrmCtmBackend {
     }
 
     fn apply(&mut self, output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+        // Every output, `reset` included, goes through the picture so a CRTC
+        // left at another level while inactive is put back too.
+        if output.id == satur8_core::levels::ALL_OUTPUTS {
+            return self.apply_levels(&Levels::uniform(saturation));
+        }
         let targets = self.resolve_targets(output)?;
+        let ids: Vec<u32> = targets.iter().map(|target| target.crtc.into()).collect();
         apply_to_targets(
             targets,
             saturation,
             |target| target.crtc.into(),
             |target, saturation| self.set_crtc_ctm(target, saturation),
-        )
+        )?;
+        let committed: Vec<(u32, Saturation)> =
+            ids.into_iter().map(|id| (id, saturation)).collect();
+        remember(&mut self.managed, &committed);
+        Ok(())
     }
 
     fn reset(&mut self, output: &Output) -> Result<(), BackendError> {
         self.apply(output, Saturation::IDENTITY)
+    }
+
+    /// Each CRTC has its own CTM, so outputs can differ.
+    fn per_output(&self) -> bool {
+        true
+    }
+
+    fn apply_levels(&mut self, levels: &Levels) -> Result<(), BackendError> {
+        let crtcs = &self.crtcs;
+        self.managed.retain(|id| crtcs.contains_key(id));
+        let plan = plan_levels(
+            levels,
+            self.crtcs.keys().copied(),
+            |id| {
+                self.crtcs
+                    .get(&id)
+                    .map(|c| self.crtc_is_active(c.crtc))
+                    .unwrap_or(false)
+            },
+            &self.managed,
+        )?;
+        let mut committed = Vec::new();
+        let result = apply_plan(plan, |id, saturation| {
+            let result = match self.crtcs.get(&id) {
+                Some(target) => self.set_crtc_ctm(target, saturation),
+                None => bail!("CRTC {id} has no CTM property"),
+            };
+            if result.is_ok() {
+                committed.push((id, saturation));
+            }
+            result
+        });
+        remember(&mut self.managed, &committed);
+        result
     }
 }
 
@@ -434,5 +570,153 @@ mod tests {
         assert!(err.to_string().contains("CRTC 42"));
         assert!(err.to_string().contains("simulated commit failure on 31"));
         assert!(err.to_string().contains("simulated commit failure on 42"));
+    }
+
+    fn levels(base: f32, outputs: &[(&str, f32)]) -> Levels {
+        Levels::new(
+            Saturation::new(base),
+            outputs
+                .iter()
+                .map(|(name, value)| (name.to_string(), Saturation::new(*value))),
+        )
+    }
+
+    fn plan(levels: &Levels, active: &[u32]) -> Vec<(u32, f32)> {
+        plan_with(levels, active, &BTreeSet::new())
+    }
+
+    fn plan_with(levels: &Levels, active: &[u32], managed: &BTreeSet<u32>) -> Vec<(u32, f32)> {
+        plan_levels(levels, [42, 31, 73], |id| active.contains(&id), managed)
+            .unwrap()
+            .into_iter()
+            .map(|(id, saturation)| (id, saturation.get()))
+            .collect()
+    }
+
+    /// The same commits as `apply` on `"all"`: every active CRTC, or every
+    /// CTM CRTC when none is active.
+    #[test]
+    fn a_uniform_picture_sets_the_crtcs_that_all_reaches() {
+        assert_eq!(plan(&levels(1.5, &[]), &[31, 73]), [(31, 1.5), (73, 1.5)]);
+        assert_eq!(
+            plan(&levels(1.5, &[]), &[]),
+            [(31, 1.5), (42, 1.5), (73, 1.5)]
+        );
+    }
+
+    /// Pins the v0.4.1 behavior for a profile that names CRTCs: the profile's
+    /// value reaches only the named ones. The others show the desktop level.
+    #[test]
+    fn a_profile_naming_crtcs_changes_only_those_crtcs() {
+        assert_eq!(
+            plan(&levels(1.0, &[("42", 1.6)]), &[31, 42, 73]),
+            [(31, 1.0), (42, 1.6), (73, 1.0)]
+        );
+        assert_eq!(
+            plan(&levels(1.0, &[("31", 1.6), ("73", 1.6)]), &[31, 42, 73]),
+            [(31, 1.6), (42, 1.0), (73, 1.6)]
+        );
+    }
+
+    #[test]
+    fn a_named_crtc_is_set_even_when_it_is_not_active() {
+        assert_eq!(
+            plan(&levels(1.0, &[("42", 1.6)]), &[31]),
+            [(31, 1.0), (42, 1.6)]
+        );
+    }
+
+    #[test]
+    fn names_that_are_not_ctm_crtcs_here_are_skipped() {
+        assert_eq!(
+            plan(&levels(1.0, &[("99", 1.6), ("DP-1", 1.6)]), &[31, 42, 73]),
+            [(31, 1.0), (42, 1.0), (73, 1.0)]
+        );
+    }
+
+    #[test]
+    fn each_crtc_gets_its_own_desktop_level_back() {
+        assert_eq!(
+            plan(&levels(1.25, &[("73", 0.85)]), &[31, 42, 73]),
+            [(31, 1.25), (42, 1.25), (73, 0.85)]
+        );
+    }
+
+    #[test]
+    fn a_picture_with_no_ctm_crtcs_is_an_error() {
+        let err = plan_levels(&levels(1.5, &[]), [], |_| false, &BTreeSet::new()).unwrap_err();
+        assert!(err.to_string().contains("no CTM-capable CRTC available"));
+    }
+
+    #[test]
+    fn apply_plan_tries_every_crtc_and_names_the_failures() {
+        let mut attempted = Vec::new();
+        let err = apply_plan(
+            vec![(31, Saturation::new(1.0)), (42, Saturation::new(1.6))],
+            |id, saturation| {
+                attempted.push((id, saturation.get()));
+                if id == 31 {
+                    anyhow::bail!("simulated commit failure");
+                }
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(attempted, vec![(31, 1.0), (42, 1.6)]);
+        assert!(err
+            .to_string()
+            .contains("CRTC 31: simulated commit failure"));
+    }
+
+    /// The review finding's sequence: a profile names an inactive CRTC, then
+    /// the next picture no longer names it. It must be put back to the base,
+    /// although "all" does not reach it.
+    #[test]
+    fn a_crtc_left_at_another_level_while_inactive_is_put_back() {
+        let mut managed = BTreeSet::new();
+        let first = plan_levels(
+            &levels(1.0, &[("42", 1.6)]),
+            [31, 42, 73],
+            |id| id == 31,
+            &managed,
+        )
+        .unwrap();
+        remember(&mut managed, &first);
+        assert!(managed.contains(&42));
+
+        assert_eq!(
+            plan_with(&levels(1.25, &[]), &[31], &managed),
+            [(31, 1.25), (42, 1.25)]
+        );
+    }
+
+    #[test]
+    fn a_remembered_crtc_that_is_gone_from_the_device_is_skipped() {
+        let managed = BTreeSet::from([99]);
+        assert_eq!(plan_with(&levels(1.0, &[]), &[31], &managed), [(31, 1.0)]);
+    }
+
+    #[test]
+    fn an_unchanged_picture_clears_what_is_remembered() {
+        let mut managed = BTreeSet::from([42, 73]);
+        let plan = plan_levels(&levels(1.0, &[]), [31, 42, 73], |id| id == 31, &managed).unwrap();
+        assert_eq!(
+            plan.iter()
+                .map(|(id, s)| (*id, s.get()))
+                .collect::<Vec<_>>(),
+            [(31, 1.0), (42, 1.0), (73, 1.0)]
+        );
+        remember(&mut managed, &plan);
+        assert!(managed.is_empty());
+    }
+
+    #[test]
+    fn remember_keeps_only_crtcs_at_another_level() {
+        let mut managed = BTreeSet::new();
+        remember(
+            &mut managed,
+            &[(31, Saturation::new(1.5)), (42, Saturation::IDENTITY)],
+        );
+        assert_eq!(managed, BTreeSet::from([31]));
     }
 }
