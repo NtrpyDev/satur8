@@ -112,9 +112,11 @@ fn deserialize_optional_saturation<'de, D>(deserializer: D) -> Result<Option<f32
 where
     D: Deserializer<'de>,
 {
+    // Keep the clamped value, so a hand-written number outside the range is
+    // reported as the level that is actually shown.
     let value = f32::deserialize(deserializer)?;
-    Saturation::try_new(value).map_err(serde::de::Error::custom)?;
-    Ok(Some(value))
+    let clamped = Saturation::try_new(value).map_err(serde::de::Error::custom)?;
+    Ok(Some(clamped.get()))
 }
 
 fn deserialize_saturation<'de, D>(deserializer: D) -> Result<f32, D::Error>
@@ -516,6 +518,15 @@ another_one = 3
             Profiles::from_toml("[[profile]]\nname = 'bad'\nsaturation = inf\nexe = 'bad'")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn an_out_of_range_output_default_loads_clamped() {
+        let high = Profiles::from_toml("[output.\"DP-2\"]\ndefault_saturation = 9.0").unwrap();
+        assert_eq!(high.outputs["DP-2"].default_saturation, Some(4.0));
+        let low = Profiles::from_toml("[output.\"DP-2\"]\ndefault_saturation = -1.0").unwrap();
+        assert_eq!(low.outputs["DP-2"].default_saturation, Some(0.0));
+        assert!(Profiles::from_toml("[output.\"DP-2\"]\ndefault_saturation = nan").is_err());
     }
 
     #[test]
