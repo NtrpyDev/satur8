@@ -4,7 +4,8 @@ name: release
 # the GitHub release for that tag. The source archive is the trust anchor: it is
 # deterministic and is what the Arch (PKGBUILD) and Fedora (spec) packaging fetch
 # and checksum. The Linux binary tarball is the convenience download the website
-# serves, built from portable parts by build-tarball.yml.
+# serves, built from portable parts by build-tarball.yml. The Decky plugin ZIP
+# (decky-plugin/) is built by build-decky-plugin.yml and attached beside them.
 #
 # A run started by hand with dry_run set builds and tests everything and
 # publishes nothing: every step that attaches files to a release, and the
@@ -110,6 +111,37 @@ jobs:
             target/dist/satur8-v*-linux-x86_64.tar.gz.sha256
             target/dist/satur8-linux-x86_64.tar.gz
             target/dist/satur8-linux-x86_64.tar.gz.sha256
+
+  decky-plugin:
+    name: decky plugin
+    # Builds and tests the plugin ZIP; publishes nothing.
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-decky-plugin.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+
+  decky-plugin-attach:
+    name: decky plugin attach
+    # After source-archive, so the release already has its title and notes.
+    # satur8-decky-plugin.zip must stay the only .zip on the release: DeckyHub
+    # lists a plugin whose release has exactly one plugin ZIP, so no second
+    # copy under a versioned name and no other .zip file is attached anywhere
+    # in this workflow.
+    needs: [source-archive, decky-plugin]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.decky-plugin.outputs.artifact }}
+          path: target/dist
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: target/dist/satur8-decky-plugin.zip
 
   fedora-copr:
     name: Fedora COPR build
