@@ -61,6 +61,14 @@ fn limited_output(
         .map(str::to_string)
 }
 
+/// Whether a reload shows the desktop picture now: only with no profile
+/// applied, and only when the new file resolves to a different desktop than the
+/// old one. An unrelated edit then leaves the screen alone, so a manual
+/// `satur8 set` or the app's live slider value is not wiped by it.
+fn reload_shows_desktop(profile_active: bool, old: &Levels, new: &Levels) -> bool {
+    !profile_active && old != new
+}
+
 /// What the profile already applied, so a repeated report is a no-op and a
 /// move to another output is a change.
 #[derive(Debug, Clone, Copy, Default)]
@@ -246,6 +254,9 @@ struct Daemon {
     /// Notes already logged since the profiles were last loaded, so each is
     /// logged once per profile and reason.
     logged_notes: Vec<Note>,
+    /// The desktop picture failed to apply, so the next focus report with no
+    /// profile tries again.
+    desktop_pending: bool,
 }
 
 impl Daemon {
@@ -262,6 +273,7 @@ impl Daemon {
             last_focused: String::new(),
             last_activation: None,
             logged_notes: Vec::new(),
+            desktop_pending: false,
         }
     }
 
@@ -276,6 +288,7 @@ impl Daemon {
             last_focused: String::new(),
             last_activation: None,
             logged_notes: Vec::new(),
+            desktop_pending: false,
         }
     }
 
@@ -338,6 +351,10 @@ impl Daemon {
                 self.invalidate_current();
                 self.restore_default();
             }
+            FocusAction::None if self.current.is_none() && self.desktop_pending => {
+                eprintln!("satur8-daemon: retrying the desktop picture");
+                self.restore_default();
+            }
             FocusAction::None => {}
         }
     }
@@ -381,7 +398,8 @@ impl Daemon {
         self.restore_default();
     }
 
-    /// Put the desktop back, logging a failure and any notes.
+    /// Put the desktop back, logging a failure and any notes. A failure is
+    /// tried again at the next focus report with no profile.
     fn restore_default(&mut self) {
         let result = self
             .backend
@@ -389,8 +407,14 @@ impl Daemon {
             .expect("backend state mutex poisoned")
             .restore(&self.profiles);
         match result {
-            Ok(notes) => self.log_notes(notes),
-            Err(error) => eprintln!("satur8-daemon: restore failed: {error}"),
+            Ok(notes) => {
+                self.desktop_pending = false;
+                self.log_notes(notes);
+            }
+            Err(error) => {
+                self.desktop_pending = true;
+                eprintln!("satur8-daemon: restore failed: {error}");
+            }
         }
     }
 
@@ -438,9 +462,10 @@ impl Daemon {
     /// now. Nothing is applied before any focus was seen or while no backend is
     /// active.
     fn replace_profiles(&mut self, profiles: Profiles) {
-        self.profiles = profiles;
+        let old_profiles = std::mem::replace(&mut self.profiles, profiles);
         self.logged_notes.clear();
-        let backend_active = match self
+        // The desktop picture before and after, for the active backend.
+        let desktops = match self
             .backend
             .lock()
             .expect("backend state mutex poisoned")
@@ -448,29 +473,32 @@ impl Daemon {
             .as_mut()
         {
             Some(guard) => {
-                guard.set_restore_to(desktop_levels(&self.profiles, guard.backend()));
-                true
+                let old = desktop_levels(&old_profiles, guard.backend());
+                let new = desktop_levels(&self.profiles, guard.backend());
+                guard.set_restore_to(new.clone());
+                Some((old, new))
             }
-            None => false,
+            None => None,
         };
         eprintln!(
             "satur8-daemon: reloaded, {} profile(s)",
             self.profiles.profiles.len()
         );
-        if !backend_active {
+        let Some((old_desktop, new_desktop)) = desktops else {
             return;
-        }
-        let Some((class, exe, output)) = self.last_activation.as_ref().map(|activation| {
+        };
+        let activation = self.last_activation.as_ref().map(|activation| {
             (
                 activation.class.clone(),
                 activation.exe.clone(),
                 activation.output.clone(),
             )
-        }) else {
-            return;
-        };
-
-        let target = match_focused(&self.profiles, &class, exe.as_deref()).cloned();
+        });
+        let (class, exe, output) = activation.clone().unwrap_or_default();
+        let target = activation
+            .as_ref()
+            .and_then(|(class, exe, _)| match_focused(&self.profiles, class, exe.as_deref()))
+            .cloned();
         match (target, self.current.clone()) {
             (Some(profile), current) => {
                 let name = profile.name.clone();
@@ -507,7 +535,12 @@ impl Daemon {
                 self.invalidate_current();
                 self.restore_default();
             }
-            (None, None) => {}
+            (None, None) => {
+                if reload_shows_desktop(false, &old_desktop, &new_desktop) {
+                    eprintln!("satur8-daemon: the desktop settings changed -> showing them");
+                    self.restore_default();
+                }
+            }
         }
     }
 }
@@ -1388,6 +1421,146 @@ mod tests {
                 shown(1.0, &[("HDMI-A-1", 1.5)]),
                 shown(1.0, &[("HDMI-A-1", 2.0)])
             ]
+        );
+    }
+
+    #[test]
+    fn a_reload_shows_the_desktop_only_when_it_changed_and_no_profile_is_on() {
+        let one = Levels::uniform(Saturation::IDENTITY);
+        let other = Levels::new(
+            Saturation::IDENTITY,
+            [("HDMI-A-1".to_string(), Saturation::new(0.85))],
+        );
+        for (profile_active, old, new, expected) in [
+            (false, &one, &other, true),
+            (false, &other, &one, true),
+            (false, &one, &one, false),
+            (true, &one, &other, false),
+            (true, &one, &one, false),
+        ] {
+            assert_eq!(
+                reload_shows_desktop(profile_active, old, new),
+                expected,
+                "profile active {profile_active}, {old:?} -> {new:?}"
+            );
+        }
+    }
+
+    fn with_output_default(mut profiles: Profiles, name: &str, value: f32) -> Profiles {
+        profiles.outputs.insert(
+            name.into(),
+            OutputConfig {
+                default_saturation: Some(value),
+            },
+        );
+        profiles
+    }
+
+    #[test]
+    fn a_new_output_default_is_shown_when_no_profile_is_on() {
+        let (mut daemon, pictures) = per_output_setup(profiles());
+        daemon.react("desktop", 0);
+
+        daemon.replace_profiles(with_output_default(profiles(), "HDMI-A-1", 0.85));
+        // The same file again shows nothing new.
+        daemon.replace_profiles(with_output_default(profiles(), "HDMI-A-1", 0.85));
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [shown(1.0, &[("HDMI-A-1", 0.85)])]
+        );
+    }
+
+    #[test]
+    fn unsetting_an_output_default_puts_it_back_to_the_base() {
+        let (mut daemon, pictures) =
+            per_output_setup(with_output_default(profiles(), "HDMI-A-1", 0.85));
+        daemon.react("desktop", 0);
+
+        daemon.replace_profiles(profiles());
+
+        assert_eq!(*pictures.lock().unwrap(), [Shown::Reset]);
+    }
+
+    /// v0.4.1 applied nothing here until a profile was applied and restored;
+    /// only the desktop app's slider changed the screen, by itself.
+    #[test]
+    fn a_new_top_level_default_is_shown_when_no_profile_is_on() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("desktop", 0);
+
+        let mut updated = profiles();
+        updated.default_saturation = 1.25;
+        daemon.replace_profiles(updated);
+
+        assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.25)]);
+    }
+
+    #[test]
+    fn an_unrelated_edit_with_no_profile_on_changes_nothing() {
+        let (mut daemon, calls, _) = setup();
+        daemon.react("desktop", 0);
+
+        let mut updated = profiles();
+        updated.profiles[0].saturation = 2.0;
+        updated.profiles.push(Profile {
+            name: "other".into(),
+            enabled: true,
+            saturation: 1.8,
+            match_rule: MatchRule {
+                exe: Some("other-game".into()),
+                ..MatchRule::default()
+            },
+            outputs: vec![],
+        });
+        daemon.replace_profiles(updated);
+
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    /// With a profile on, the new desktop is the restore target; the profile's
+    /// own picture is applied again on reload, as always, and its untouched
+    /// outputs show the new desktop value at once, because the resolver builds
+    /// a limited profile picture on top of the desktop picture.
+    #[test]
+    fn a_desktop_change_with_a_profile_on_shows_on_its_untouched_outputs() {
+        let base = Profiles {
+            profile_outputs: ProfileOutputs::Focused,
+            ..profiles()
+        };
+        let (mut daemon, pictures) = per_output_setup(base.clone());
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+
+        daemon.replace_profiles(with_output_default(base, "DP-1", 0.9));
+        daemon.react_on("desktop", 0, Some("DP-1"));
+
+        assert_eq!(
+            *pictures.lock().unwrap(),
+            [
+                shown(1.0, &[("HDMI-A-1", 1.5)]),
+                shown(1.0, &[("DP-1", 0.9), ("HDMI-A-1", 1.5)]),
+                shown(1.0, &[("DP-1", 0.9)]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_desktop_change_is_tried_again_at_the_next_focus() {
+        let (mut daemon, calls, fail_apply) = setup();
+        daemon.react("desktop", 0);
+
+        fail_apply.store(true, Ordering::Release);
+        let mut updated = profiles();
+        updated.default_saturation = 1.25;
+        daemon.replace_profiles(updated);
+        fail_apply.store(false, Ordering::Release);
+        daemon.react("desktop", 0);
+        // Applied once it worked; nothing more after that.
+        daemon.react("desktop", 0);
+
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.25), Call::Apply("all", 1.25)]
         );
     }
 }
