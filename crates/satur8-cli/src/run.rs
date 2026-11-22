@@ -13,7 +13,7 @@
 use anyhow::{bail, Context, Result};
 use satur8_backend::{install_signal_handler, select_backend, RestoreGuard};
 use satur8_core::levels::{desktop_picture, profile_outputs_not_connected, profile_picture};
-use satur8_core::{Levels, Picture, Profile, Profiles, Saturation};
+use satur8_core::{Levels, Note, Picture, Profile, Profiles, Saturation};
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,6 +59,15 @@ fn launch_picture(profiles: &Profiles, resolved: &ResolvedSaturation, per_output
     }
 }
 
+/// What to tell the user in a `--via gamescope` mode, which shows one
+/// saturation on every output: the same notes the normal path prints for a
+/// backend that cannot target one output.
+fn one_level_notes(profiles: &Profiles, resolved: Option<&ResolvedSaturation>) -> Vec<Note> {
+    resolved
+        .map(|resolved| launch_picture(profiles, resolved, false).notes)
+        .unwrap_or_default()
+}
+
 pub fn run(args: RunArgs) -> Result<i32> {
     if args.command.is_empty() {
         bail!("nothing to run. Usage: satur8 run [--profile NAME | --saturation S] -- <command>");
@@ -69,6 +78,9 @@ pub fn run(args: RunArgs) -> Result<i32> {
 
     // SteamOS/Bazzite path: drive the running gamescope compositor at runtime.
     if args.via.as_deref() == Some("gamescope-native") {
+        for note in one_level_notes(&profiles, resolved.as_ref()) {
+            eprintln!("satur8: {note}");
+        }
         let sat = resolved
             .as_ref()
             .map(|resolved| resolved.saturation)
@@ -93,6 +105,9 @@ pub fn run(args: RunArgs) -> Result<i32> {
     // The gamescope fallback wraps the whole launch in a nested compositor and
     // exits with the game, so it bypasses the apply/restore backend entirely.
     if args.via.as_deref() == Some("gamescope") {
+        for note in one_level_notes(&profiles, resolved.as_ref()) {
+            eprintln!("satur8: {note}");
+        }
         let sat = resolved
             .as_ref()
             .map(|resolved| resolved.saturation)
@@ -402,5 +417,45 @@ mod tests {
         let picture = launch_picture(&profiles(), &resolved, true);
         assert_eq!(picture.levels, Levels::uniform(Saturation::new(2.2)));
         assert!(picture.notes.is_empty());
+    }
+
+    #[test]
+    fn the_gamescope_modes_say_when_a_profile_asks_for_one_output() {
+        let profiles = profiles();
+        let named = resolve_saturation(&profiles, &args(Some("named"), None, "/games/x"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            one_level_notes(&profiles, Some(&named)),
+            [Note::ProfileChangesEveryOutput {
+                profile: "named".into()
+            }]
+        );
+
+        let mut focused = profiles.clone();
+        focused.profile_outputs = satur8_core::ProfileOutputs::Focused;
+        let auto = resolve_saturation(&focused, &args(None, None, "/games/auto-game"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            one_level_notes(&focused, Some(&auto)),
+            [Note::ProfileChangesEveryOutput {
+                profile: "auto".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn the_gamescope_modes_say_nothing_extra_without_output_settings() {
+        let profiles = profiles();
+        let auto = resolve_saturation(&profiles, &args(None, None, "/games/auto-game"))
+            .unwrap()
+            .unwrap();
+        assert!(one_level_notes(&profiles, Some(&auto)).is_empty());
+        let explicit = resolve_saturation(&profiles, &args(None, Some(2.0), "/games/x"))
+            .unwrap()
+            .unwrap();
+        assert!(one_level_notes(&profiles, Some(&explicit)).is_empty());
+        assert!(one_level_notes(&profiles, None).is_empty());
     }
 }
