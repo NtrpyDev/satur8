@@ -140,6 +140,9 @@ struct Daemon {
     profiles: Profiles,
     backend: Arc<Mutex<BackendState>>,
     current: Option<String>,
+    /// What the focus script last reported: the resolved executable when the
+    /// pid could be resolved, otherwise the window class. Read by the GUI.
+    last_focused: String,
 }
 
 impl Daemon {
@@ -152,6 +155,7 @@ impl Daemon {
             profiles,
             backend,
             current: None,
+            last_focused: String::new(),
         }
     }
 
@@ -162,6 +166,7 @@ impl Daemon {
             profiles,
             backend: Arc::new(Mutex::new(BackendState::with_backend(backend, restore_to))),
             current: None,
+            last_focused: String::new(),
         }
     }
 
@@ -171,6 +176,7 @@ impl Daemon {
             .expect("backend state mutex poisoned")
             .try_detect(self.profiles.default_saturation());
         let exe = (pid != 0).then(|| satur8_core::resolve_exe(pid)).flatten();
+        self.last_focused = exe.clone().unwrap_or_else(|| class.to_string());
         match decide_focus_action(
             self.current.as_deref(),
             class,
@@ -307,6 +313,13 @@ impl Daemon {
     #[zbus(property)]
     fn active_profile(&self) -> String {
         self.current.clone().unwrap_or_default()
+    }
+
+    /// The window the focus script last reported (executable or window class;
+    /// empty when focus went to the desktop or nothing was reported yet).
+    #[zbus(property)]
+    fn last_focused(&self) -> String {
+        self.last_focused.clone()
     }
 }
 
@@ -486,6 +499,16 @@ mod tests {
         daemon.react("game.class", 0);
         assert_eq!(daemon.current.as_deref(), Some("game"));
         assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.5)]);
+    }
+
+    #[test]
+    fn remembers_the_last_focused_window_for_the_gui() {
+        let (mut daemon, _, _) = setup();
+        assert_eq!(daemon.last_focused(), "");
+        daemon.react("game.class", 0);
+        assert_eq!(daemon.last_focused(), "game.class");
+        daemon.react("", 0);
+        assert_eq!(daemon.last_focused(), "");
     }
 
     #[test]

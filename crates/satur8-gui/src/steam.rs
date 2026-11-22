@@ -54,17 +54,49 @@ fn first_existing(dir: &Path, names: &[&str]) -> Option<PathBuf> {
     None
 }
 
-/// Square-ish art for the row tile (portrait box art looks best as a tile).
-pub fn icon_path(app_id: u32) -> Option<PathBuf> {
-    let dir = cache_dir(app_id)?;
-    first_existing(&dir, &["library_600x900.jpg", "header.jpg", "logo.png"])
+/// Steam's small square game icon. Steam caches it at the top of the app's
+/// librarycache folder under a 40-character hex name, e.g. `8dbc71...a355.jpg`.
+fn game_icon(dir: &Path) -> Option<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path.extension().is_some_and(|ext| ext == "jpg")
+                && path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|stem| {
+                        stem.len() == 40 && stem.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
+        })
+        .collect();
+    found.sort();
+    found.into_iter().next()
 }
 
-/// Wide art for the before/after preview (the hero banner / header).
-pub fn preview_path(app_id: u32) -> Option<PathBuf> {
+/// Newer Steam clients keep some art in hash-named subfolders of the app's
+/// librarycache folder instead of at its top level.
+fn first_existing_in_subdirs(dir: &Path, names: &[&str]) -> Option<PathBuf> {
+    let mut subdirs: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    subdirs.sort();
+    names
+        .iter()
+        .find_map(|name| subdirs.iter().map(|d| d.join(name)).find(|p| p.is_file()))
+}
+
+/// Art for the card tile: Steam's square game icon first, then the earlier
+/// box art / header / logo fallbacks, at the top level or in a subfolder.
+pub fn icon_path(app_id: u32) -> Option<PathBuf> {
     let dir = cache_dir(app_id)?;
-    first_existing(
-        &dir,
-        &["header.jpg", "library_hero.jpg", "library_600x900.jpg"],
-    )
+    const FALLBACKS: [&str; 3] = ["library_600x900.jpg", "header.jpg", "logo.png"];
+    game_icon(&dir)
+        .or_else(|| first_existing(&dir, &FALLBACKS))
+        .or_else(|| first_existing_in_subdirs(&dir, &FALLBACKS))
 }

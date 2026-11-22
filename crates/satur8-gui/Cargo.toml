@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 satur8-core = { workspace = true }
 satur8-backend = { workspace = true }
+satur8-kwin = { workspace = true }
 slint = "1.16"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 zbus = { workspace = true }
