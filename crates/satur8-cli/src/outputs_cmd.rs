@@ -53,19 +53,29 @@ pub enum FollowMode {
 
 pub fn run(cmd: OutputsCmd) -> Result<()> {
     let mut profiles = config::load_profiles()?;
-    let (message, name) = match cmd {
+    // Whether the edit asks for something only a per-output backend can do.
+    // Removing an output's value, or going back to every output, does not.
+    let (message, name, asks_per_output) = match cmd {
         OutputsCmd::Default {
             name,
             saturation,
             unset,
         } => {
             let value = if unset { None } else { saturation };
-            (set_output_default(&mut profiles, &name, value)?, Some(name))
+            let message = set_output_default(&mut profiles, &name, value)?;
+            (message, Some(name), value.is_some())
         }
-        OutputsCmd::Follow { mode } => (set_follow(&mut profiles, mode), None),
+        OutputsCmd::Follow { mode } => (
+            set_follow(&mut profiles, mode),
+            None,
+            follow_asks_per_output(mode),
+        ),
     };
     config::save_profiles(&profiles)?;
     println!("{message}");
+    if !asks_per_output {
+        return Ok(());
+    }
     if let Ok(backend) = select_backend() {
         let outputs = backend.outputs();
         if let Some(note) = backend_note(
@@ -127,6 +137,12 @@ pub fn set_output_default(
     }
 }
 
+/// Whether a follow mode needs a backend that can target one output. `all` is
+/// what every backend already does.
+pub fn follow_asks_per_output(mode: FollowMode) -> bool {
+    mode == FollowMode::Focused
+}
+
 /// Set what a game profile that lists no outputs changes.
 pub fn set_follow(profiles: &mut Profiles, mode: FollowMode) -> String {
     profiles.profile_outputs = match mode {
@@ -142,7 +158,8 @@ pub fn set_follow(profiles: &mut Profiles, mode: FollowMode) -> String {
 }
 
 /// What to add when this backend cannot use the setting, or `name` is not
-/// connected now. The setting is saved either way.
+/// connected now. The setting is saved either way. Only for an edit that asks
+/// for per-output behavior: `follow all` and `--unset` work on every backend.
 pub fn backend_note(
     backend: &str,
     per_output: bool,
@@ -190,6 +207,12 @@ mod tests {
         assert!(set_output_default(&mut profiles, "all", Some(1.2)).is_err());
         assert!(set_output_default(&mut profiles, "DP-2", Some(f32::NAN)).is_err());
         assert!(profiles.outputs.is_empty());
+    }
+
+    #[test]
+    fn only_following_the_focused_output_asks_for_a_per_output_backend() {
+        assert!(follow_asks_per_output(FollowMode::Focused));
+        assert!(!follow_asks_per_output(FollowMode::All));
     }
 
     #[test]
