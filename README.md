@@ -89,27 +89,24 @@ On a Steam Deck, see [Steam Deck](#steam-deck).
 
 ### Bazzite
 
-Satur8 has not been run on a Bazzite device. Use the release tarball above without `--system`: the installer writes only to your home folder, which Bazzite keeps across updates, and it needs no root. `--system` is refused on Bazzite and other image-based systems.
+Satur8 has been run on a real Bazzite install in a virtual machine (the KDE desktop edition, Bazzite stable 45.20261117.1, KWin 6.8.3, software rendering), not on a Bazzite device with its own GPU. Use the release tarball above without `--system`: the installer writes only to your home folder, which Bazzite keeps across updates, and it needs no root. `--system` is refused on Bazzite and other image-based systems.
 
 - Steam Game Mode (the `bazzite-deck` images) uses the same gamescope color and focus features as the Steam Deck. The installer and background service, in v0.4.0 and again in v0.4.1, were run against Bazzite's own gamescope build (3.17.0-ogc1, in Bazzite stable 45.20261117.1) in a container, not on a Bazzite device: the service found gamescope, loaded a profile's table when that app took focus, and removed it at the home window and when stopped. Setup is the same as on the [Steam Deck](#steam-deck).
-- KDE Plasma Desktop Mode gets the bundled effect built in Fedora 45's own packages for KWin 6.8.3 (`fedora45-6.8.3`), which Bazzite stable uses. In the Bazzite container the installer picked it and installed it per user; it has not been run on a Bazzite desktop. Bazzite has no build tools, so after a KWin update the effect stays off until you install a newer Satur8 release that includes that KWin version. In the container, a stand-in KWin one patch newer made the installer skip the effect with the reason and install everything else.
+- KDE Plasma Desktop Mode gets the bundled effect built in Fedora 45's own packages for KWin 6.8.3 (`fedora45-6.8.3`), which Bazzite stable uses. On the real install, with v0.4.0 and v0.4.1: the installer picked that effect, `satur8 on 2.0`, `satur8 set 0` and `satur8 off` changed a test window as the saturation math predicts, per-game switching followed window focus with the background service running as the installed service, `satur8 repair` put the right effect back after a wrong file was placed there, and after a reboot with nobody touching it the service and effect came back. Bazzite has no build tools, so after a KWin update the effect stays off until a Satur8 release bundles an effect for that KWin; no system update was on offer during the test, so that case was not seen.
 - The GNOME images run GNOME 51. From v0.4.1, the Satur8 GNOME Shell extension lists GNOME 51. It was checked on GNOME Shell 51.1 headless in a Fedora 45 container, not on a Bazzite device or a GNOME 51 desktop.
 - The COPR package is built for Fedora 45, which current Bazzite is based on. Installing it on Bazzite by layering it with `rpm-ostree` has not been tested, and Bazzite's documentation treats layering as a last resort.
 
 ## Quick start
 
-Start the focus daemon:
+Turn on automatic per-game switching:
 
 ```sh
-systemctl --user enable --now satur8-daemon
+satur8 auto on
 ```
 
-On KDE Plasma, turn on the KWin focus script once. It tells the daemon which window is focused, and it is off until you enable it:
+That starts the focus daemon now and at login. On KDE Plasma it also turns on the KWin focus script, which tells the daemon which window is focused, and asks KWin to load it. It is what the switch on the desktop app's Status page does; `satur8 auto off` reverses it and `satur8 auto status` says whether it is on.
 
-```sh
-kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
-qdbus6 org.kde.KWin /KWin reconfigure
-```
+The same by hand, if you need it: `systemctl --user enable --now satur8-daemon`, then on KDE Plasma `kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true` and `qdbus6 org.kde.KWin /KWin reconfigure` (on Fedora and Bazzite the last tool is named `qdbus-qt6`; the installer prints the command with the name your system has).
 
 Open the desktop app, add a game profile, and set its saturation:
 
@@ -154,9 +151,30 @@ packaging/install.sh --enable-daemon
 
 Without `--enable-daemon`, the installer prints the command that turns the service on. Everything is installed in your home folder, so it survives SteamOS updates. `--system` is refused on SteamOS. On SteamOS 3.9 the installer prints `Using bundled KWin effect for ABI 6.7.3 (steamos-6.7.3)`; that effect is what Desktop Mode uses. If the installer says the KWin effect was not installed, Game Mode still works without it.
 
+From v0.5.1 there is also a [Decky Loader](https://decky.xyz) plugin, for Decky users who want to stay in Game Mode. Its panel in the Quick Access Menu says whether Satur8 is installed and which version, installs or updates it (it downloads the release from GitHub, checks its SHA-256, and runs this same installer as your user with the background service turned on), reinstalls it as a repair, and opens the app. To get it, open Decky's settings, then Developer, then Install Plugin from URL, and enter `https://github.com/NtrpyDev/satur8/releases/latest/download/satur8-decky-plugin.zip`. It is not on the official Decky store; if DeckyHub lists it, it can be installed from there too. Checked on a Steam Deck OLED with Decky Loader v3.3.1: the panel loads and Open Satur8 starts the app. Installing, updating and reinstalling from the plugin can only be checked against a published release, so that is checked after v0.5.1 is out. Its source and details are in [decky-plugin/](decky-plugin/).
+
 The commands are installed to `~/.local/bin`. An SSH login on SteamOS does not have that folder on its PATH, so over SSH a plain `satur8` gives "command not found"; the installer prints a hint about this. The examples below use the full path, `~/.local/bin/satur8`, which works everywhere. (Konsole in Desktop Mode was not checked.)
 
-### Add a game
+### The app in Game Mode
+
+In Game Mode, Steam shows only programs started from its library, so the app needs an entry there. On a system with a Steam gaming session the installer asks Steam to add it (`satur8 steam-shortcut add`; `--no-steam-entry` skips this). It never adds a second entry, and it says what it did or why it could not, for example when Steam is not running. Then open **Satur8** from the Non-Steam section of the library. No Desktop Mode, terminal or typing is needed after the install.
+
+There the app has its own layout for the Deck's screen and controls, not the desktop window made smaller:
+
+- **General** is the first row: Steam's own screens and every game without a row of its own. It is what the desktop app calls Desktop vibrance.
+- **Add a game** lists your installed Steam games by name. A game that is running is first and says so. Pick one and it gets a row, matched by its Steam AppID.
+- Each game has a row with its value, an on/off switch, a remove button that asks first, and a wide slider. Tap the track or drag along it; dragging up or down scrolls the page instead. A game whose row is switched off shows its normal colors, not the General value.
+- The Deck's buttons work: the D-pad or left stick moves a highlight, A selects (on a slider, A then left and right change it), B goes back or undoes, X turns the game on or off, Y opens the list, L1 and R1 change page, L2 and R2 change the row's slider by one. A bar along the bottom says what the buttons do at that moment.
+
+A game's setting shows while that game is on screen. While Satur8 itself is on screen you see General, so switch back to the game to see its setting.
+
+The entry's artwork is put in place by `satur8 steam-shortcut artwork`, and by the app the first time it is started from the library; Steam shows new artwork after it restarts. `satur8 steam-shortcut status` says whether the entry is there and with which AppID.
+
+What was checked: this layout was run on a virtual 1280x800 screen with a Steam Deck's Game Mode environment, with pointer presses and drags standing in for touch and keys standing in for the buttons, and started inside the Steam Linux Runtime container that Steam runs it in. It has not yet been run on a Deck, and the gamepad reader has not read a real pad. On a Deck, an earlier build confirmed the cause this layout fixes: the app used to open larger than the screen, so only its top left could be touched.
+
+If the buttons do nothing, create an empty file `~/.config/satur8/input-debug`, start the app from the library, press a few buttons, and look at `~/.local/state/satur8/input-debug.log`: it lists the input devices the app could open, which one it took for a gamepad, and each press it read.
+
+### Add a game from the command line
 
 List the installed Steam games, then add a profile by the game's name:
 
@@ -177,15 +195,17 @@ Matching by executable also works for Proton games. Use the Windows executable n
 
 A profile you add or change while the service runs takes effect right away, also for the game that is on screen.
 
-The Steam home screen and games without a profile get `default_saturation` from `~/.config/satur8/profiles.toml`. At 1.0, the default, Satur8 loads nothing there.
+The Steam home screen and games without a profile get `default_saturation` from `~/.config/satur8/profiles.toml`. At 1.0, the default, Satur8 loads nothing there. A game whose profile is disabled gets neither its profile's value nor `default_saturation`: it shows its normal colors (1.0).
 
 ### Automatic switching
 
-The background service does the switching. If you installed without `--enable-daemon`, turn it on with:
+The background service does the switching. If you installed without `--enable-daemon`, turn it on with the switch on the app's Status page, or with:
 
 ```sh
-systemctl --user enable --now satur8-daemon
+~/.local/bin/satur8 auto on
 ```
+
+By hand that is `systemctl --user enable --now satur8-daemon`.
 
 The service starts with the Game Mode session. This was checked by switching the Deck to Desktop Mode and back, and by restarting the Deck with v0.4.1 installed: with nobody touching it, the service was running in Game Mode about ten seconds after boot and Steam's color settings were unchanged.
 
@@ -213,13 +233,13 @@ Desktop Mode runs KDE Plasma, which applies Satur8 through its KWin effect. KWin
 
 After installing, switch to Desktop Mode once. KWin then loads the effect; no logout is needed beyond that switch. `~/.local/bin/satur8 on 2.0` and `~/.local/bin/satur8 off` then change the whole desktop.
 
-For per-game switching in Desktop Mode, turn on the KWin focus script once while the Deck is in Desktop Mode. These are the commands the installer prints:
+For per-game switching in Desktop Mode, turn it on once while the Deck is in Desktop Mode, with the switch on the app's Status page or with the command the installer prints:
 
 ```sh
-systemctl --user enable --now satur8-daemon
-kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true
-qdbus6 org.kde.KWin /KWin reconfigure
+~/.local/bin/satur8 auto on
 ```
+
+By hand that is `systemctl --user enable --now satur8-daemon`, `kwriteconfig6 --file kwinrc --group Plugins --key satur8-focusEnabled true` and `qdbus6 org.kde.KWin /KWin reconfigure`.
 
 A profile then applies while its window has focus, and the desktop comes back when you switch to another window. Desktop programs match by `--exe` or `--window-class`.
 
@@ -244,6 +264,8 @@ packaging/install.sh --uninstall
 
 This stops the service, removes Satur8's table, and removes the commands, the service and the table folder. It was checked on the Deck with a game running and its table loaded: the picture went back to normal. Your profiles in `~/.config/satur8/profiles.toml` are kept, so they come back if you reinstall.
 
+Satur8's entry stays in your Steam library, because Steam has no command to remove one; the uninstaller says so and takes Satur8's artwork off it. To remove the entry, select it in the Steam library, open its settings (the gear), then Manage, then "Remove non-Steam game from your library". (This part of the uninstaller was not run on a Deck.)
+
 ### Known: gamescope can abort when Game Mode ends
 
 On the tested Deck, gamescope sometimes aborts while Game Mode shuts down for the switch to Desktop Mode. The switch still completes. This happens without Satur8: in repeated trials a session that never had a Satur8 table aborted the same way (1 of 8 sessions without a table, 2 of 6 with one, too few to say whether a table changes the odds). All the aborts have one signature, two threads of gamescope 3.16.30.1 using the session's D-Bus connection at the same time during shutdown, and Satur8's Game Mode code does not use that connection. No abort was seen while a game was running.
@@ -252,7 +274,8 @@ On the tested Deck, gamescope sometimes aborts while Game Mode shuts down for th
 
 - HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged. A game presenting SDR does get the look: ELDEN RING through Proton, presenting SDR on the tested Deck, turned grayscale in gamescope's own screenshot.
 - An external display.
-- The desktop app (`satur8-gui`) on the Deck beyond starting it: it starts in Desktop Mode and shows the KWin backend active, but it was not clicked through.
+- The app's Game Mode layout on a Deck, with touch and with the controller (see [The app in Game Mode](#the-app-in-game-mode)).
+- The desktop app (`satur8-gui`) in Desktop Mode beyond starting it: it starts there and shows the KWin backend active, but it was not clicked through.
 - The `steamos-6.8.2` effect on a Deck running SteamOS 3.10 (it was only run headless, see above).
 - A Bazzite device (see [Bazzite](#bazzite)) and other systems that run a gamescope session.
 - gamescope versions other than 3.16.30.1.
@@ -284,7 +307,7 @@ Satur8 chooses the best available backend for your session. Zero per-frame cost 
 | GNOME Wayland | GNOME Shell shader extension | One compositor pass | Verified |
 | X11 with NVIDIA | NV-CONTROL Digital Vibrance | Zero | Verified |
 | Hyprland | `hyprctl` shader backend | One compositor pass | Verified |
-| DRM/KMS sessions | DRM CTM | Zero | Implemented |
+| DRM/KMS sessions (a console with no display server) | DRM CTM | Zero | Verified on a Steam Deck OLED's AMD GPU (2026-11-22) |
 | Steam Game Mode (Steam Deck) | gamescope look table, automatic | Reuses gamescope's color pipeline | Verified on a Steam Deck OLED, SteamOS 3.9.5, gamescope 3.16.30.1 (2026-11-21) |
 | Steam Game Mode (Bazzite) | gamescope look table, automatic | Reuses gamescope's color pipeline | Implemented |
 | gamescope (running compositor) | gamescope-native color atoms | Reuses existing gamescope | Verified |
@@ -307,10 +330,10 @@ The screenshots below show the Satur8 GUI.
 
 On the Main page you can:
 
-- Set the desktop vibrance, which is also the default when no game profile is active, and restore the desktop to normal.
-- Add a currently running game.
+- Set the desktop vibrance, which games without a profile also get, and restore the desktop to normal.
+- Add a game from one list of your games by name: installed Steam games, with any that is running first. Launchers and other background programs are not listed.
 - Set the saturation level per game.
-- Enable or disable a profile.
+- Enable or disable a profile. A game whose profile is disabled shows its normal colors, not the desktop vibrance.
 
 <img src="assets/readme/gui-status-v036.png" alt="Satur8 status page with health checks and settings" width="900">
 
@@ -337,6 +360,14 @@ Set or clear saturation now:
 satur8 on 1.75      # turn on at 1.75x (1.0 = unchanged, 0 = greyscale)
 satur8 off          # restore normal color
 satur8 set 2.0      # set an exact value
+```
+
+Turn automatic per-game switching on or off, the way the switch on the app's Status page does:
+
+```sh
+satur8 auto on      # the background service now and at login; on KDE Plasma also the KWin focus script
+satur8 auto off     # the reverse
+satur8 auto status  # say whether it is on
 ```
 
 Inspect the environment and backend:
@@ -367,7 +398,20 @@ satur8 profile remove cs2
 satur8 profile path
 ```
 
+A disabled profile still belongs to its game: while it is disabled the game shows its normal colors (1.0), not the default saturation. Remove the profile to give the game the default saturation again.
+
 A profile needs at least one match rule: `--exe`, `--window-class`, `--steam-app-id`, or `--steam-game`. `satur8 games` lists the installed Steam games and the profile each one uses (`--json` for scripts). `--steam-game` takes a game's name, part of it, or its AppID, and stores the AppID.
+
+Satur8's own entry in the Steam library, which is how the app is opened in Steam Game Mode (see [The app in Game Mode](#the-app-in-game-mode)):
+
+```sh
+satur8 steam-shortcut status             # is the entry there, and with which AppID
+satur8 steam-shortcut add                # ask Steam to add it, unless it is there
+satur8 steam-shortcut artwork            # put its artwork in place
+satur8 steam-shortcut artwork --remove   # take that artwork away again
+```
+
+`add` uses SteamOS's `steamos-add-to-steam` and needs Steam running; on a system without that tool it says how to add the entry in Steam. These commands read Steam's shortcuts file and never write it.
 
 ### Multiple monitors
 
