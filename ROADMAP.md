@@ -235,7 +235,7 @@ Not blocking the packaging spine; picked up as time allows.
 - [x] Steam Deck: pick a game from a list of installed Steam games instead of
       typing its AppID, on the command line: `satur8 games` lists them and
       `satur8 profile add NAME SATURATION --steam-game NAME` adds a profile by
-      the game's name.
+      the game's name. Done in v0.4.0 and run on a Steam Deck.
 - [ ] Steam Deck: the same installed-games picker in the desktop app.
 - [ ] Steam Deck: the desktop app in Game Mode.
 - [ ] Steam Deck: a Decky panel.

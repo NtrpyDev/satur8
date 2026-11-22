@@ -3,12 +3,6 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
-## Unreleased
-
-- `satur8 games` lists the installed Steam games with each game's AppID and
-  profile, and `satur8 profile add NAME SATURATION --steam-game NAME` adds a
-  profile by the game's name instead of its AppID.
-
 ## v0.4.0 - 2026-11-22
 
 Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.
@@ -26,6 +20,10 @@ Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.
   away and back.
 - The Steam home screen and games without a profile get `default_saturation`
   from `profiles.toml`. At 1.0, the default, Satur8 loads nothing there.
+- `satur8 games` lists the installed Steam games with each game's AppID and
+  profile, and `satur8 profile add NAME SATURATION --steam-game NAME` adds a
+  profile by the game's name, part of it, or its AppID, so you do not have to
+  look the AppID up. Steam's own runtimes and Proton are left out of the list.
 - Profiles match a game by Steam AppID (`satur8 profile add NAME SATURATION
   --steam-app-id N`) or by executable, including the Windows executable name of
   a Proton game such as `Sushiamo.exe`.
