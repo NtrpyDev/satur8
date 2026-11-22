@@ -5,6 +5,15 @@ GitHub release notes for that tag.
 
 ## Unreleased
 
+- When KDE still runs the Satur8 effect it loaded before an upgrade, which
+  happens until the next login, `satur8 outputs` says so and that one log out
+  and back in turns on per-output values, instead of saying KDE can only show
+  one value. If the effect file on disk is also from before per-output
+  support, it says to reinstall or run `satur8 repair` instead. `satur8
+  doctor` and `satur8 status` say the same when the profiles file uses
+  per-output settings, `satur8 outputs default` and `satur8 outputs follow
+  focused` print it in place of the general note, and the background service
+  logs it once.
 - KDE Plasma can show a different saturation on each output. Each output can
   have its own desktop value (`satur8 outputs default NAME VALUE`, `--unset`
   to clear it), a profile can list the outputs it changes

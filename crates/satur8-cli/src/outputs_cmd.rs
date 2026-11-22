@@ -78,9 +78,11 @@ pub fn run(cmd: OutputsCmd) -> Result<()> {
     }
     if let Ok(backend) = select_backend() {
         let outputs = backend.outputs();
+        let reason = backend.per_output_reason();
         if let Some(note) = backend_note(
             backend.name(),
             backend.per_output(),
+            reason.as_deref(),
             &outputs,
             name.as_deref(),
         ) {
@@ -163,14 +165,18 @@ pub fn set_follow(profiles: &mut Profiles, mode: FollowMode) -> String {
 pub fn backend_note(
     backend: &str,
     per_output: bool,
+    reason: Option<&str>,
     outputs: &[Output],
     name: Option<&str>,
 ) -> Option<String> {
     if !per_output {
-        return Some(format!(
-            "note: the {backend} backend applies one saturation to every output, \
-             so this setting is not in use here"
-        ));
+        return Some(match reason {
+            Some(reason) => format!("note: {reason}"),
+            None => format!(
+                "note: the {backend} backend applies one saturation to every output, \
+                 so this setting is not in use here"
+            ),
+        });
     }
     let name = name?;
     (!outputs.iter().any(|output| output.id == name))
@@ -243,17 +249,31 @@ mod tests {
             human_name: "Dell".into(),
         }];
         assert_eq!(
-            backend_note("gnome-shell", false, &outputs, Some("DP-2")).as_deref(),
+            backend_note("gnome-shell", false, None, &outputs, Some("DP-2")).as_deref(),
             Some(
                 "note: the gnome-shell backend applies one saturation to every output, \
                  so this setting is not in use here"
             )
         );
         assert_eq!(
-            backend_note("kwin", true, &outputs, Some("HDMI-A-1")).as_deref(),
+            backend_note("kwin", true, None, &outputs, Some("HDMI-A-1")).as_deref(),
             Some("note: 'HDMI-A-1' is not connected now; the setting applies when it is")
         );
-        assert_eq!(backend_note("kwin", true, &outputs, Some("DP-2")), None);
-        assert_eq!(backend_note("kwin", true, &outputs, None), None);
+        assert_eq!(
+            backend_note("kwin", true, None, &outputs, Some("DP-2")),
+            None
+        );
+        assert_eq!(backend_note("kwin", true, None, &outputs, None), None);
+    }
+
+    #[test]
+    fn an_older_kwin_effect_gets_its_reason_instead_of_the_generic_note() {
+        let reason = "KDE is still running the Satur8 effect from before the upgrade, so one \
+                      value applies to every output. Log out and back in once to use a \
+                      different value per output.";
+        assert_eq!(
+            backend_note("kwin", false, Some(reason), &[], Some("DP-2")),
+            Some(format!("note: {reason}"))
+        );
     }
 }

@@ -243,11 +243,13 @@ fn cmd_outputs() -> Result<()> {
     let profiles = config::load_profiles().unwrap_or_default();
     let outputs = backend.outputs();
     let current = backend.current_levels();
+    let reason = backend.per_output_reason();
     let view = outputs_report::BackendView {
         name: backend.name(),
         per_output: backend.per_output(),
         outputs: &outputs,
         current: current.as_ref(),
+        reason: reason.as_deref(),
     };
     for line in outputs_report::outputs_lines(&view, &profiles) {
         println!("{line}");
@@ -267,11 +269,13 @@ fn print_per_output_settings() {
         Ok(backend) => {
             let outputs = backend.outputs();
             let current = backend.current_levels();
+            let reason = backend.per_output_reason();
             let view = outputs_report::BackendView {
                 name: backend.name(),
                 per_output: backend.per_output(),
                 outputs: &outputs,
                 current: current.as_ref(),
+                reason: reason.as_deref(),
             };
             outputs_report::settings_section(Ok(&view), &profiles)
         }
@@ -462,7 +466,12 @@ fn cmd_doctor() -> Result<()> {
                 }
             }
             match kwin.is_loaded() {
-                Ok(true) => println!("  [ok] satur8 effect is loaded"),
+                Ok(true) => {
+                    let profiles = config::load_profiles().unwrap_or_default();
+                    let state = outputs_report::uses_per_output_settings(&profiles)
+                        .then(|| kwin.effect_outputs());
+                    println!("{}", loaded_effect_line(state));
+                }
                 Ok(false) => {
                     println!("  [..] satur8 effect installed but not loaded (run `satur8 on`)")
                 }
@@ -572,6 +581,21 @@ fn supported_effect_lines(
         format!("       effect origin: {}", effect_origin(state)),
         format!("       Next step: {advice}."),
     ]
+}
+
+/// The `satur8 doctor` line for a loaded KWin effect. `state` is only asked
+/// for when the profiles file uses the per-output settings, so the line stays
+/// as before for every other file. A loaded effect from before per-output
+/// support gets "[..]" instead of "[ok]"; the per-output section below says
+/// why and what to do.
+fn loaded_effect_line(state: Option<satur8_kwin::EffectOutputs>) -> &'static str {
+    match state {
+        Some(satur8_kwin::EffectOutputs::OlderLoaded { .. }) => {
+            "  [..] satur8 effect is loaded, but it is one from before per-output \
+             support (see per-output settings below)"
+        }
+        _ => "  [ok] satur8 effect is loaded",
+    }
 }
 
 fn print_profiles_summary() -> Result<()> {
@@ -812,6 +836,23 @@ mod tests {
                 }
             }) if query == "sushi"
         ));
+    }
+
+    #[test]
+    fn doctor_marks_an_older_loaded_effect_only_when_the_file_asks_for_per_output() {
+        use satur8_kwin::EffectOutputs;
+        assert_eq!(loaded_effect_line(None), "  [ok] satur8 effect is loaded");
+        assert_eq!(
+            loaded_effect_line(Some(EffectOutputs::PerOutput)),
+            "  [ok] satur8 effect is loaded"
+        );
+        for installed_is_newer in [true, false] {
+            assert_eq!(
+                loaded_effect_line(Some(EffectOutputs::OlderLoaded { installed_is_newer })),
+                "  [..] satur8 effect is loaded, but it is one from before per-output support \
+                 (see per-output settings below)"
+            );
+        }
     }
 
     #[test]

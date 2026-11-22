@@ -152,6 +152,13 @@ pub trait Backend: Send {
         None
     }
 
+    /// Why this backend shows one saturation on every output right now and
+    /// what to do about it, when that is something the user can change.
+    /// Default: none, it simply works that way.
+    fn per_output_reason(&self) -> Option<String> {
+        None
+    }
+
     /// Show `levels`. The default handles a picture that is the same on every
     /// output through [`apply`](Backend::apply) on [`all_outputs`], and refuses
     /// any other.

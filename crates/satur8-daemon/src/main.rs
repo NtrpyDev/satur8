@@ -115,6 +115,18 @@ fn desktop_levels(profiles: &Profiles, backend: &dyn Backend) -> Levels {
     desktop_picture(profiles, backend.per_output()).levels
 }
 
+/// The notes for a picture, plus the backend's reason when the picture could
+/// not be what the file asks for because the backend shows one value on every
+/// output (an older KWin effect still loaded, for example).
+fn with_backend_reason(mut notes: Vec<Note>, backend: &dyn Backend) -> Vec<Note> {
+    if !notes.is_empty() && !backend.per_output() {
+        if let Some(reason) = backend.per_output_reason() {
+            notes.push(Note::OneValueBecause { reason });
+        }
+    }
+    notes
+}
+
 /// Whether a backend that has just become reachable shows the desktop picture
 /// now: only with no profile applied and a desktop that is not unchanged, so
 /// an unchanged desktop loads nothing (no KWin effect for nothing). gamescope
@@ -237,7 +249,7 @@ impl BackendState {
             .chain(picture.notes)
             .chain(not_connected)
             .collect();
-        Ok((notes, limited_to))
+        Ok((with_backend_reason(notes, guard.backend()), limited_to))
     }
 
     /// Put the desktop back. Returns what the user should be told about it.
@@ -250,7 +262,7 @@ impl BackendState {
         let desktop = desktop_picture(profiles, guard.backend().per_output());
         guard.set_restore_to(desktop.levels);
         guard.restore_now()?;
-        Ok(desktop.notes)
+        Ok(with_backend_reason(desktop.notes, guard.backend()))
     }
 }
 
@@ -1750,5 +1762,78 @@ mod tests {
         let (class, pid) = game_mode_focus(769);
         assert_eq!(daemon.sync_gamescope(&class, pid), GamescopeSync::Done);
         assert_eq!(*calls.lock().unwrap(), [Call::Apply("all", 1.25)]);
+    }
+
+    /// A uniform backend that, like KWin with an older effect still loaded,
+    /// says why it shows one value on every output.
+    struct WithReason(FakeBackend);
+
+    impl Backend for WithReason {
+        fn name(&self) -> &'static str {
+            "kwin"
+        }
+        fn cost(&self) -> CostNote {
+            CostNote::CompositorShaderPass
+        }
+        fn outputs(&self) -> Vec<Output> {
+            self.0.outputs()
+        }
+        fn apply(&mut self, output: &Output, saturation: Saturation) -> Result<(), BackendError> {
+            self.0.apply(output, saturation)
+        }
+        fn reset(&mut self, output: &Output) -> Result<(), BackendError> {
+            self.0.reset(output)
+        }
+        fn per_output_reason(&self) -> Option<String> {
+            Some("KDE is still running the Satur8 effect from before the upgrade.".into())
+        }
+    }
+
+    #[test]
+    fn the_fallback_note_carries_the_backends_reason_once() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let backend = WithReason(FakeBackend {
+            name: "kwin",
+            calls: calls.clone(),
+            fail_apply: Arc::new(AtomicBool::new(false)),
+        });
+        let mut daemon = Daemon::with_profiles(following_focus(), Box::new(backend));
+
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+        daemon.react_on("desktop", 0, None);
+        daemon.react_on("game.class", 0, Some("HDMI-A-1"));
+
+        assert_eq!(
+            daemon.logged_notes,
+            [
+                Note::ProfileChangesEveryOutput {
+                    profile: "game".into()
+                },
+                Note::OneValueBecause {
+                    reason: "KDE is still running the Satur8 effect from before the upgrade."
+                        .into()
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn no_reason_is_logged_when_nothing_asks_for_per_output() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let backend = WithReason(FakeBackend {
+            name: "kwin",
+            calls: calls.clone(),
+            fail_apply: Arc::new(AtomicBool::new(false)),
+        });
+        let mut daemon = Daemon::with_profiles(profiles(), Box::new(backend));
+
+        daemon.react("game.class", 0);
+        daemon.react("desktop", 0);
+
+        assert!(daemon.logged_notes.is_empty());
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Call::Apply("all", 1.5), Call::Reset]
+        );
     }
 }

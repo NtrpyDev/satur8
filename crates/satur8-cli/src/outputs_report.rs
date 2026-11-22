@@ -19,6 +19,9 @@ pub struct BackendView<'a> {
     pub outputs: &'a [Output],
     /// What every output shows right now, when the backend can tell.
     pub current: Option<&'a Levels>,
+    /// Why one value applies to every output and what to do, when the backend
+    /// says (an older KWin effect still loaded, for example).
+    pub reason: Option<&'a str>,
 }
 
 /// Whether the file uses the per-output settings: `profile_outputs` or an
@@ -117,6 +120,9 @@ pub fn not_connected_lines(view: &BackendView, profiles: &Profiles) -> Vec<Strin
 
 /// The one line on what the backend can do with outputs.
 fn capability_line(view: &BackendView) -> String {
+    if let (false, Some(reason)) = (view.per_output, view.reason) {
+        return reason.to_string();
+    }
     if view.per_output {
         format!(
             "the {} backend can show a different saturation on each output",
@@ -260,6 +266,7 @@ mod tests {
             per_output: false,
             outputs,
             current: None,
+            reason: None,
         }
     }
 
@@ -308,6 +315,7 @@ mod tests {
             per_output: true,
             outputs: &outputs,
             current: Some(&current),
+            reason: None,
         };
         assert_eq!(
             outputs_lines(&view, &example()),
@@ -330,6 +338,7 @@ mod tests {
             per_output: true,
             outputs: &outputs,
             current: None,
+            reason: None,
         };
         assert_eq!(
             outputs_lines(&view, &Profiles::default()),
@@ -381,6 +390,7 @@ mod tests {
             per_output: true,
             outputs: &outputs,
             current: None,
+            reason: None,
         };
         assert_eq!(
             settings_section(Ok(&view), &example()),
@@ -401,5 +411,42 @@ mod tests {
                 "    [..] not checked: no backend reachable (the session has no display backend)",
             ]
         );
+    }
+
+    const OLDER_EFFECT: &str = "KDE is still running the Satur8 effect from before the upgrade, \
+                                so one value applies to every output. Log out and back in once \
+                                to use a different value per output.";
+
+    fn older_kwin<'a>(outputs: &'a [Output]) -> BackendView<'a> {
+        BackendView {
+            name: "kwin",
+            per_output: false,
+            outputs,
+            current: None,
+            reason: Some(OLDER_EFFECT),
+        }
+    }
+
+    #[test]
+    fn outputs_with_an_older_effect_say_why_and_what_to_do() {
+        let outputs = [all_outputs()];
+        assert_eq!(
+            outputs_lines(&older_kwin(&outputs), &Profiles::default()),
+            [
+                "outputs on the kwin backend:".to_string(),
+                "  all      All outputs".to_string(),
+                format!("  {OLDER_EFFECT}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn doctor_and_status_say_why_with_an_older_effect() {
+        let outputs = [all_outputs()];
+        let section = settings_section(Ok(&older_kwin(&outputs)), &example());
+        assert_eq!(section[0], "  per-output settings (backend kwin):");
+        assert_eq!(section[1], format!("    [..] {OLDER_EFFECT}"));
+        // Still nothing for a file without per-output settings.
+        assert!(settings_section(Ok(&older_kwin(&outputs)), &old_style()).is_empty());
     }
 }

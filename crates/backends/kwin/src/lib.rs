@@ -30,9 +30,66 @@ const EFFECT_IFACE: &str = "org.kde.kwin.Effect.Satur8";
 
 pub struct KwinBackend {
     conn: Connection,
-    /// Whether the effect KWin runs answers the per-output calls, once asked.
-    /// KWin keeps the copy it loaded for the whole session, so the answer holds.
-    per_output: Cell<Option<bool>>,
+    /// What the effect KWin runs can do with outputs, once asked. KWin keeps
+    /// the copy it loaded for the whole session, so the answer holds.
+    per_output: Cell<Option<EffectOutputs>>,
+}
+
+/// What the effect KWin runs can do with outputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectOutputs {
+    /// It answers the per-output calls.
+    PerOutput,
+    /// It is loaded but has no per-output calls: an effect from before
+    /// per-output support. `installed_is_newer` is whether the effect file on
+    /// disk has them, which means KWin still runs the copy it loaded before
+    /// an upgrade.
+    OlderLoaded { installed_is_newer: bool },
+    /// It could not be loaded or asked.
+    Unavailable,
+}
+
+impl EffectOutputs {
+    /// Why one value applies to every output, and the one next step; `None`
+    /// when the effect can do per-output.
+    pub fn explanation(self) -> Option<&'static str> {
+        match self {
+            EffectOutputs::PerOutput => None,
+            EffectOutputs::OlderLoaded {
+                installed_is_newer: true,
+            } => Some(
+                "KDE is still running the Satur8 effect from before the upgrade, so one \
+                 value applies to every output. Log out and back in once to use a \
+                 different value per output.",
+            ),
+            EffectOutputs::OlderLoaded {
+                installed_is_newer: false,
+            } => Some(
+                "The installed Satur8 KWin effect is from before per-output support, so \
+                 one value applies to every output. Reinstall Satur8 or run \
+                 `satur8 repair`, then log out and back in once.",
+            ),
+            EffectOutputs::Unavailable => Some(
+                "Satur8 could not ask its KWin effect what it supports, so one value \
+                 applies to every output. `satur8 doctor` shows the effect's state.",
+            ),
+        }
+    }
+}
+
+/// The state from a probe of the running effect. The effect file on disk is
+/// only read for an effect without the per-output calls.
+fn effect_outputs_state(
+    probe: &Result<Option<BTreeMap<String, String>>, BackendError>,
+    installed_has_per_output: impl FnOnce() -> Option<bool>,
+) -> EffectOutputs {
+    match probe {
+        Ok(Some(_)) => EffectOutputs::PerOutput,
+        Ok(None) => EffectOutputs::OlderLoaded {
+            installed_is_newer: installed_has_per_output() == Some(true),
+        },
+        Err(_) => EffectOutputs::Unavailable,
+    }
 }
 
 impl KwinBackend {
@@ -217,6 +274,27 @@ fn is_unknown_method(error: &zbus::Error) -> bool {
 }
 
 impl KwinBackend {
+    /// What the effect KWin runs can do with outputs. A real answer is kept for
+    /// the session; an effect that could not be asked is asked again next time.
+    pub fn effect_outputs(&self) -> EffectOutputs {
+        if let Some(known) = self.per_output.get() {
+            return known;
+        }
+        let probe = probe_outputs(self);
+        self.remember_state(&probe)
+    }
+
+    fn remember_state(
+        &self,
+        probe: &Result<Option<BTreeMap<String, String>>, BackendError>,
+    ) -> EffectOutputs {
+        let state = effect_outputs_state(probe, repair::installed_effect_has_per_output);
+        if state != EffectOutputs::Unavailable {
+            self.per_output.set(Some(state));
+        }
+        state
+    }
+
     fn call_effect<B>(&self, method: &str, body: &B) -> Result<zbus::Message, zbus::Error>
     where
         B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
@@ -464,16 +542,11 @@ impl Backend for KwinBackend {
     /// The outputs a per-output effect lists; the single "all" row for an
     /// older effect, which applies one saturation session-wide.
     fn outputs(&self) -> Vec<Output> {
-        match probe_outputs(self) {
-            Ok(Some(listed)) => {
-                self.per_output.set(Some(true));
-                outputs_from(listed)
-            }
-            Ok(None) => {
-                self.per_output.set(Some(false));
-                vec![satur8_core::all_outputs()]
-            }
-            Err(_) => vec![satur8_core::all_outputs()],
+        let probe = probe_outputs(self);
+        self.remember_state(&probe);
+        match probe {
+            Ok(Some(listed)) => outputs_from(listed),
+            Ok(None) | Err(_) => vec![satur8_core::all_outputs()],
         }
     }
 
@@ -514,19 +587,11 @@ impl Backend for KwinBackend {
     /// effect KWin loaded before an upgrade keeps one level on every output
     /// until the next login.
     fn per_output(&self) -> bool {
-        if let Some(known) = self.per_output.get() {
-            return known;
-        }
-        // Only a real answer is kept: an effect that could not be asked now
-        // may answer on the next call.
-        match probe_outputs(self) {
-            Ok(listed) => {
-                let answer = listed.is_some();
-                self.per_output.set(Some(answer));
-                answer
-            }
-            Err(_) => false,
-        }
+        self.effect_outputs() == EffectOutputs::PerOutput
+    }
+
+    fn per_output_reason(&self) -> Option<String> {
+        self.effect_outputs().explanation().map(str::to_string)
     }
 
     fn apply_levels(&mut self, levels: &Levels) -> Result<(), BackendError> {
@@ -904,5 +969,78 @@ mod tests {
             .calls()
             .iter()
             .any(|call| matches!(call, Call::SetOne(_))));
+    }
+
+    #[test]
+    fn the_three_effect_states_from_a_probe() {
+        let new_effect = FakeEffect::new(true);
+        let old_effect = FakeEffect::new(false);
+        assert_eq!(
+            effect_outputs_state(&probe_outputs(&new_effect), || Some(true)),
+            EffectOutputs::PerOutput
+        );
+        assert_eq!(
+            effect_outputs_state(&probe_outputs(&old_effect), || Some(true)),
+            EffectOutputs::OlderLoaded {
+                installed_is_newer: true
+            }
+        );
+        for on_disk in [Some(false), None] {
+            assert_eq!(
+                effect_outputs_state(&probe_outputs(&old_effect), || on_disk),
+                EffectOutputs::OlderLoaded {
+                    installed_is_newer: false
+                }
+            );
+        }
+        let failed: Result<Option<BTreeMap<String, String>>, BackendError> =
+            Err(BackendError::Apply("KWin refused to load".into()));
+        assert_eq!(
+            effect_outputs_state(&failed, || panic!(
+                "the file is only read for an older effect"
+            )),
+            EffectOutputs::Unavailable
+        );
+    }
+
+    #[test]
+    fn each_state_says_why_and_what_to_do() {
+        assert_eq!(EffectOutputs::PerOutput.explanation(), None);
+        assert_eq!(
+            EffectOutputs::OlderLoaded {
+                installed_is_newer: true
+            }
+            .explanation(),
+            Some(
+                "KDE is still running the Satur8 effect from before the upgrade, so one value \
+                 applies to every output. Log out and back in once to use a different value \
+                 per output."
+            )
+        );
+        assert_eq!(
+            EffectOutputs::OlderLoaded {
+                installed_is_newer: false
+            }
+            .explanation(),
+            Some(
+                "The installed Satur8 KWin effect is from before per-output support, so one \
+                 value applies to every output. Reinstall Satur8 or run `satur8 repair`, then \
+                 log out and back in once."
+            )
+        );
+        assert!(EffectOutputs::Unavailable
+            .explanation()
+            .unwrap()
+            .contains("`satur8 doctor`"));
+    }
+
+    #[test]
+    fn the_effect_file_is_checked_for_the_per_output_calls() {
+        assert!(repair::has_per_output_calls(
+            b"\0qt_meta\0setSaturation\0setSaturations\0outputs\0"
+        ));
+        assert!(!repair::has_per_output_calls(
+            b"\0qt_meta\0setSaturation\0saturation\0setLinearLight\0"
+        ));
     }
 }

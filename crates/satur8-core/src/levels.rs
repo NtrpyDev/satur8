@@ -78,6 +78,9 @@ pub enum Note {
     /// The profile names an output that is not connected. Nothing on screen
     /// changes for it until it is.
     OutputNotConnected { profile: String, output: String },
+    /// Why the backend shows one value on every output right now, and what to
+    /// do, when that is something the user can change.
+    OneValueBecause { reason: String },
 }
 
 impl fmt::Display for Note {
@@ -94,6 +97,7 @@ impl fmt::Display for Note {
                 f,
                 "profile '{profile}' changes every output: the focused window's output is unknown"
             ),
+            Note::OneValueBecause { reason } => f.write_str(reason),
             Note::OutputNotConnected { profile, output } => write!(
                 f,
                 "profile '{profile}' names output '{output}', which is not connected now"
