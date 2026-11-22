@@ -122,8 +122,31 @@ effect_src_dir="$data/satur8/kwin-effect"
 effect_set_dir="$data/satur8/kwin-effects"
 env_dir="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/satur8"
+# The app icon, named satur8 as satur8.desktop's Icon= says, in the
+# freedesktop hicolor theme at its real size (256x256). A release archive
+# carries it in that layout; a source checkout has it beside the GUI's files.
+icon_rel="icons/hicolor/256x256/apps/satur8.png"
+app_icon=""
+for candidate in "$repo/assets/$icon_rel" "$repo/crates/satur8-gui/ui/icon.png"; do
+    if [ -f "$candidate" ]; then
+        app_icon="$candidate"
+        break
+    fi
+done
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+
+# Refresh GTK's icon cache for a hicolor folder, but only where a cache
+# already exists: a new per-user cache that later goes stale would hide other
+# apps' new icons. The tool is optional (KDE does not use the cache), so its
+# absence or failure never stops the install.
+refresh_icon_cache() { # refresh_icon_cache <hicolor dir> [sudo]
+    local dir="$1" run=()
+    [ "${2:-}" = sudo ] && run=(sudo)
+    if command -v gtk-update-icon-cache >/dev/null 2>&1 && [ -f "$dir/icon-theme.cache" ]; then
+        "${run[@]}" gtk-update-icon-cache -q -t "$dir" >/dev/null 2>&1 || true
+    fi
+}
 
 daemon_was_active=false
 
@@ -503,6 +526,17 @@ install_all() {
 
     say "Installing desktop entry"
     install -Dm644 "$repo/packaging/satur8.desktop" "$data/applications/satur8.desktop"
+    if [ -z "$app_icon" ]; then
+        say "No app icon in this archive: the desktop entry will show a generic icon"
+    elif [ "$mode" = system ]; then
+        say "Installing app icon to /usr/share/$icon_rel (sudo)"
+        sudo install -Dm644 "$app_icon" "/usr/share/$icon_rel"
+        refresh_icon_cache /usr/share/icons/hicolor sudo
+    else
+        say "Installing app icon to $data/$icon_rel"
+        install -Dm644 "$app_icon" "$data/$icon_rel"
+        refresh_icon_cache "$data/icons/hicolor"
+    fi
 
     cat <<EOF
 
@@ -582,8 +616,15 @@ uninstall_all() {
     # folder; rmdir keeps it if anything else is there.
     rmdir "$data/satur8" 2>/dev/null || true
     rm -f "$unit_dir/satur8-daemon.service" "$data/applications/satur8.desktop"
+    if [ -e "$data/$icon_rel" ]; then
+        rm -f "$data/$icon_rel"
+        refresh_icon_cache "$data/icons/hicolor"
+    fi
     if [ -e "$qt_plugin_sys/satur8.so" ]; then
         echo "    (system-installed effect at $qt_plugin_sys left alone; remove with sudo if needed)"
+    fi
+    if [ -e "/usr/share/$icon_rel" ]; then
+        echo "    (system-installed icon at /usr/share/$icon_rel left alone; remove with sudo if needed)"
     fi
 }
 

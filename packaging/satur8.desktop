@@ -5,6 +5,7 @@ GenericName=Digital Vibrance
 Comment=Per-game saturation boost, applied in the compositor (never in the game)
 Exec=satur8-gui
 Icon=satur8
+StartupWMClass=satur8
 Terminal=false
 Categories=Utility;Settings;
 Keywords=satur8;saturation;color;gaming;

@@ -25,6 +25,12 @@ use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedS
 
 slint::include_modules!();
 
+/// The app ID the compositor matches the window to: the base name of the
+/// desktop entry `packaging/satur8.desktop`, whose `Icon=` names the icon the
+/// installers put in the hicolor theme. Slint sends it as the Wayland app ID
+/// and as the class half of the X11 `WM_CLASS`.
+const APP_ID: &str = "satur8";
+
 const TILE_COLORS: [(u8, u8, u8); 8] = [
     (13, 148, 136),
     (37, 99, 235),
@@ -91,6 +97,12 @@ thread_local! {
 
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
+    // After AppWindow::new(), which creates Slint's platform (before that
+    // set_xdg_app_id only returns NoPlatform), and before ui.run() shows the
+    // window, which is when the ID is read. A failure only costs the icon.
+    if let Err(error) = slint::set_xdg_app_id(APP_ID) {
+        eprintln!("satur8-gui: could not set the app ID {APP_ID}: {error}");
+    }
     ui.set_version_text(format!("v{}", env!("CARGO_PKG_VERSION")).into());
     let gui_config = Rc::new(RefCell::new(load_gui_config()));
     ui.global::<Pal>().set_dark(gui_config.borrow().dark_mode);
@@ -916,6 +928,23 @@ fn reload_daemon_profiles() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_id_names_the_desktop_entry_and_its_icon() {
+        let desktop = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packaging")
+            .join(format!("{APP_ID}.desktop"));
+        let entry = std::fs::read_to_string(&desktop)
+            .unwrap_or_else(|error| panic!("no desktop entry at {}: {error}", desktop.display()));
+        let value = |key: &str| {
+            entry
+                .lines()
+                .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+                .map(str::trim)
+        };
+        assert_eq!(value("Icon"), Some(APP_ID));
+        assert_eq!(value("StartupWMClass"), Some(APP_ID));
+    }
 
     #[test]
     fn tray_on_the_same_wayland_display_counts() {

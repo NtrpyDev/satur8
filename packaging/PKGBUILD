@@ -65,5 +65,8 @@ package() {
         packaging/satur8-daemon.service \
         > "$pkgdir/usr/lib/systemd/user/satur8-daemon.service"
     install -Dm644 packaging/satur8.desktop "$pkgdir/usr/share/applications/satur8.desktop"
+    # App icon, named as the desktop entry's Icon= (256x256).
+    install -Dm644 crates/satur8-gui/ui/icon.png \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/satur8.png"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
