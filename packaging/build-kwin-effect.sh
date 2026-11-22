@@ -43,8 +43,9 @@
 # (updates-testing added for "testing").
 #
 # Checks on every effect, run inside its build system: the embedded ID equals
-# the installed KWin's version; ldd -r finds every library, symbol and symbol
-# version; build-info.txt records the package versions, the highest Qt_6.x,
+# the installed KWin's version, read both here and by the installer's own
+# packaging/install.sh --check-effect; ldd -r finds every library, symbol and
+# symbol version; build-info.txt records the package versions, the highest Qt_6.x,
 # GLIBC, GLIBCXX and CXXABI versions the effect needs, the SHA-256 of each
 # KWin header the build included, the Satur8 source version and the file's
 # SHA-256.
@@ -254,6 +255,13 @@ find /build -name '*.d' -type f -exec cat {} + | tr ' \\' '\n\n' | grep '^/usr/i
         printf '%-26s -> %-40s %s %s\n' "$lib" "${path:-NOT FOUND}" "${owner:-NOT OWNED}" "$(pkg_version "${owner:-none}" || true)"
     done
     echo
+    # The installer's own check, so the build and the installer read the
+    # embedded ID the same way: it compares the ID with the installed KWin.
+    echo "### bash packaging/install.sh --check-effect satur8.so"
+    rc=0
+    bash /check/install.sh --check-effect "$so" 2>&1 || rc=$?
+    echo "CHECK_EFFECT_RESULT: exit $rc"
+    echo
     echo "### ldd -r satur8.so"
     ldd -r "$so" 2>&1
     echo
@@ -265,6 +273,10 @@ find /build -name '*.d' -type f -exec cat {} + | tr ' \\' '\n\n' | grep '^/usr/i
 } > /out/verify.txt 2>&1
 cat /out/verify.txt
 BUILD
+
+# The installer, for its --check-effect gate inside the build system.
+[ -f "$repo/packaging/install.sh" ] || fail "missing $repo/packaging/install.sh"
+install -m644 "$repo/packaging/install.sh" "$work/check/install.sh"
 
 downloads="unknown"
 manifest_report=""
@@ -437,6 +449,7 @@ sum_host="$(sha256sum "$so" | cut -d' ' -f1)"
 sum_cont="$(cat "$work/out/sha256-in-container.txt")"
 [ "$sum_host" = "$sum_cont" ] || fail "sha256 changed between container and host ($sum_cont vs $sum_host): possible hardware fault"
 grep -q '^LDD_RESULT: clean' "$work/out/verify.txt" || fail "ldd -r is not clean inside the $target build system (see verify output above)"
+grep -q '^CHECK_EFFECT_RESULT: exit 0$' "$work/out/verify.txt" || fail "packaging/install.sh --check-effect rejected the effect inside the $target build system (see verify output above)"
 
 read -r kwin_pkg kwin_ver kwin_pkgver < "$work/out/kwin.txt"
 header_ver="$(cat "$work/out/kwin-header-version.txt")"
