@@ -46,6 +46,9 @@ The app in Steam Game Mode: its own layout for the Deck's screen, touch and butt
   Steam Game Mode it is the service alone. The installer's closing message
   and the README show this command, with the commands it replaces kept as a
   by-hand line.
+- `satur8 status` marks a level that is kept for an output that is not
+  connected as `(not connected)`, so it no longer reads as something on
+  screen.
 - "Add game" is one list of your games by name, in both layouts: the
   installed Steam games, with any that is running first and marked. A
   running Steam game is recognized by its Steam AppID and shown under its

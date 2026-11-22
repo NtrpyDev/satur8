@@ -377,7 +377,8 @@ fn cmd_status() -> Result<()> {
             // them (a manual `set --output`, a profile, an output's default).
             if loaded {
                 if let Some(levels) = satur8_core::Backend::current_levels(&kwin) {
-                    for line in outputs_report::current_output_lines(&levels) {
+                    let connected = satur8_core::Backend::outputs(&kwin);
+                    for line in outputs_report::current_output_lines(&levels, &connected) {
                         println!("{line}");
                     }
                 }
