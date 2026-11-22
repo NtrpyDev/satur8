@@ -27,10 +27,14 @@ done
 tarball="${tarball:-$repo/target/dist/satur8-v$version-linux-x86_64.tar.gz}"
 [ -f "$tarball" ] || { echo "FAIL: no release tarball at $tarball (run packaging/release-tarball.sh)" >&2; exit 1; }
 
-runtime=""
-for candidate in podman docker; do
-    command -v "$candidate" >/dev/null 2>&1 && { runtime="$candidate"; break; }
-done
+# ENGINE picks the container engine (CI sets docker); otherwise podman if
+# installed, else docker.
+runtime="${ENGINE:-}"
+if [ -z "$runtime" ]; then
+    for candidate in podman docker; do
+        command -v "$candidate" >/dev/null 2>&1 && { runtime="$candidate"; break; }
+    done
+fi
 [ -n "$runtime" ] || { echo "FAIL: needs podman or docker" >&2; exit 1; }
 
 echo "==> $image"
