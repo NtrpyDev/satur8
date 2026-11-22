@@ -106,8 +106,11 @@ pick_case "Fedora 45, KWin 6.8.3: its own effect" \
     "$fedora" 6.8.3 libQt6Core.so.6.11.2 "pick: fedora45-6.8.3" ""
 pick_case "SteamOS, KWin 6.9.0: nothing, and the reason names KWin 6.9.0" \
     "$steamos" 6.9.0 libQt6Core.so.6.12.0 "skip:*KWin 6.9.0*" ""
-pick_case "Arch, KWin 6.8.3, Qt 6.12, no build tools: Fedora's effect with a note" \
-    "$arch" 6.8.3 libQt6Core.so.6.12.0 "pick: fedora45-6.8.3" "*another system (fedora45)*"
+# Any Fedora entry for KWin 6.8.3 is right here: the fake set has only
+# fedora45-6.8.3, a real set (SATUR8_REAL_EFFECT_DIR) also has fedora44-6.8.3,
+# and the fallback takes the first entry that fits.
+pick_case "Arch, KWin 6.8.3, Qt 6.12, no build tools: a Fedora effect with a note" \
+    "$arch" 6.8.3 libQt6Core.so.6.12.0 "pick: fedora[0-9]*-6.8.3" "*another system (fedora[0-9]*)*"
 pick_case "Arch, KWin 6.8.3, Qt 6.10, no build tools: nothing (needs Qt 6.11)" \
     "$arch" 6.8.3 libQt6Core.so.6.10.3 "skip:*fedora45-6.8.3 needs Qt 6.11 and this system has Qt 6.10*" ""
 pick_case "Arch, KWin 6.8.3, Qt unknown: nothing" \
