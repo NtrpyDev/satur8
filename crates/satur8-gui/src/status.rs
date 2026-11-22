@@ -1524,4 +1524,181 @@ mod tests {
             row.detail
         );
     }
+
+    // ------------------------------- pinned: Desktop Mode text and plans as they are
+
+    fn details(facts: &Facts) -> Vec<String> {
+        health_rows(facts)
+            .into_iter()
+            .map(|row| row.detail)
+            .collect()
+    }
+
+    fn script_path() -> PathBuf {
+        PathBuf::from("/usr/share/kwin/scripts/satur8-focus/contents/code/main.js")
+    }
+
+    #[test]
+    fn kde_rows_toggle_and_plans_are_pinned() {
+        assert_eq!(
+            details(&healthy()),
+            [
+                "Working through KDE Plasma's compositor (kwin)",
+                "Installed and matches this KDE version (6.8.3); idle until a profile needs it",
+                "Running",
+                "On: KDE tells Satur8 which window is focused",
+            ]
+        );
+        assert_eq!(
+            switch_state(&healthy()),
+            SwitchState {
+                available: true,
+                on: true,
+                detail: "Each game's profile applies when its window is focused".into(),
+            }
+        );
+        assert_eq!(
+            plan_disable(&healthy()),
+            vec![
+                Action::SetFocusEnabled(false),
+                Action::KwinReconfigure,
+                Action::UnloadScript,
+                Action::Systemctl(vec!["disable", "--now"]),
+            ]
+        );
+
+        // Switching off on purpose.
+        let mut off = healthy();
+        off.daemon_running = Some(false);
+        off.unit = UnitState::Disabled;
+        off.script_enabled = false;
+        off.script_loaded = Some(false);
+        assert_eq!(
+            details(&off)[2..],
+            ["Off; only needed for automatic per-game switching", "Off"]
+        );
+        assert_eq!(
+            switch_state(&off).detail,
+            "Off. Game profiles are not applied automatically"
+        );
+        assert_eq!(
+            plan_enable(&off),
+            vec![
+                Action::Systemctl(vec!["enable", "--now"]),
+                Action::SetFocusEnabled(true),
+                Action::KwinReconfigure,
+                Action::LoadScript(script_path()),
+            ]
+        );
+        assert_eq!(plan_repair(&off), vec![Action::RepairEffect]);
+
+        // Wanted, but the service and the script are not running.
+        let mut partly = healthy();
+        partly.daemon_running = Some(false);
+        partly.script_loaded = Some(false);
+        assert_eq!(
+            details(&partly)[2..],
+            [
+                "Not running, so games are not switched automatically",
+                "Turned on, but not running in this session. Repair starts it",
+            ]
+        );
+        assert_eq!(
+            switch_state(&partly).detail,
+            "Partly on (service starts at login, detection turned on). Turn on to finish"
+        );
+        assert_eq!(
+            plan_repair(&partly),
+            vec![
+                Action::RepairEffect,
+                Action::Systemctl(vec!["start"]),
+                Action::LoadScript(script_path()),
+            ]
+        );
+        assert_eq!(
+            Action::RepairEffect.describe(),
+            "Check and repair the saturation effect"
+        );
+    }
+
+    fn desktop(session: SessionType, desktop: Desktop, gpu: Gpu, backend: &str) -> Facts {
+        Facts {
+            env: Environment {
+                session,
+                desktop,
+                gpu,
+            },
+            backend: Some(backend.into()),
+            effect: None,
+            kwin_version: None,
+            daemon_running: Some(false),
+            unit: UnitState::Disabled,
+            script_enabled: false,
+            script_loaded: None,
+            script_path: None,
+        }
+    }
+
+    #[test]
+    fn gnome_hyprland_and_nvidia_rows_toggle_and_plans_are_pinned() {
+        for (facts, color) in [
+            (
+                desktop(
+                    SessionType::Wayland,
+                    Desktop::Gnome,
+                    Gpu::Intel,
+                    "gnome-shell",
+                ),
+                "Working through the GNOME Shell extension (gnome-shell)",
+            ),
+            (
+                desktop(
+                    SessionType::Wayland,
+                    Desktop::Hyprland,
+                    Gpu::Amd,
+                    "hyprland",
+                ),
+                "Working through a Hyprland screen shader (hyprland)",
+            ),
+            (
+                desktop(SessionType::X11, Desktop::Kde, Gpu::Nvidia, "nv-control"),
+                "Working through the NVIDIA driver setting (nv-control)",
+            ),
+        ] {
+            assert_eq!(
+                details(&facts),
+                [
+                    color,
+                    "Only used on KDE Plasma (Wayland)",
+                    "Only needed for per-game switching on KDE Plasma (Wayland)",
+                    "Only available on KDE Plasma (Wayland)",
+                ]
+            );
+            assert_eq!(
+                levels(&facts)[1..],
+                [
+                    Level::NotApplicable,
+                    Level::NotApplicable,
+                    Level::NotApplicable
+                ]
+            );
+            assert_eq!(
+                switch_state(&facts),
+                SwitchState {
+                    available: false,
+                    on: false,
+                    detail: format!(
+                        "Needs KDE Plasma on Wayland; this session is {} / {}",
+                        facts.env.session, facts.env.desktop
+                    ),
+                }
+            );
+            assert!(plan_repair(&facts).is_empty());
+            let mut running = facts.clone();
+            running.daemon_running = Some(true);
+            running.unit = UnitState::Enabled;
+            assert_eq!(details(&running)[2], "Running");
+            assert!(plan_repair(&running).is_empty());
+        }
+    }
 }
