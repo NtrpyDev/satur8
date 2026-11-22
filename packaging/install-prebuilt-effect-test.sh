@@ -37,12 +37,16 @@ if [ -z "$runtime" ]; then
 fi
 [ -n "$runtime" ] || { echo "FAIL: needs podman or docker" >&2; exit 1; }
 
+# List the archive once. Piping tar straight into `grep -q` fails under
+# pipefail whenever grep exits before tar has written the whole list.
+listing="$(tar -tzf "$tarball")"
+
 # The archive carries the app icon in the hicolor layout the installer reads.
-tar -tzf "$tarball" | grep -q '^[^/]*/assets/icons/hicolor/256x256/apps/satur8\.png$' ||
+printf '%s\n' "$listing" | grep '^[^/]*/assets/icons/hicolor/256x256/apps/satur8\.png$' > /dev/null ||
     { echo "FAIL: the tarball has no assets/icons/hicolor/256x256/apps/satur8.png" >&2; exit 1; }
 
 # The cases need these keys in the tarball's set.
-set_keys="$(tar -tzf "$tarball" | sed -n 's|^[^/]*/prebuilt/linux-x86_64/kwin/effects/\([^/]*\)/satur8\.so$|\1|p')"
+set_keys="$(printf '%s\n' "$listing" | sed -n 's|^[^/]*/prebuilt/linux-x86_64/kwin/effects/\([^/]*\)/satur8\.so$|\1|p')"
 for key in steamos-6.7.3 fedora45-6.8.3; do
     grep -qx "$key" <<<"$set_keys" || {
         echo "FAIL: the tarball's effect set has no $key; it has: $(printf '%s' "$set_keys" | tr '\n' ' ')" >&2
