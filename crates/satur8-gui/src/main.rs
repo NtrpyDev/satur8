@@ -731,17 +731,66 @@ fn now_hms() -> String {
     )
 }
 
+/// The display this process draws on, used to tell this session's tray from a
+/// tray that belongs to another login.
+struct SessionDisplay {
+    wayland: Option<Vec<u8>>,
+    x11: Option<Vec<u8>>,
+}
+
+impl SessionDisplay {
+    fn from_env() -> Self {
+        use std::os::unix::ffi::OsStringExt;
+        let var = |name: &str| {
+            std::env::var_os(name)
+                .map(OsStringExt::into_vec)
+                .filter(|value| !value.is_empty())
+        };
+        Self {
+            wayland: var("WAYLAND_DISPLAY"),
+            x11: var("DISPLAY"),
+        }
+    }
+
+    /// Whether a process with this `/proc/<pid>/environ` content draws on the
+    /// same display. Wayland decides when this session has one, X11 otherwise.
+    /// With no display known at all, the caller's same-user check is all there
+    /// is to go on.
+    fn matches(&self, environ: &[u8]) -> bool {
+        let theirs = |name: &[u8]| {
+            environ
+                .split(|byte| *byte == 0)
+                .find_map(|entry| entry.strip_prefix(name)?.strip_prefix(b"="))
+        };
+        match (&self.wayland, &self.x11) {
+            (Some(ours), _) => theirs(b"WAYLAND_DISPLAY") == Some(ours.as_slice()),
+            (None, Some(ours)) => theirs(b"DISPLAY") == Some(ours.as_slice()),
+            (None, None) => true,
+        }
+    }
+}
+
+/// True when a tray icon is running for this user in this session. A tray that
+/// belongs to another user, or to this user's other session, cannot reopen
+/// this window, so it must not count.
 fn satur8_tray_is_running() -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    let display = SessionDisplay::from_env();
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return false;
     };
     entries.flatten().any(|entry| {
+        let path = entry.path();
         entry
             .file_name()
             .to_str()
             .is_some_and(|name| name.bytes().all(|byte| byte.is_ascii_digit()))
-            && std::fs::read_to_string(entry.path().join("comm"))
+            && std::fs::read_to_string(path.join("comm"))
                 .is_ok_and(|comm| comm.trim() == "satur8-tray")
+            && std::fs::metadata(&path).is_ok_and(|meta| meta.uid() == uid)
+            && std::fs::read(path.join("environ")).is_ok_and(|environ| display.matches(&environ))
     })
 }
 
@@ -865,6 +914,49 @@ fn reload_daemon_profiles() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tray_on_the_same_wayland_display_counts() {
+        let ours = SessionDisplay {
+            wayland: Some(b"wayland-0".to_vec()),
+            x11: Some(b":0".to_vec()),
+        };
+        assert!(ours.matches(b"HOME=/home/a\0WAYLAND_DISPLAY=wayland-0\0DISPLAY=:0\0"));
+    }
+
+    #[test]
+    fn tray_on_another_wayland_display_does_not_count() {
+        let ours = SessionDisplay {
+            wayland: Some(b"wayland-0".to_vec()),
+            x11: Some(b":0".to_vec()),
+        };
+        // Same X display name, different compositor: another session.
+        assert!(!ours.matches(b"WAYLAND_DISPLAY=wayland-1\0DISPLAY=:0\0"));
+        // A longer name that merely starts the same must not match.
+        assert!(!ours.matches(b"WAYLAND_DISPLAY=wayland-01\0"));
+        assert!(!ours.matches(b"HOME=/home/a\0"));
+    }
+
+    #[test]
+    fn x11_session_compares_the_x_display() {
+        let ours = SessionDisplay {
+            wayland: None,
+            x11: Some(b":1".to_vec()),
+        };
+        assert!(ours.matches(b"DISPLAY=:1\0"));
+        assert!(!ours.matches(b"DISPLAY=:0\0"));
+        assert!(!ours.matches(b"XDISPLAY=:1\0"));
+    }
+
+    #[test]
+    fn with_no_display_known_the_same_user_check_decides() {
+        let ours = SessionDisplay {
+            wayland: None,
+            x11: None,
+        };
+        assert!(ours.matches(b"DISPLAY=:0\0"));
+        assert!(ours.matches(b""));
+    }
 
     #[test]
     fn new_game_default_is_the_old_hard_coded_value() {

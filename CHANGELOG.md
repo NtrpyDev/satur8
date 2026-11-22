@@ -38,6 +38,9 @@ Redesigned desktop app with a new Status tab, plus documentation fixes.
   - The activity log moved here from the main window.
 - The daemon exposes a new read-only `LastFocused` D-Bus property for the
   Status tab. The app still works with an older daemon that lacks it.
+- Closing the window hides it to the tray only when the tray icon belongs to
+  you and runs in the same session. A tray started by another user, or by your
+  other login, no longer keeps a hidden window around with no way to reopen it.
 - Remove the Live Preview panel and the per-game Preview button. The app no
   longer changes the desktop just to preview a profile.
 - ROADMAP.md and PLAN.md now name the current release and describe the
