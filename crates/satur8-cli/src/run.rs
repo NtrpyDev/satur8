@@ -11,8 +11,9 @@
 //! reset the backend once it has exited.
 
 use anyhow::{bail, Context, Result};
-use satur8_backend::{apply_to_outputs, install_signal_handler, select_backend, RestoreGuard};
-use satur8_core::{Profiles, Saturation};
+use satur8_backend::{install_signal_handler, select_backend, RestoreGuard};
+use satur8_core::levels::{desktop_picture, profile_picture};
+use satur8_core::{Levels, Picture, Profile, Profiles, Saturation};
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,7 +33,30 @@ pub struct RunArgs {
 
 struct ResolvedSaturation {
     saturation: Saturation,
-    outputs: Vec<String>,
+    /// The profile the saturation came from, when it came from one.
+    profile: Option<Profile>,
+}
+
+#[cfg(test)]
+impl ResolvedSaturation {
+    /// The outputs the profile names; none for an explicit saturation.
+    fn outputs(&self) -> &[String] {
+        self.profile
+            .as_ref()
+            .map_or(&[], |profile| &profile.outputs)
+    }
+}
+
+/// What the outputs show while the game runs. There is no focused window to
+/// follow, so a profile that would follow focus changes every output.
+fn launch_picture(profiles: &Profiles, resolved: &ResolvedSaturation, per_output: bool) -> Picture {
+    match &resolved.profile {
+        Some(profile) => profile_picture(profiles, profile, None, per_output),
+        None => Picture {
+            levels: Levels::uniform(resolved.saturation),
+            notes: Vec::new(),
+        },
+    }
 }
 
 pub fn run(args: RunArgs) -> Result<i32> {
@@ -86,14 +110,19 @@ pub fn run(args: RunArgs) -> Result<i32> {
     }
 
     // Apply before launch (if we have something to apply).
-    let mut backend = RestoreGuard::new(select_backend()?, profiles.default_saturation());
+    let selected = select_backend()?;
+    let per_output = selected.per_output();
+    let desktop = desktop_picture(&profiles, per_output);
+    let mut backend = RestoreGuard::new(selected, desktop.levels);
     if let Some(resolved) = resolved {
-        apply_to_outputs(
-            backend.backend_mut(),
-            &resolved.outputs,
-            resolved.saturation,
-        )
-        .context("applying saturation before launch")?;
+        let picture = launch_picture(&profiles, &resolved, per_output);
+        for note in desktop.notes.iter().chain(&picture.notes) {
+            eprintln!("satur8: {note}");
+        }
+        backend
+            .backend_mut()
+            .apply_levels(&picture.levels)
+            .context("applying saturation before launch")?;
         eprintln!(
             "satur8: {:.2} via {} backend, launching {}",
             resolved.saturation.get(),
@@ -188,7 +217,7 @@ fn resolve_saturation(profiles: &Profiles, args: &RunArgs) -> Result<Option<Reso
     if let Some(s) = args.saturation {
         return Ok(Some(ResolvedSaturation {
             saturation: Saturation::try_new(s)?,
-            outputs: Vec::new(),
+            profile: None,
         }));
     }
     if let Some(name) = &args.profile {
@@ -197,7 +226,7 @@ fn resolve_saturation(profiles: &Profiles, args: &RunArgs) -> Result<Option<Reso
             .with_context(|| format!("no profile named '{name}' (see `satur8 profile list`)"))?;
         return Ok(Some(ResolvedSaturation {
             saturation: p.saturation(),
-            outputs: p.outputs.clone(),
+            profile: Some(p.clone()),
         }));
     }
     // Try to auto-match by the launched executable's basename.
@@ -206,7 +235,7 @@ fn resolve_saturation(profiles: &Profiles, args: &RunArgs) -> Result<Option<Reso
         eprintln!("satur8: matched profile '{}' by exe '{exe}'", p.name);
         return Ok(Some(ResolvedSaturation {
             saturation: p.saturation(),
-            outputs: p.outputs.clone(),
+            profile: Some(p.clone()),
         }));
     }
     Ok(None)
@@ -298,7 +327,7 @@ mod tests {
         let args = args(Some("named"), Some(2.2), "/games/auto-game");
         let resolved = resolve_saturation(&profiles(), &args).unwrap().unwrap();
         assert_eq!(resolved.saturation.get(), 2.2);
-        assert!(resolved.outputs.is_empty());
+        assert!(resolved.outputs().is_empty());
     }
 
     #[test]
@@ -306,7 +335,7 @@ mod tests {
         let args = args(Some("named"), None, "/games/auto-game");
         let resolved = resolve_saturation(&profiles(), &args).unwrap().unwrap();
         assert_eq!(resolved.saturation.get(), 1.4);
-        assert_eq!(resolved.outputs, ["DP-1", "HDMI-A-1"]);
+        assert_eq!(resolved.outputs(), ["DP-1", "HDMI-A-1"]);
     }
 
     #[test]
@@ -334,13 +363,33 @@ mod tests {
         assert_eq!(exe_basename("cs2"), "cs2");
     }
 
+    /// Rewritten for per-output support, like the daemon's test of the same
+    /// name: a backend that shows one saturation on every output gets the
+    /// profile once, on every output, and the user is told.
     #[test]
-    fn applies_profile_to_each_configured_output() {
+    fn a_profile_naming_outputs_changes_every_output_on_a_uniform_backend() {
         let mut backend = FakeBackend::default();
-        let outputs = vec!["DP-1".into(), "HDMI-A-1".into()];
+        let args = args(Some("named"), None, "/games/auto-game");
+        let resolved = resolve_saturation(&profiles(), &args).unwrap().unwrap();
 
-        apply_to_outputs(&mut backend, &outputs, Saturation::new(1.5)).unwrap();
+        let picture = launch_picture(&profiles(), &resolved, backend.per_output());
+        backend.apply_levels(&picture.levels).unwrap();
 
-        assert_eq!(backend.applied_outputs, outputs);
+        assert_eq!(backend.applied_outputs, ["all"]);
+        assert_eq!(
+            picture.notes,
+            [satur8_core::Note::ProfileChangesEveryOutput {
+                profile: "named".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn an_explicit_saturation_changes_every_output() {
+        let args = args(None, Some(2.2), "/games/auto-game");
+        let resolved = resolve_saturation(&profiles(), &args).unwrap().unwrap();
+        let picture = launch_picture(&profiles(), &resolved, true);
+        assert_eq!(picture.levels, Levels::uniform(Saturation::new(2.2)));
+        assert!(picture.notes.is_empty());
     }
 }

@@ -18,8 +18,9 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use satur8_backend::{all_outputs, select_backend, RestoreGuard};
+use satur8_core::levels::desktop_picture;
 use satur8_core::proc;
-use satur8_core::{Backend, MatchRule, Profile, Profiles, Saturation};
+use satur8_core::{Backend, Levels, MatchRule, Profile, Profiles, Saturation};
 use serde::{Deserialize, Serialize};
 use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
@@ -110,10 +111,10 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let profiles = load_profiles(Profiles::default());
     let backend = match select_backend() {
-        Ok(backend) => Some(RestoreGuard::inactive(
-            backend,
-            profiles.default_saturation(),
-        )),
+        Ok(backend) => {
+            let desktop = desktop_picture(&profiles, backend.per_output()).levels;
+            Some(RestoreGuard::inactive(backend, desktop))
+        }
         Err(error) => {
             eprintln!("satur8-gui: {error}");
             None
@@ -295,9 +296,12 @@ fn main() -> Result<(), slint::PlatformError> {
             {
                 let mut st = state.borrow_mut();
                 st.profiles.default_saturation = sat;
+                let st = &mut *st;
+                let profiles = &st.profiles;
                 if let Some(b) = st.backend.as_mut() {
-                    b.set_restore_to(Saturation::new(sat));
-                    if apply_or_reset(b.backend_mut(), sat).is_ok() {
+                    let desktop = desktop_picture(profiles, b.backend().per_output()).levels;
+                    b.set_restore_to(desktop.clone());
+                    if show_desktop(b.backend_mut(), &desktop).is_ok() {
                         b.disarm();
                     }
                 }
@@ -628,11 +632,15 @@ fn spawn_live_poll(w: slint::Weak<AppWindow>) {
 
 // ---------------- helpers ----------------
 
-fn apply_or_reset(backend: &mut dyn Backend, sat: f32) -> Result<(), satur8_core::BackendError> {
-    if (sat - 1.0).abs() < 1e-3 {
-        backend.reset(&all_outputs())
-    } else {
-        backend.apply(&all_outputs(), Saturation::new(sat))
+/// Show the desktop picture. An unchanged one (within the slider's step) is
+/// a reset, which lets the backend release its per-frame cost.
+fn show_desktop(
+    backend: &mut dyn Backend,
+    desktop: &Levels,
+) -> Result<(), satur8_core::BackendError> {
+    match desktop.uniform_value() {
+        Some(sat) if (sat.get() - 1.0).abs() < 1e-3 => backend.reset(&all_outputs()),
+        _ => backend.apply_levels(desktop),
     }
 }
 fn percent_to_sat(percent: f32) -> Option<f32> {
