@@ -13,6 +13,12 @@ GitHub release notes for that tag.
   `satur8 status` shows a matching short line. KDE and Game Mode reports are
   unchanged. The doctor's DRM CTM note no longer says KWin outside KDE: on
   GNOME it names GNOME Shell, elsewhere it is generic.
+- The desktop app's Status page in Steam Game Mode no longer says automatic
+  per-game switching needs KDE Plasma. There switching is only the background
+  service: the toggle turns it on or off with the session, Repair starts it
+  when it is meant to be on and never touches the KWin effect, and the KWin
+  effect and script rows read as not applicable or built into the service.
+  Other sessions are unchanged.
 
 ## v0.4.1 - 2026-11-22
 
