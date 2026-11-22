@@ -15,6 +15,7 @@
 # Usage:
 #   packaging/install.sh                 # per-user install
 #   packaging/install.sh --system        # system install (uses sudo)
+#   packaging/install.sh --enable-daemon # also turn on the background service
 #   packaging/install.sh --uninstall     # remove a per-user install
 set -euo pipefail
 
@@ -23,19 +24,33 @@ prebuilt="$repo/prebuilt/linux-x86_64"
 mode="user"
 action="install"
 effect_to_check=""
+enable_daemon=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --system) mode="system"; shift ;;
+        --enable-daemon) enable_daemon=true; shift ;;
         --uninstall) action="uninstall"; shift ;;
         --check-effect)
             action="check-effect"
             effect_to_check="${2:?--check-effect requires a plugin path}"
             shift 2
             ;;
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         *) echo "unknown arg: $1" >&2; exit 1 ;;
     esac
 done
+
+is_steamos() {
+    grep -Eq '^ID="?steamos"?$' /etc/os-release 2>/dev/null
+}
+
+# On SteamOS only the per-user install is supported: everything it writes is
+# under $HOME, which SteamOS updates leave alone.
+if [ "$action" = install ] && [ "$mode" = system ] && is_steamos; then
+    echo "--system is not supported on SteamOS." >&2
+    echo "Run packaging/install.sh without --system for a per-user install." >&2
+    exit 1
+fi
 
 bindir="$HOME/.local/bin"
 data="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -133,6 +148,14 @@ kwin_present() {
     command -v kwin_wayland >/dev/null 2>&1 ||
     command -v kwin_x11 >/dev/null 2>&1 ||
     [ -f /usr/include/kwin/config-kwin.h ]
+}
+
+# Whether this machine has a Steam Game Mode (gamescope) session to log into:
+# SteamOS's session files, or ChimeraOS's gamescope-session-plus unit.
+has_gamescope_session() {
+    [ -f /usr/share/wayland-sessions/gamescope-wayland.desktop ] ||
+    [ -f /usr/lib/systemd/user/gamescope-session.service ] ||
+    [ -f /usr/lib/systemd/user/gamescope-session-plus@.service ]
 }
 
 # Build the effect for the installed KWin. Returns non-zero, with the reason in
@@ -268,7 +291,12 @@ Installed. Next steps:
       qdbus6 org.kde.KWin /KWin reconfigure
 EOF
 
-    if [ -n "$effect_skip_reason" ]; then
+    if [ -n "$effect_skip_reason" ] && has_gamescope_session; then
+        echo
+        echo "NOTE: the KWin effect was not installed ($effect_skip_reason)."
+        echo "  Everything else is installed. Steam Game Mode does not use the KWin"
+        echo "  effect, so Satur8 works there without it."
+    elif [ -n "$effect_skip_reason" ]; then
         echo
         echo "NOTE: the KWin effect was not installed ($effect_skip_reason)."
         echo "  Everything else is installed. On KDE Plasma, install cmake, a C++"
@@ -277,11 +305,21 @@ EOF
 
     resume_runtime
     trap - EXIT
+
+    if [ "$enable_daemon" = true ]; then
+        say "Turning on the background service"
+        systemctl --user enable --now satur8-daemon.service
+    fi
 }
 
 uninstall_all() {
     if command -v systemctl >/dev/null 2>&1; then
         systemctl --user disable --now satur8-daemon.service >/dev/null 2>&1 || true
+    fi
+    # Put the colors back while the binary still exists. Stopping the daemon
+    # restores too, but only when it was running.
+    if [ -x "$bindir/satur8" ]; then
+        "$bindir/satur8" off >/dev/null 2>&1 || true
     fi
     if command -v qdbus6 >/dev/null 2>&1; then
         qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect satur8 \
