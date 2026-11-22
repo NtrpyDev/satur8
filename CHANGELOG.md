@@ -3,32 +3,6 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
-## Unreleased
-
-- `satur8 doctor` on GNOME Wayland now checks the GNOME Shell extension instead
-  of printing only "KWin backend unavailable": the GNOME Shell version, where
-  the extension is installed and which GNOME versions it lists, the state GNOME
-  Shell reports for it (with the error text when it failed to load), whether
-  its D-Bus service is running so Satur8 can apply, and one next step.
-  `satur8 status` shows a matching short line. KDE and Game Mode reports are
-  unchanged. The doctor's DRM CTM note no longer says KWin outside KDE: on
-  GNOME it names GNOME Shell, elsewhere it is generic.
-- The desktop app's Status page in Steam Game Mode no longer says automatic
-  per-game switching needs KDE Plasma. There switching is only the background
-  service: the toggle turns it on or off with the session, Repair starts it
-  when it is meant to be on and never touches the KWin effect, and the KWin
-  effect and script rows read as not applicable or built into the service.
-  Other sessions are unchanged.
-- The desktop app shows its own icon in the title bar and taskbar instead of a
-  generic one (checked on a Steam Deck in Desktop Mode). It now sets its app
-  ID to satur8, so the desktop matches the window to satur8.desktop, and every
-  install path (the tarball's installer, the Arch package and the Fedora
-  package) installs the icon that entry names.
-- In Steam Game Mode, a color table set by another program is no longer taken
-  for one of Satur8's just because its file name matches. Only a table in
-  Satur8's own folder counts as ours, so the other program's table is saved
-  and put back when Satur8 lets go, instead of being removed.
-
 ## v0.4.1 - 2026-11-22
 
 Release binaries that run on older systems, a working KWin effect on systems without build tools, including the Steam Deck's Desktop Mode, and GNOME 51 support.
@@ -105,6 +79,29 @@ Release binaries that run on older systems, a working KWin effect on systems wit
   running SteamOS 3.10, the Fedora effects on a real Fedora KDE or Bazzite
   desktop, the desktop app on the Deck beyond starting it, and a cold boot of
   the Deck.
+- `satur8 doctor` on GNOME Wayland now checks the GNOME Shell extension instead
+  of printing only "KWin backend unavailable": the GNOME Shell version, where
+  the extension is installed and which GNOME versions it lists, the state GNOME
+  Shell reports for it (with the error text when it failed to load), whether
+  its D-Bus service is running so Satur8 can apply, and one next step.
+  `satur8 status` shows a matching short line. KDE and Game Mode reports are
+  unchanged. The doctor's DRM CTM note no longer says KWin outside KDE: on
+  GNOME it names GNOME Shell, elsewhere it is generic.
+- The desktop app's Status page in Steam Game Mode no longer says automatic
+  per-game switching needs KDE Plasma. There switching is only the background
+  service: the toggle turns it on or off with the session, Repair starts it
+  when it is meant to be on and never touches the KWin effect, and the KWin
+  effect and script rows read as not applicable or built into the service.
+  Other sessions are unchanged.
+- The desktop app shows its own icon in the title bar and taskbar instead of a
+  generic one (checked on a Steam Deck in Desktop Mode). It now sets its app
+  ID to satur8, so the desktop matches the window to satur8.desktop, and every
+  install path (the tarball's installer, the Arch package and the Fedora
+  package) installs the icon that entry names.
+- In Steam Game Mode, a color table set by another program is no longer taken
+  for one of Satur8's just because its file name matches. Only a table in
+  Satur8's own folder counts as ours, so the other program's table is saved
+  and put back when Satur8 lets go, instead of being removed.
 
 ## v0.4.0 - 2026-11-22
 
