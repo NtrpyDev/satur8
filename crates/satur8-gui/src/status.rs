@@ -739,6 +739,36 @@ pub fn kwin_version_in(support: &str) -> Option<String> {
     })
 }
 
+/// The effect facts for a reachable KWin, from what repair reads (`state`),
+/// what KWin says (`supported`, `loaded`) and the running KWin's version.
+/// Repair's decision and the stale-file check need `running`: KWin keeps
+/// accepting an effect it loaded earlier after the file on disk was replaced
+/// by one for another KWin. With `running` unknown, KWin's answer is trusted.
+pub fn effect_facts(
+    state: satur8_kwin::repair::EffectState,
+    supported: bool,
+    loaded: bool,
+    running: Option<String>,
+) -> EffectFacts {
+    let state = satur8_kwin::repair::EffectState {
+        supported,
+        running,
+        ..state
+    };
+    let repair = Some(satur8_kwin::repair::decide(&state));
+    let stale_user = satur8_kwin::repair::stale_user_file(&state).map(String::from);
+    EffectFacts {
+        reachable: true,
+        supported,
+        loaded,
+        headers: state.headers,
+        system: state.system,
+        user: state.user,
+        repair,
+        stale_user,
+    }
+}
+
 /// Gather [`Facts`]. Read-only: D-Bus queries, `systemctl --user is-enabled`,
 /// and file reads. Can take a moment, so call it off the UI thread.
 pub fn probe() -> Facts {
@@ -750,25 +780,9 @@ pub fn probe() -> Facts {
     let conn = session().ok();
 
     let (effect, kwin_version, script_loaded) = if kde {
-        let effect = match satur8_kwin::KwinBackend::connect() {
-            Some(kwin) => {
-                let supported = kwin.is_supported().unwrap_or(false);
-                let state = satur8_kwin::repair::inspect(supported);
-                let repair = Some(satur8_kwin::repair::decide(&state));
-                let stale_user = satur8_kwin::repair::stale_user_file(&state).map(String::from);
-                EffectFacts {
-                    reachable: true,
-                    supported,
-                    loaded: kwin.is_loaded().unwrap_or(false),
-                    headers: state.headers,
-                    system: state.system,
-                    user: state.user,
-                    repair,
-                    stale_user,
-                }
-            }
-            None => EffectFacts::default(),
-        };
+        // The running KWin's version, from the support information repair and
+        // doctor read too. Asked once: it serves the effect check and the
+        // version shown on the page.
         let version = conn.as_ref().and_then(|c| {
             call::<String>(
                 c,
@@ -781,6 +795,18 @@ pub fn probe() -> Facts {
             .ok()
             .and_then(|text| kwin_version_in(&text))
         });
+        let effect = match satur8_kwin::KwinBackend::connect() {
+            Some(kwin) => {
+                let supported = kwin.is_supported().unwrap_or(false);
+                effect_facts(
+                    satur8_kwin::repair::inspect(supported),
+                    supported,
+                    kwin.is_loaded().unwrap_or(false),
+                    version.clone(),
+                )
+            }
+            None => EffectFacts::default(),
+        };
         (Some(effect), version, conn.as_ref().and_then(script_loaded))
     } else {
         (None, None, None)
@@ -1439,6 +1465,63 @@ mod tests {
         assert_eq!(
             describe_focused(&live).as_deref(),
             Some("Desktop or nothing reported yet")
+        );
+    }
+
+    /// What probe() hands effect_facts() on the Deck: KWin 6.7.3 running and
+    /// installed, the per-user file replaced by one for 6.7.9, the set holding
+    /// steamos-6.7.3, and KWin still answering supported from memory.
+    fn deck_state_with_a_wrong_file() -> satur8_kwin::repair::EffectState {
+        satur8_kwin::repair::EffectState {
+            headers: Some("6.7.3".into()),
+            user: Some("6.7.9".into()),
+            user_source_current: true,
+            set_match: Some(satur8_kwin::repair::SetPick {
+                key: "steamos-6.7.3".into(),
+                other_system: false,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn effect_row_uses_the_running_version_for_a_file_kwin_still_accepts() {
+        let mut facts = healthy();
+        facts.kwin_version = Some("6.7.3".into());
+        facts.effect = Some(effect_facts(
+            deck_state_with_a_wrong_file(),
+            true,
+            true,
+            Some("6.7.3".into()),
+        ));
+        let row = &health_rows(&facts)[1];
+        assert_eq!(row.level, Level::Problem);
+        assert_eq!(
+            row.detail,
+            "Built for KDE 6.7.9, but KDE 6.7.3 is installed. Repair replaces it"
+        );
+        let effect = facts
+            .effect
+            .as_ref()
+            .map(|e| (e.repair, e.stale_user.clone()));
+        assert_eq!(
+            effect,
+            Some((Some(RepairStep::InstallFromSet), Some("6.7.9".into())))
+        );
+
+        // Running version unknown: KWin's answer is trusted, as before.
+        facts.effect = Some(effect_facts(
+            deck_state_with_a_wrong_file(),
+            true,
+            true,
+            None,
+        ));
+        let row = &health_rows(&facts)[1];
+        assert_eq!(row.level, Level::Ok);
+        assert!(
+            row.detail.starts_with("Installed and matches"),
+            "{}",
+            row.detail
         );
     }
 }
