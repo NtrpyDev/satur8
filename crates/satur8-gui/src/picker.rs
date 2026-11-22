@@ -129,19 +129,21 @@ pub fn profile_for(profiles: &Profiles, app_id: u32) -> Option<usize> {
         .or_else(|| profiles.profiles.iter().position(has_id))
 }
 
-/// The profile a program already has: one matched by this executable (the
-/// `.exe` and `.x86_64` endings and letter case do not matter), else one with
-/// the name a new profile for it would get.
+/// The profile a program already has: the one the background service applies
+/// to this executable, else one with the name a new profile for it would
+/// get. The match by executable is `Profiles::match_exe` itself, the rule the
+/// service uses (the `.exe` and `.x86_64` endings and letter case do not
+/// matter, and a profile that is on is found ahead of one that is off), so
+/// the list never names or opens a profile other than the one applied.
 pub fn profile_for_program(profiles: &Profiles, exe: &str) -> Option<usize> {
     let wanted = program_name(exe).to_lowercase();
-    let same_exe = |profile: &Profile| {
-        profile
-            .match_rule
-            .exe
-            .as_deref()
-            .is_some_and(|e| program_name(e).to_lowercase() == wanted)
-    };
-    profiles.profiles.iter().position(same_exe).or_else(|| {
+    let applied = profiles.match_exe(exe).and_then(|found| {
+        profiles
+            .profiles
+            .iter()
+            .position(|profile| std::ptr::eq(profile, found))
+    });
+    applied.or_else(|| {
         profiles
             .profiles
             .iter()
@@ -1153,6 +1155,60 @@ mod tests {
         // Picking it again opens it; its saturation is left alone.
         profiles.profiles[0].saturation = 1.9;
         assert_eq!(pick(&profiles, &row, 0.5), Pick::Open(0));
+        assert_eq!(profile_for_program(&profiles, "escapefromtarkov"), Some(0));
+    }
+
+    /// Two profiles for one program, the earlier one off: the background
+    /// service applies the one that is on, so that is the one the list must
+    /// name and open.
+    #[test]
+    fn a_programs_profile_is_the_one_the_service_applies() {
+        let for_exe = |name: &str, exe: &str, enabled: bool, saturation: f32| Profile {
+            name: name.into(),
+            enabled,
+            saturation,
+            match_rule: MatchRule {
+                exe: Some(exe.into()),
+                window_class: None,
+                steam_app_id: None,
+            },
+            outputs: vec![],
+        };
+        let mut profiles = Profiles {
+            profiles: vec![
+                for_exe("old tarkov", "EscapeFromTarkov.exe", false, 1.2),
+                for_exe("tarkov", "escapefromtarkov", true, 1.6),
+            ],
+            ..Profiles::default()
+        };
+        let applied = profiles
+            .match_exe("EscapeFromTarkov.exe")
+            .unwrap()
+            .name
+            .clone();
+        assert_eq!(applied, "tarkov");
+        assert_eq!(
+            profile_for_program(&profiles, "EscapeFromTarkov.exe"),
+            Some(1)
+        );
+
+        // The row names that profile, and picking it opens that profile.
+        let running = Running::Procs(vec![Proc {
+            exe: "EscapeFromTarkov.exe".into(),
+            app_id: None,
+            is_game: true,
+        }]);
+        let listed = rows(&Library::NoSteam, &profiles, &running, None, "");
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].detail.contains("tarkov") && !listed[0].detail.contains("old tarkov"));
+        assert!(!listed[0].detail.contains("disabled"));
+        assert_eq!(pick(&profiles, &listed[0], 1.4), Pick::Open(1));
+
+        // With both off, the first is the one the service uses, and so here.
+        profiles.profiles[1].enabled = false;
+        assert_eq!(profile_for_program(&profiles, "escapefromtarkov"), Some(0));
+        // With only the earlier one on, it is that one.
+        profiles.profiles[0].enabled = true;
         assert_eq!(profile_for_program(&profiles, "escapefromtarkov"), Some(0));
     }
 
