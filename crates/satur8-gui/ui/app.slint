@@ -1,4 +1,11 @@
-import { ListView, ScrollView } from "std-widgets.slint";
+// Satur8 GUI. Layout, color, type and spacing follow the "game cards" renders
+// (render-source/toolkit.py, card_revision.py, directions.py in the test copy).
+
+import "fonts/SchibstedGrotesk-Bold.ttf";
+import "fonts/HankenGrotesk-Regular.ttf";
+import "fonts/HankenGrotesk-Medium.ttf";
+import "fonts/HankenGrotesk-SemiBold.ttf";
+import "fonts/JetBrainsMono-Medium.ttf";
 
 export struct GameRow {
     name: string,
@@ -11,153 +18,200 @@ export struct GameRow {
     has-icon: bool,
 }
 
+export struct HealthRowUi {
+    label: string,
+    detail: string,
+    level: int,   // 0 ok, 1 problem, 2 not applicable
+}
+
 export struct LogRow {
     text: string,
     time: string,
     ok: bool,
 }
 
-// Brand palette, matched to satur8.app.
+// Brand palette. Dark values are the render tokens (toolkit.py:7-8).
+// Light mode has no target design; it keeps the earlier light values and
+// extends them to the new tokens.
 export global Pal {
     in-out property <bool> dark: false;
-    // Single violet accent across all controls.
-    out property <color> accent:      dark ? #7c6cff : #6a5af0;
-    out property <color> accent-2:    dark ? #9b8dff : #8779f5;
-    // Secondary accent for everything that is not the saturation controls.
-    out property <color> alt:         dark ? #7c6cff : #6a5af0;
-    out property <color> alt-2:       dark ? #9b8dff : #8779f5;
-    out property <color> accent-soft: dark ? #1e1747 : #e9e6ff;
-    out property <color> bg:          dark ? #07080b : #eef1f6;
-    out property <color> card:        dark ? #0e1117 : #ffffff;
-    out property <color> note:        dark ? #11161f : #f3f6fb;
-    out property <color> line:        dark ? #1e2532 : #dde3ee;
-    out property <color> track:       dark ? #232a36 : #cfd6e2;
-    out property <color> ink:         dark ? #f3f6fb : #0a0c10;
-    out property <color> muted:       dark ? #828c9d : #5b6675;
-    out property <color> hover:       dark ? #1a2230 : #e6ebf3;
-    out property <color> danger-soft: dark ? #2a1517 : #f4d8d4;
+    out property <color> accent:      dark ? #1fe3cb : #007568;   // TEAL
+    out property <color> accent-2:    dark ? #6cf5e6 : #005e55;   // hover on solid
+    out property <color> accent-soft: dark ? #0c2d2b : #d8f3ed;   // TINT
+    out property <color> accent-soft-2: dark ? #10403c : #c6ece4; // hover on tint
+    out property <color> accent-line: dark ? #1f655c : #7cc8bc;   // TLINE
+    out property <color> on-accent:   dark ? #08211e : #ffffff;   // DARK
+    out property <color> bg:          dark ? #07080b : #eef1f6;   // BG
+    out property <color> sheet:       dark ? #0e1116 : #ffffff;   // SHEET
+    out property <color> surface:     dark ? #11151b : #ffffff;   // SURFACE
+    out property <color> raised:      dark ? #171c22 : #f3f6fb;   // LIGHT
+    out property <color> field:       dark ? #1c2229 : #cfd6e2;   // FIELD
+    out property <color> line:        dark ? #2b313a : #dde3ee;   // LINE
+    out property <color> line-soft:   dark ? #20262e : #e8ecf2;   // LESS
+    out property <color> ink:         dark ? #f3f6fb : #0a0c10;   // WHITE
+    out property <color> soft:        dark ? #c3cbd4 : #2b3442;   // SOFT
+    out property <color> muted:       dark ? #9ba6b3 : #5b6675;   // MUTED
+    out property <color> dim:         dark ? #8995a5 : #6b7685;   // DIM
+    out property <color> hover:       dark ? #1a2028 : #e6ebf3;
     out property <color> danger:      #ff5f6e;
-    // The site spectrum gradient (100deg: magenta -> coral -> amber -> cyan -> violet).
-    out property <brush> spectrum: @linear-gradient(100deg,
-        #ff3d8a 0%, #ff6a3d 26%, #ffc24b 48%, #1fe3cb 74%, #7c6cff 100%);
+    // Problem rows on the Status page.
+    out property <color> warn:        dark ? #f5b84b : #a86200;
 }
 
-component BrandLogo inherits HorizontalLayout {
-    height: 48px;
-    HorizontalLayout {
-        spacing: 1px;
+// Typography tokens. To swap fonts, change the `import` lines at the top of
+// this file, these family names and weights, and `default-font-family` on
+// AppWindow. Nothing else in the UI names a font.
+// Roles: reg = body text, med = labels, bold = strong labels and buttons,
+// head = headings and the big teal values, mono = numbers, paths and times.
+export global Font {
+    out property <string> reg:  "Hanken Grotesk";
+    out property <int>    reg-weight:  400;
+    out property <string> med:  "Hanken Grotesk";
+    out property <int>    med-weight:  500;
+    out property <string> bold: "Hanken Grotesk";
+    out property <int>    bold-weight: 600;
+    out property <string> head: "Schibsted Grotesk";
+    out property <int>    head-weight: 700;
+    out property <string> mono: "JetBrains Mono";
+    out property <int>    mono-weight: 500;
+}
+
+// Button styles from toolkit.py:78-92.
+// kind: 0 solid teal, 1 sub, 2 flat (outline), 3 tint, 4 bare.
+component Btn inherits Rectangle {
+    in property <string> text;
+    in property <int> kind: 1;
+    in property <image> icon;
+    in property <bool> has-icon: false;
+    in property <image> trailing;
+    in property <bool> has-trailing: false;
+    in property <length> font-size: 13px;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: 36px;
+    opacity: root.enabled ? 1 : 0.5;
+    width: row.preferred-width + 32px;
+    border-radius: 7px;
+    property <length> isz: root.height >= 30px ? 15px : 13px;
+    property <color> ink: kind == 0 ? Pal.on-accent
+        : kind == 3 ? Pal.accent
+        : kind == 1 ? Pal.ink
+        : Pal.soft;
+    background: kind == 0 ? (touch.has-hover ? Pal.accent-2 : Pal.accent)
+        : kind == 1 ? (touch.has-hover ? Pal.hover : Pal.raised)
+        : kind == 3 ? (touch.has-hover ? Pal.accent-soft-2 : Pal.accent-soft)
+        : (touch.has-hover ? Pal.hover : transparent);
+    border-width: kind == 4 ? 0px : 1px;
+    border-color: kind == 0 ? Pal.accent : kind == 3 ? Pal.accent-line : Pal.line;
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    row := HorizontalLayout {
         alignment: center;
-        Text {
-            text: "Satur";
-            color: Pal.ink;
-            font-family: "Fira Sans Condensed";
-            font-size: 30px;
-            font-weight: 800;
+        spacing: 7px;
+        if root.has-icon: VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon; colorize: root.ink;
+                width: root.isz; height: root.isz;
+            }
+        }
+        if root.text != "": Text {
+            text: root.text;
+            font-family: Font.bold; font-weight: Font.bold-weight;
+            font-size: root.font-size;
+            color: root.ink;
             vertical-alignment: center;
         }
-        // Spectrum-gradient "8" rendered as art, matching the site wordmark.
-        Image {
-            source: @image-url("brand-8.png");
-            height: 30px;
-            width: 21px;
-            image-fit: contain;
-            vertical-alignment: center;
+        if root.has-trailing: VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.trailing; colorize: root.ink;
+                width: root.isz; height: root.isz;
+            }
         }
     }
 }
 
-component NavItem inherits Rectangle {
+// Top-bar tab: text only, teal underline when active (toolkit.py:140-143).
+component Tab inherits Rectangle {
     in property <string> label;
     in property <bool> active;
     callback clicked;
-    height: 38px;
-    width: nav-label.preferred-width + 32px;
-    border-radius: 10px;
-    border-width: active ? 1px : 0px;
-    border-color: Pal.line;
-    background: active ? Pal.note : (touch.has-hover ? Pal.hover : transparent);
-    touch := TouchArea { clicked => { root.clicked(); } }
-    HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        nav-label := Text {
-            text: label;
-            font-family: "Fira Sans";
-            font-size: 15px;
-            font-weight: active ? 700 : 600;
-            color: Pal.ink;
-            vertical-alignment: center;
-        }
-    }
-}
-
-component Button inherits Rectangle {
-    in property <string> text;
-    in property <bool> primary: false;
-    callback clicked;
-    height: 36px;
-    width: label.preferred-width + 30px;
-    border-radius: 9px;
-    border-width: primary ? 0px : 1px;
-    border-color: Pal.line;
-    background: primary
-        ? (touch.pressed || touch.has-hover ? Pal.alt-2 : Pal.alt)
-        : (touch.pressed ? Pal.line : (touch.has-hover ? Pal.hover : Pal.note));
-
-    touch := TouchArea { clicked => { root.clicked(); } }
-
-    label := Text {
-        text: root.text;
-        color: primary ? white : Pal.ink;
-        font-family: "Fira Sans";
-        font-size: 14px;
-        font-weight: primary ? 700 : 600;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-}
-
-component ThemeToggle inherits Rectangle {
-    callback toggled(bool);
-    width: 38px;
-    height: 38px;
-    border-radius: 19px;
-    border-width: 1px;
-    border-color: Pal.line;
-    background: touch.pressed ? Pal.line : (touch.has-hover ? Pal.hover : Pal.note);
-
+    height: 64px;
     touch := TouchArea {
-        clicked => {
-            Pal.dark = !Pal.dark;
-            root.toggled(Pal.dark);
-        }
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
     }
-
     Text {
-        text: Pal.dark ? "☾" : "☀";
-        color: Pal.muted;
-        font-size: 18px;
-        font-weight: 700;
+        width: 100%; height: 100%;
+        text: root.label;
+        font-family: root.active ? Font.bold : Font.med;
+        font-weight: root.active ? Font.bold-weight : Font.med-weight;
+        font-size: 15px;
+        color: root.active ? Pal.ink : (touch.has-hover ? Pal.soft : Pal.muted);
         horizontal-alignment: center;
         vertical-alignment: center;
     }
+    if root.active: Rectangle {
+        x: 9px; y: 61px; width: root.width - 18px; height: 3px;
+        border-radius: 1px;
+        background: Pal.accent;
+    }
 }
 
-component Card inherits Rectangle {
-    background: Pal.card;
-    border-radius: 14px;
+// Saturation toggle, 32x18 (toolkit.py:98-100).
+component VibSwitch inherits Rectangle {
+    in-out property <bool> checked;
+    // controlled: the click only reports; the owner sets `checked` from the
+    // real state, so the binding is never overwritten.
+    in property <bool> controlled: false;
+    in property <bool> enabled: true;
+    callback toggled;
+    width: 32px; height: 18px; border-radius: 9px;
+    opacity: root.enabled ? 1 : 0.45;
+    background: checked ? Pal.accent : Pal.field;
     border-width: 1px;
-    border-color: Pal.line;
+    border-color: checked ? Pal.accent : Pal.line;
+    animate background { duration: 130ms; }
+    Rectangle {
+        width: 12px; height: 12px; border-radius: 6px;
+        x: root.checked ? 16px : 3px;
+        y: 3px;
+        background: root.checked ? Pal.on-accent : Pal.soft;
+        animate x { duration: 130ms; easing: ease-out; }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        enabled: root.enabled;
+        clicked => {
+            if (!root.controlled) {
+                root.checked = !root.checked;
+            }
+            root.toggled();
+        }
+    }
 }
 
-// Cyan track slider, replaces the std blue one.
+// Bipolar slider: the fill runs from the 0% center to the value
+// (toolkit.py:101-118). ruler adds the 21 tick marks of the Desktop page.
 component VibSlider inherits Rectangle {
-    in property <float> minimum;
-    in property <float> maximum;
+    in property <float> minimum: -100;
+    in property <float> maximum: 100;
     in-out property <float> value;
+    in property <bool> ruler: false;
     callback changed(float);
-    height: 18px;
+    callback released(float);
+    // Track center line inside this component.
+    property <length> cy: 6px;
     property <float> frac: (root.value - root.minimum) / (root.maximum - root.minimum);
+    property <length> pos: Math.floor(root.width * root.frac / 1px) * 1px;
+    property <length> mid: Math.floor(root.width / 2px) * 1px;
+    property <length> marks-y: root.ruler ? root.cy + 16px : root.cy + 9px;
+    height: root.marks-y + 15px;
 
     function commit(px: length) {
         root.value = Math.clamp(
@@ -167,60 +221,172 @@ component VibSlider inherits Rectangle {
     }
 
     Rectangle {
-        height: 6px; y: (parent.height - 6px) / 2;
-        border-radius: 3px; background: Pal.track;
+        x: 0; y: root.cy - 2px; width: root.width; height: 4px;
+        border-radius: 2px; background: Pal.field;
+    }
+    Rectangle {
+        x: Math.min(root.mid, root.pos); y: root.cy - 2px;
+        width: Math.max(1px, Math.abs(root.pos - root.mid)); height: 4px;
+        border-radius: 2px; background: Pal.accent;
+    }
+    if !root.ruler: Rectangle {
+        x: root.mid; y: root.cy - 4px; width: 1px; height: 8px;
+        background: Pal.dim;
+    }
+    for t in (root.ruler ? 21 : 0): Rectangle {
+        x: Math.round(t * root.width / 20 / 1px) * 1px;
+        y: root.cy + 7px;
+        width: 1px;
+        height: Math.mod(t, 5) == 0 ? 7px : 3px;
+        background: Math.mod(t, 5) == 0 ? Pal.dim : Pal.line;
+    }
+    Rectangle {
+        x: root.pos - 6px; y: root.cy - 6px; width: 12px; height: 12px;
+        border-radius: 6px; background: Pal.accent;
         Rectangle {
-            x: 0; y: 0; height: parent.height;
-            width: (root.width - 16px) * root.frac + 8px;
-            border-radius: 3px; background: Pal.accent;
+            x: 4px; y: 4px; width: 4px; height: 4px;
+            border-radius: 2px; background: Pal.on-accent;
         }
     }
-    Rectangle {
-        width: 16px; height: 16px; border-radius: 8px;
-        x: (root.width - 16px) * root.frac;
-        y: (parent.height - 16px) / 2;
-        background: Pal.ink;
-        border-width: 3px; border-color: Pal.accent;
+    Text {
+        x: 0; y: root.marks-y; width: 50px; height: 15px;
+        text: "-100%"; font-family: Font.mono; font-weight: Font.mono-weight; font-size: 10px; color: Pal.dim;
+        vertical-alignment: center;
     }
-    ta := TouchArea {
+    Text {
+        x: root.mid - 25px; y: root.marks-y; width: 50px; height: 15px;
+        text: "0%"; font-family: Font.mono; font-weight: Font.mono-weight; font-size: 10px; color: Pal.dim;
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+    Text {
+        x: root.width - 50px; y: root.marks-y; width: 50px; height: 15px;
+        text: "+100%"; font-family: Font.mono; font-weight: Font.mono-weight; font-size: 10px; color: Pal.dim;
+        horizontal-alignment: right; vertical-alignment: center;
+    }
+    // `moved` fires on every pointer move while the button is held
+    // (i-slint-core items/input_items.rs:179-187), so `changed` runs live
+    // during a drag. `released` fires once when the drag ends.
+    TouchArea {
+        x: 0; y: 0; width: root.width; height: root.cy + 10px;
+        mouse-cursor: pointer;
         moved => { root.commit(self.mouse-x); }
         clicked => { root.commit(self.mouse-x); }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                root.released(root.value);
+            }
+        }
     }
 }
 
-// Cyan toggle, replaces the std switch.
-component VibSwitch inherits Rectangle {
-    in-out property <bool> checked;
-    callback toggled;
-    width: 46px; height: 26px; border-radius: 13px;
-    background: checked ? Pal.accent : Pal.track;
-    animate background { duration: 130ms; }
+// Section title (toolkit.py:188) and page heading (toolkit.py:122).
+component Heading inherits Text {
+    font-family: Font.head; font-weight: Font.head-weight;
+    color: Pal.ink;
+    letter-spacing: -0.55px;
+    vertical-alignment: center;
+}
+component Section inherits Text {
+    font-family: Font.head; font-weight: Font.head-weight;
+    color: Pal.ink;
+    letter-spacing: -0.25px;
+    vertical-alignment: center;
+}
+component Para inherits Text {
+    font-family: Font.reg; font-weight: Font.reg-weight;
+    color: Pal.soft;
+    wrap: word-wrap;
+}
+
+// One game profile card, 350x146 at the render size (card_revision.py:12-25).
+component GameCard inherits Rectangle {
+    in property <GameRow> game;
+    callback percent-changed(float);
+    callback enabled-toggled(bool);
+    callback remove-clicked();
+    height: 146px;
+    background: Pal.surface;
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: Pal.line;
+
     Rectangle {
-        width: 20px; height: 20px; border-radius: 10px;
-        background: Pal.dark ? #07080b : white;
-        x: root.checked ? parent.width - 23px : 3px;
-        y: 3px;
-        animate x { duration: 130ms; easing: ease-out; }
+        x: 15px; y: 12px; width: 35px; height: 35px;
+        border-radius: 5px;
+        clip: true;
+        background: root.game.has-icon ? transparent : Pal.accent-soft;
+        border-width: root.game.has-icon ? 0px : 1px;
+        border-color: Pal.accent-line;
+        if root.game.has-icon: Image {
+            width: 100%; height: 100%;
+            source: root.game.icon;
+            image-fit: cover;
+        }
+        if !root.game.has-icon: Text {
+            width: 100%; height: 100%;
+            text: root.game.initial;
+            font-family: Font.head; font-weight: Font.head-weight; font-size: 20px; color: Pal.accent;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
     }
-    TouchArea { clicked => { root.checked = !root.checked; root.toggled(); } }
-}
-
-component Swatches inherits HorizontalLayout {
-    in property <[color]> colors;
-    spacing: 8px;
-    for c in colors: Rectangle {
-        height: 34px;
-        horizontal-stretch: 1;
-        border-radius: 7px;
-        background: c;
+    Text {
+        x: 61px; y: 8px; width: root.width - 102px; height: 27px;
+        text: root.game.name;
+        font-family: Font.head; font-weight: Font.head-weight; font-size: 18px; color: Pal.ink;
+        vertical-alignment: center; overflow: elide;
+    }
+    Text {
+        x: 62px; y: 33px; width: root.width - 104px; height: 16px;
+        text: root.game.exe;
+        font-family: Font.mono; font-weight: Font.mono-weight; font-size: 11px; color: Pal.muted;
+        vertical-alignment: center; overflow: elide;
+    }
+    Btn {
+        x: root.width - 44px; y: 13px; width: 27px; height: 27px;
+        kind: 4;
+        has-icon: true; icon: @image-url("icons/x.svg");
+        clicked => { root.remove-clicked(); }
+    }
+    Rectangle {
+        x: 15px; y: 58px; width: root.width - 30px; height: 1px;
+        background: Pal.line-soft;
+    }
+    Text {
+        x: 15px; y: 65px; width: 91px; height: 23px;
+        text: "Saturation";
+        font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.soft;
+        vertical-alignment: center;
+    }
+    Text {
+        x: 101px; y: 62px; width: 90px; height: 26px;
+        text: (root.game.percent > 0 ? "+" : "") + root.game.percent + "%";
+        font-family: Font.head; font-weight: Font.head-weight; font-size: 18px; color: Pal.accent;
+        vertical-alignment: center;
+    }
+    Text {
+        x: root.width - 110px; y: 65px; width: 55px; height: 22px;
+        text: "Enabled";
+        font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+        vertical-alignment: center;
+    }
+    VibSwitch {
+        x: root.width - 48px; y: 68px;
+        checked: root.game.enabled;
+        toggled => { root.enabled-toggled(self.checked); }
+    }
+    VibSlider {
+        x: 17px; y: 98px; width: root.width - 34px;
+        minimum: -100; maximum: 100;
+        value: root.game.percent;
+        changed(v) => { root.percent-changed(v); }
     }
 }
 
 export component AppWindow inherits Window {
     title: "Satur8";
     icon: @image-url("icon.png");
-    default-font-family: "Fira Sans";
-    default-font-size: 15px;
+    default-font-family: "Hanken Grotesk";
+    default-font-size: 14px;
     preferred-width: 1140px;
     preferred-height: 700px;
     min-width: 1040px;
@@ -229,480 +395,710 @@ export component AppWindow inherits Window {
 
     in-out property <[GameRow]> games;
     in-out property <[string]> running;
-    in-out property <string> outputs-note;
     in-out property <[LogRow]> activity;
-    in-out property <[color]> before-swatches;
-    in-out property <[color]> after-swatches;
-    in-out property <image> before-image;
-    in-out property <image> after-image;
-    in-out property <bool> has-image: false;
     in-out property <string> backend-name: "none";
     in-out property <bool> backend-ok: false;
     in-out property <string> version-text: "";
-    in-out property <string> current-profile-name: "-";
-    in-out property <int> current-percent: 0;
     in-out property <int> default-percent: 0;
     in-out property <int> nav: 0;
 
+
+    // Status page.
+    in-out property <[HealthRowUi]> health;
+    in-out property <bool> health-problem: false;
+    in-out property <bool> checking: false;
+    in-out property <bool> repairing: false;
+    in-out property <bool> switch-available: false;
+    in-out property <bool> switch-on: false;
+    in-out property <bool> switch-busy: false;
+    in-out property <string> switch-detail: "Checking...";
+    in-out property <bool> live-daemon: false;
+    in-out property <string> live-profile: "-";
+    in-out property <string> live-saturation: "-";
+    in-out property <string> live-saturation-note: "";
+    in-out property <bool> live-has-focused: false;
+    in-out property <string> live-focused: "";
+    in-out property <int> new-game-percent: 40;
+    in-out property <string> sysinfo-text: "";
+    callback check-health();
+    callback repair();
+    callback set-switching(bool);
+    callback new-game-changed(float);
+    callback new-game-released(float);
+    callback sysinfo-copied();
+    callback report-bug();
+    callback page-shown(int);
+
+    changed nav => { root.page-shown(root.nav); }
+
     callback default-changed(float);
+    callback default-released(float);
     callback percent-changed(int, float);
     callback toggle-enabled(int, bool);
     callback remove(int);
     callback add-running(int);
     callback refresh-running();
-    callback preview-profile(int);
-    callback apply-output();
-    callback restore-output();
-    callback preview-output();
     callback clear-activity();
     callback dark-mode-changed(bool);
     callback open-link(string);
 
-    // Background: ink base with a soft top-down wash on dark.
+    property <length> page-h: root.height - 65px;
+
+    // Main page geometry (page coordinates, below the 65px top bar).
+    // Desktop strip, then the "Games" row, then the card grid and the note.
+    // Cards keep the render's 15px column gap and 11px row gap; the column
+    // count follows the window width so cards stay between 300px and about
+    // 380px wide (350px at 1140px).
+    property <length> strip-y: 24px;
+    property <length> strip-h: 110px;
+    property <length> games-y: root.strip-y + root.strip-h + 28px;
+    property <length> grid-y: root.games-y + 37px + 16px;
+    property <int> grid-cols: Math.max(1, Math.floor((root.width - 45px) / 315px));
+    property <length> card-w: (root.width - 60px - (root.grid-cols - 1) * 15px) / root.grid-cols;
+    property <int> grid-rows: Math.ceil(root.games.length / root.grid-cols);
+    property <length> grid-h: root.grid-rows == 0 ? 146px : root.grid-rows * 157px - 11px;
+    property <length> note-y: root.grid-y + root.grid-h + 10px;
+
+    // ================= Top bar (toolkit.py:137-145) =================
     Rectangle {
-        width: 100%; height: 100%;
-        background: Pal.dark
-            ? @linear-gradient(180deg, #0b0e15 0%, #07080b 50%, #07080b 100%)
-            : Pal.bg;
+        x: 0; y: 0; width: root.width; height: 65px;
+        background: Pal.sheet;
+        Rectangle { x: 0; y: 64px; width: parent.width; height: 1px; background: Pal.line; }
+
+        Image {
+            x: 30px; y: 20px; width: 115px; height: 23px;
+            source: Pal.dark ? @image-url("word.png") : @image-url("word-light.png");
+            image-fit: fill;
+        }
+        Rectangle { x: 173px; y: 20px; width: 1px; height: 24px; background: Pal.line; }
+
+        Tab { x: 194px; y: 0; width: 58px; label: "Main";     active: root.nav == 0; clicked => { root.nav = 0; } }
+        Tab { x: 266px; y: 0; width: 66px; label: "Status";   active: root.nav == 1; clicked => { root.nav = 1; } }
+        Tab { x: 346px; y: 0; width: 60px; label: "About";    active: root.nav == 2; clicked => { root.nav = 2; } }
+
+        // Backend status pill. Right edge sits 141px from the window edge.
+        Rectangle {
+            y: 18px; height: 28px;
+            width: Math.max(155px, pill-text.preferred-width + 39px);
+            x: parent.width - 141px - self.width;
+            border-radius: 14px;
+            background: Pal.surface;
+            border-width: 1px;
+            border-color: Pal.line;
+            Rectangle {
+                x: 12px; y: 11px; width: 6px; height: 6px; border-radius: 3px;
+                background: root.backend-ok ? Pal.accent : Pal.danger;
+            }
+            pill-text := Text {
+                x: 25px; y: 0; height: 28px;
+                text: root.backend-ok ? (root.backend-name + " backend active") : "no backend in this session";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.soft;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            x: parent.width - 130px; y: 17px; width: 61px; height: 30px;
+            text: root.version-text;
+            font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.muted;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+        Btn {
+            x: parent.width - 60px; y: 16px; width: 32px; height: 32px;
+            kind: 2;
+            border-radius: 9px;
+            has-icon: true;
+            icon: Pal.dark ? @image-url("icons/moon.svg") : @image-url("icons/sun.svg");
+            clicked => {
+                Pal.dark = !Pal.dark;
+                root.dark-mode-changed(Pal.dark);
+            }
+        }
     }
 
-    VerticalLayout {
-        // ================= Header =================
+    // ================= Main: desktop strip + game cards =================
+    if root.nav == 0: main-page := Flickable {
+        x: 0; y: 65px; width: root.width; height: root.page-h;
+        viewport-height: Math.max(self.height, root.note-y + 19px + 28px);
+
+        // Desktop vibrance strip. One control row (title, value, slider,
+        // restore), the old Desktop page sentence under it in muted text.
         Rectangle {
-            height: 72px;
-            background: Pal.dark ? #0a0c12 : Pal.card;
-            // spectrum accent line along the bottom edge
-            Rectangle { height: 3px; y: parent.height - 3px; background: Pal.spectrum; }
-            HorizontalLayout {
-                padding-left: 24px;
-                padding-right: 24px;
-                spacing: 22px;
-                BrandLogo {
-                    y: (parent.height - self.height) / 2;
+            x: 30px; y: root.strip-y; width: parent.width - 60px; height: root.strip-h;
+            background: Pal.surface;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            property <length> row-mid: 40px;
+
+            strip-title := Section {
+                x: 24px; y: parent.row-mid - 17px; width: self.preferred-width; height: 34px;
+                text: "Desktop vibrance"; font-size: 22px;
+            }
+            strip-value := Text {
+                x: strip-title.x + strip-title.width + 24px; y: parent.row-mid - 22px; width: 104px; height: 44px;
+                text: (root.default-percent > 0 ? "+" : "") + root.default-percent + "%";
+                font-family: Font.head; font-weight: Font.head-weight; font-size: 32px; color: Pal.accent;
+                letter-spacing: -0.6px;
+                vertical-alignment: center;
+            }
+            VibSlider {
+                x: strip-value.x + strip-value.width + 16px; y: parent.row-mid - 6px;
+                width: parent.width - self.x - 24px - 232px - 32px;
+                minimum: -100; maximum: 100;
+                value: root.default-percent;
+                changed(v) => { root.default-changed(v); }
+                released(v) => { root.default-released(v); }
+            }
+            Btn {
+                x: parent.width - 24px - 232px; y: parent.row-mid - 20px; width: 232px; height: 41px;
+                kind: 2; font-size: 14px;
+                text: "Restore desktop to normal";
+                has-icon: true; icon: @image-url("icons/restore.svg");
+                clicked => {
+                    root.default-changed(0);
+                    root.default-released(0);
                 }
-                HorizontalLayout {
-                    height: 38px;
-                    y: (parent.height - self.height) / 2;
-                    spacing: 8px;
-                    NavItem { label: "Profiles"; active: nav == 0; clicked => { nav = 0; } }
-                    NavItem { label: "Settings"; active: nav == 1; clicked => { nav = 1; } }
-                    NavItem { label: "About"; active: nav == 2; clicked => { nav = 2; } }
+            }
+            Text {
+                x: 24px; y: 74px; width: parent.width - 48px; height: 18px;
+                text: "Saturates your whole desktop now, and is the default when no game profile is active. Leave at 0% to keep the desktop untouched.";
+                font-family: Font.reg; font-weight: Font.reg-weight; font-size: 13px; color: Pal.muted;
+                vertical-alignment: center; overflow: elide;
+            }
+        }
+
+        Section {
+            x: 30px; y: root.games-y; width: 400px; height: 37px;
+            text: "Games"; font-size: 28px;
+        }
+        add-btn := Btn {
+            x: parent.width - 209px; y: root.games-y; width: 179px; height: 37px;
+            kind: 0;
+            text: "Add running game";
+            has-icon: true; icon: @image-url("icons/plus.svg");
+            has-trailing: true; trailing: @image-url("icons/down.svg");
+            clicked => { running-popup.show(); }
+        }
+
+        // "Add running game" list. No render exists for the open state; it
+        // reuses the page tokens and components.
+        running-popup := PopupWindow {
+            x: add-btn.x + add-btn.width - 280px;
+            y: add-btn.y + add-btn.height + 6px;
+            width: 280px;
+            height: 320px;
+            Rectangle {
+                background: Pal.sheet;
+                border-radius: 11px;
+                border-width: 1px;
+                border-color: Pal.line;
+                Section {
+                    x: 16px; y: 10px; width: 170px; height: 31px;
+                    text: "Running programs"; font-size: 16px;
                 }
-                Rectangle { horizontal-stretch: 1; }
-                ThemeToggle {
-                    y: (parent.height - self.height) / 2;
-                    toggled(dark) => { root.dark-mode-changed(dark); }
+                Btn {
+                    x: parent.width - 86px; y: 12px; width: 70px; height: 27px;
+                    kind: 2; border-radius: 6px; font-size: 12px;
+                    text: "Refresh";
+                    clicked => { root.refresh-running(); }
                 }
-                Rectangle {
-                    y: (parent.height - self.height) / 2;
-                    height: 32px;
-                    width: pill.preferred-width + 30px;
-                    border-radius: 16px;
-                    background: backend-ok ? Pal.accent-soft : Pal.danger-soft;
-                    border-width: 1px;
-                    border-color: backend-ok ? Pal.alt : Pal.danger;
-                    pill := HorizontalLayout {
-                        padding-left: 14px; padding-right: 14px; spacing: 8px;
-                        Rectangle {
-                            width: 9px; height: 9px; border-radius: 5px;
-                            y: (parent.height - 9px) / 2;
-                            background: backend-ok ? Pal.alt : Pal.danger;
+                Rectangle { x: 16px; y: 49px; width: parent.width - 32px; height: 1px; background: Pal.line; }
+                Flickable {
+                    x: 8px; y: 54px; width: parent.width - 16px; height: parent.height - 62px;
+                    viewport-height: Math.max(self.height, root.running.length * 32px);
+                    for r[i] in root.running: Rectangle {
+                        x: 0; y: i * 32px; width: parent.width; height: 32px;
+                        border-radius: 6px;
+                        background: rt.has-hover ? Pal.raised : transparent;
+                        rt := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.add-running(i); running-popup.close(); }
                         }
                         Text {
-                            text: backend-ok ? (backend-name + " backend active") : "no backend in this session";
-                            color: Pal.ink; font-size: 14px; vertical-alignment: center;
+                            x: 8px; y: 0; width: parent.width - 16px; height: parent.height;
+                            text: r;
+                            font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.soft;
+                            vertical-alignment: center; overflow: elide;
                         }
                     }
+                }
+            }
+        }
+
+        if root.games.length == 0: Rectangle {
+            x: 30px; y: root.grid-y; width: parent.width - 60px; height: 146px;
+            background: Pal.surface;
+            border-radius: 11px; border-width: 1px; border-color: Pal.line;
+            Text {
+                width: 100%; height: 100%;
+                text: "No games yet.\nClick “Add running game”, pick your game, and set its satur8.";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.muted;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+        }
+
+        for game[i] in root.games: GameCard {
+            x: 30px + Math.mod(i, root.grid-cols) * (root.card-w + 15px);
+            y: root.grid-y + Math.floor(i / root.grid-cols) * 157px;
+            width: root.card-w;
+            game: game;
+            percent-changed(v) => { root.percent-changed(i, v); }
+            enabled-toggled(on) => { root.toggle-enabled(i, on); }
+            remove-clicked => { root.remove(i); }
+        }
+
+        Image {
+            x: 31px; y: root.note-y + 3px; width: 14px; height: 14px;
+            source: @image-url("icons/info.svg"); colorize: Pal.dim;
+        }
+        Text {
+            x: 52px; y: root.note-y; width: 879px; height: 19px;
+            text: "Profiles are matched by the game's executable name.";
+            font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+            vertical-alignment: center;
+        }
+    }
+
+    // ================= Status =================
+    // Health (first), Right now, Settings, Help, and a compact Activity log.
+    // Two columns share the render's 16px gutter; the page scrolls when the
+    // window is shorter than the content.
+    if root.nav == 1: status-page := Flickable {
+        x: 0; y: 65px; width: root.width; height: root.page-h;
+        property <length> left-w: Math.floor((self.width - 76px) * 0.58 / 1px) * 1px;
+        property <length> right-x: 46px + self.left-w;
+        property <length> right-w: self.width - 76px - self.left-w;
+        property <length> top-h: 228px;
+        property <length> mid-y: 24px + self.top-h + 16px;
+        // Settings and Help share a row; it grows if the Help text wraps to
+        // more lines on a narrow window, so the buttons never touch it.
+        property <length> mid-h: Math.max(164px, help-para.y + help-para.height + 12px + 36px + 19px);
+        property <length> act-y: self.mid-y + self.mid-h + 16px;
+        viewport-height: Math.max(self.height, self.act-y + 159px + 28px);
+
+        // ---------------- Health ----------------
+        Rectangle {
+            x: 30px; y: 24px; width: status-page.left-w; height: status-page.top-h;
+            background: Pal.surface;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            Section {
+                x: 19px; y: 11px; width: 200px; height: 35px;
+                text: "Health"; font-size: 23px;
+            }
+            check-btn := Btn {
+                x: parent.width - 19px - self.width; y: 15px; width: 112px; height: 27px;
+                kind: 2; border-radius: 6px; font-size: 12px;
+                enabled: !root.checking && !root.repairing && !root.switch-busy;
+                text: root.checking ? "Checking..." : "Check again";
+                clicked => { root.check-health(); }
+            }
+            Btn {
+                x: check-btn.x - 8px - self.width; y: 15px; width: 92px; height: 27px;
+                kind: root.health-problem ? 0 : 2; border-radius: 6px; font-size: 12px;
+                enabled: !root.checking && !root.repairing && !root.switch-busy;
+                text: root.repairing ? "Repairing..." : "Repair";
+                clicked => { root.repair(); }
+            }
+            Rectangle { x: 19px; y: 52px; width: parent.width - 38px; height: 1px; background: Pal.line; }
+            for item[i] in root.health: Rectangle {
+                x: 19px; y: 56px + i * 42px; width: parent.width - 38px; height: 42px;
+                Rectangle {
+                    x: 1px; y: 12px; width: 7px; height: 7px; border-radius: 3.5px;
+                    background: item.level == 0 ? Pal.accent : item.level == 1 ? Pal.warn : Pal.dim;
                 }
                 Text {
-                    text: version-text;
-                    y: (parent.height - self.height) / 2;
-                    color: Pal.muted;
-                    font-size: 12px;
-                    vertical-alignment: center;
+                    x: 17px; y: 3px; width: parent.width - 17px; height: 20px;
+                    text: item.label;
+                    font-family: Font.bold; font-weight: Font.bold-weight; font-size: 13px;
+                    color: item.level == 2 ? Pal.muted : Pal.ink;
+                    vertical-alignment: center; overflow: elide;
                 }
+                Text {
+                    x: 17px; y: 21px; width: parent.width - 17px; height: 17px;
+                    text: item.detail;
+                    font-family: Font.med; font-weight: Font.med-weight; font-size: 12px;
+                    color: item.level == 1 ? Pal.warn : Pal.muted;
+                    vertical-alignment: center; overflow: elide;
+                }
+                if i < root.health.length - 1: Rectangle {
+                    x: 0; y: 41px; width: parent.width; height: 1px;
+                    background: Pal.line-soft;
+                }
+            }
+            if root.health.length == 0: Text {
+                x: 19px; y: 56px; width: parent.width - 38px; height: 42px;
+                text: "Checking...";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center;
             }
         }
 
-            // ---- body: Profiles page ----
-            if nav == 0: HorizontalLayout {
-                vertical-stretch: 1;
-                padding: 22px;
-                spacing: 18px;
+        // ---------------- Right now ----------------
+        Rectangle {
+            x: status-page.right-x; y: 24px; width: status-page.right-w; height: status-page.top-h;
+            background: Pal.sheet;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            Section {
+                x: 19px; y: 11px; width: 200px; height: 35px;
+                text: "Right now"; font-size: 23px;
+            }
+            // Small live marker: teal while the background service answers.
+            Rectangle {
+                x: parent.width - 19px - 7px; y: 25px; width: 7px; height: 7px; border-radius: 3.5px;
+                background: root.live-daemon ? Pal.accent : Pal.dim;
+            }
+            Text {
+                x: parent.width - 120px - 30px; y: 15px; width: 120px; height: 27px;
+                text: root.live-daemon ? "live" : "service off";
+                font-family: Font.mono; font-weight: Font.mono-weight; font-size: 11px; color: Pal.muted;
+                horizontal-alignment: right; vertical-alignment: center;
+            }
+            Rectangle { x: 19px; y: 52px; width: parent.width - 38px; height: 1px; background: Pal.line; }
 
-                // ============ main column ============
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    spacing: 16px;
+            // Saturation applied: always shown.
+            Text {
+                x: 19px; y: 62px; width: parent.width - 38px; height: 18px;
+                text: "Saturation applied";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center;
+            }
+            live-sat := Text {
+                x: 19px; y: 80px; width: self.preferred-width; height: 32px;
+                text: root.live-saturation;
+                font-family: Font.head; font-weight: Font.head-weight; font-size: 24px; color: Pal.accent;
+                vertical-alignment: center;
+            }
+            Text {
+                x: live-sat.x + live-sat.width + 12px; y: 81px;
+                width: parent.width - 19px - self.x; height: 32px;
+                text: root.live-saturation-note;
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center; overflow: elide;
+            }
+            Rectangle { x: 19px; y: 120px; width: parent.width - 38px; height: 1px; background: Pal.line-soft; }
 
-                    Card {
-                        vertical-stretch: 1;
-                        VerticalLayout {
-                            padding: 18px;
-                            spacing: 4px;
-
-                            HorizontalLayout {
-                                VerticalLayout {
-                                    Text { text: "Profiles"; font-size: 20px; font-weight: 700; color: Pal.ink; }
-                                    Text { text: "Configure per-game digital vibrance (saturation) profiles."; color: Pal.muted; font-size: 13px; }
-                                }
-                                Rectangle { horizontal-stretch: 1; }
-                                Button {
-                                    text: "＋  Add running game  ▾";
-                                    primary: true;
-                                    clicked => { running-popup.show(); }
-                                }
-                            }
-
-                            running-popup := PopupWindow {
-                                x: parent.width - 280px;
-                                y: 52px;
-                                width: 270px;
-                                height: 320px;
-                                Rectangle {
-                                    background: Pal.card; border-radius: 12px; border-width: 1px; border-color: Pal.line;
-                                    VerticalLayout {
-                                        padding: 10px; spacing: 6px;
-                                        HorizontalLayout {
-                                            Text { text: "Running programs"; font-weight: 700; font-size: 13px; color: Pal.ink; }
-                                            Rectangle { horizontal-stretch: 1; }
-                                            Button { text: "Refresh"; clicked => { root.refresh-running(); } }
-                                        }
-                                        ScrollView {
-                                            VerticalLayout {
-                                                spacing: 2px;
-                                                for r[i] in running: Rectangle {
-                                                    height: 30px; border-radius: 6px;
-                                                    background: rt.has-hover ? Pal.hover : transparent;
-                                                    rt := TouchArea { clicked => { root.add-running(i); running-popup.close(); } }
-                                                    HorizontalLayout {
-                                                        padding-left: 8px;
-                                                        Text { text: r; vertical-alignment: center; color: Pal.ink; overflow: elide; }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Rectangle { height: 10px; }
-
-                            // table header
-                            HorizontalLayout {
-                                height: 22px;
-                                Text { text: "Profile"; width: 212px; color: Pal.muted; font-size: 12px; font-weight: 600; }
-                                Text { text: "Saturation"; horizontal-stretch: 1; color: Pal.muted; font-size: 12px; font-weight: 600; }
-                                Text { text: "Enabled"; width: 76px; color: Pal.muted; font-size: 12px; font-weight: 600; horizontal-alignment: center; }
-                                Text { text: "Preview"; width: 130px; color: Pal.muted; font-size: 12px; font-weight: 600; horizontal-alignment: center; }
-                            }
-                            Rectangle { height: 1px; background: Pal.line; }
-
-                            if games.length == 0: Rectangle {
-                                height: 130px;
-                                Text {
-                                    text: "No games yet.\nClick “Add running game”, pick your game, and set its satur8.";
-                                    color: Pal.muted; horizontal-alignment: center; vertical-alignment: center;
-                                }
-                            }
-
-                            ListView {
-                                vertical-stretch: 1;
-                                for game[i] in games: Rectangle {
-                                    height: 88px;
-                                    Rectangle { height: 1px; y: parent.height - 1px; background: Pal.line; }
-                                    HorizontalLayout {
-                                        spacing: 0px;
-                                        // Profile (icon + name/exe) = 212px
-                                        HorizontalLayout {
-                                            width: 212px;
-                                            spacing: 12px;
-                                            Rectangle {
-                                                width: 48px; height: 48px; border-radius: 12px;
-                                                y: (parent.height - 48px) / 2; background: game.accent;
-                                                clip: true;
-                                                if game.has-icon: Image {
-                                                    width: 48px; height: 48px;
-                                                    source: game.icon;
-                                                    image-fit: cover;
-                                                }
-                                                if !game.has-icon: Text { text: game.initial; color: white; font-size: 20px; font-weight: 800; }
-                                            }
-                                            VerticalLayout {
-                                                alignment: center;
-                                                Text { text: game.name; font-size: 15px; font-weight: 700; color: Pal.ink; overflow: elide; }
-                                                Text { text: game.exe; font-size: 12px; color: Pal.muted; overflow: elide; }
-                                            }
-                                        }
-                                        // Saturation
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 6px;
-                                            Text {
-                                                text: (game.percent > 0 ? "+" : "") + game.percent + "%";
-                                                color: Pal.ink; font-size: 14px; font-weight: 700;
-                                            }
-                                            VibSlider {
-                                                minimum: -100; maximum: 100; value: game.percent;
-                                                changed(v) => { root.percent-changed(i, v); }
-                                            }
-                                            HorizontalLayout {
-                                                Text { text: "-100%"; color: Pal.muted; font-size: 10px; }
-                                                Rectangle { horizontal-stretch: 1; }
-                                                Text { text: "0%"; color: Pal.muted; font-size: 10px; }
-                                                Rectangle { horizontal-stretch: 1; }
-                                                Text { text: "+100%"; color: Pal.muted; font-size: 10px; }
-                                            }
-                                        }
-                                        // Enabled
-                                        HorizontalLayout {
-                                            width: 76px;
-                                            alignment: center;
-                                            VerticalLayout {
-                                                alignment: center;
-                                                VibSwitch { checked: game.enabled; toggled => { root.toggle-enabled(i, self.checked); } }
-                                            }
-                                        }
-                                        // Preview + menu
-                                        HorizontalLayout {
-                                            width: 130px;
-                                            alignment: center;
-                                            spacing: 4px;
-                                            VerticalLayout {
-                                                alignment: center;
-                                                Button { text: "Preview"; clicked => { root.preview-profile(i); } }
-                                            }
-                                            VerticalLayout {
-                                                alignment: center;
-                                                Button { text: "✕"; clicked => { root.remove(i); } }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Rectangle { height: 6px; }
-                            Text { text: "ⓘ  Profiles are matched by the game's executable name."; color: Pal.muted; font-size: 12px; }
-                        }
-                    }
-
-                    // Activity
-                    Card {
-                        height: 176px;
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 6px;
-                            HorizontalLayout {
-                                Text { text: "Activity"; font-size: 15px; font-weight: 700; color: Pal.ink; }
-                                Rectangle { horizontal-stretch: 1; }
-                                Button { text: "Clear"; clicked => { root.clear-activity(); } }
-                            }
-                            ScrollView {
-                                VerticalLayout {
-                                    spacing: 4px;
-                                    for entry in activity: HorizontalLayout {
-                                        spacing: 10px;
-                                        height: 24px;
-                                        Rectangle {
-                                            width: 16px; height: 16px; border-radius: 8px;
-                                            y: (parent.height - 16px) / 2;
-                                            background: entry.ok ? Pal.alt : Pal.muted;
-                                        }
-                                        Text { text: entry.text; color: Pal.ink; font-size: 13px; vertical-alignment: center; }
-                                        Rectangle { horizontal-stretch: 1; }
-                                        Text { text: entry.time; color: Pal.muted; font-size: 12px; vertical-alignment: center; }
-                                    }
-                                }
-                            }
-                        }
-                    }
+            if root.live-daemon: Rectangle {
+                x: 19px; y: 126px; width: parent.width - 38px; height: 96px;
+                Text {
+                    x: 0; y: 2px; width: parent.width / 2; height: 18px;
+                    text: "Active profile";
+                    font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                    vertical-alignment: center;
                 }
-
-                // ============ right: Live Preview ============
-                Card {
-                    width: 300px;
-                    VerticalLayout {
-                        padding: 18px;
-                        spacing: 10px;
-                        Text { text: "Live Preview"; font-size: 16px; font-weight: 700; color: Pal.ink; }
-                        HorizontalLayout {
-                            spacing: 6px;
-                            Text { text: "Current profile:"; color: Pal.muted; font-size: 13px; }
-                            Text { text: current-profile-name; color: Pal.ink; font-size: 13px; font-weight: 600; }
-                        }
-                        HorizontalLayout {
-                            spacing: 6px;
-                            Text { text: "Saturation:"; color: Pal.muted; font-size: 13px; }
-                            Text { text: (current-percent > 0 ? "+" : "") + current-percent + "%"; color: Pal.ink; font-size: 13px; font-weight: 700; }
-                        }
-                        Rectangle { height: 1px; background: Pal.line; }
-
-                        // Before / After preview - real game art, shown whole.
-                        if has-image: VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "Before"; color: Pal.muted; font-size: 12px; }
-                            Rectangle {
-                                height: 100px; border-radius: 10px; clip: true; background: #05070a;
-                                border-width: 1px; border-color: Pal.line;
-                                Image { source: before-image; image-fit: contain; width: 100%; height: 100%; }
-                            }
-                            Rectangle { height: 4px; }
-                            Text { text: "After"; color: Pal.muted; font-size: 12px; font-weight: 600; }
-                            Rectangle {
-                                height: 100px; border-radius: 10px; clip: true; background: #05070a;
-                                border-width: 1px; border-color: Pal.line;
-                                Image { source: after-image; image-fit: contain; width: 100%; height: 100%; }
-                            }
-                        }
-                        if !has-image: VerticalLayout {
-                            spacing: 8px;
-                            Text { text: "Before"; color: Pal.muted; font-size: 12px; }
-                            Swatches { colors: before-swatches; }
-                            Text { text: "After"; color: Pal.muted; font-size: 12px; }
-                            Swatches { colors: after-swatches; }
-                        }
-                        Rectangle { height: 4px; }
-                        Rectangle {
-                            height: 66px;
-                            background: Pal.note; border-radius: 10px;
-                            border-width: 1px; border-color: Pal.line;
-                            VerticalLayout {
-                                padding: 10px;
-                                Text {
-                                    text: "Preview applies to your whole desktop temporarily so you can eyeball it. Click Restore to undo. " + outputs-note;
-                                    color: Pal.muted;
-                                    font-size: 11px;
-                                    wrap: word-wrap;
-                                    horizontal-stretch: 1;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-                        Rectangle { vertical-stretch: 1; }
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Button { text: "↺ Restore"; clicked => { root.restore-output(); } }
-                            Button { text: "Preview on desktop"; primary: true; clicked => { root.preview-output(); } }
-                            Rectangle { horizontal-stretch: 1; }
-                        }
-                    }
+                Text {
+                    x: 0; y: 20px; width: parent.width / 2 - 8px; height: 24px;
+                    text: root.live-profile;
+                    font-family: Font.bold; font-weight: Font.bold-weight; font-size: 15px; color: Pal.ink;
+                    vertical-alignment: center; overflow: elide;
+                }
+                if root.live-has-focused: Text {
+                    x: parent.width / 2; y: 2px; width: parent.width / 2; height: 18px;
+                    text: "Last focused window";
+                    font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                    vertical-alignment: center;
+                }
+                if root.live-has-focused: Text {
+                    x: parent.width / 2; y: 20px; width: parent.width / 2; height: 24px;
+                    text: root.live-focused;
+                    font-family: Font.mono; font-weight: Font.mono-weight; font-size: 12px; color: Pal.soft;
+                    vertical-alignment: center; overflow: elide;
+                }
+                Text {
+                    x: 0; y: 54px; width: parent.width; height: 34px;
+                    text: "Updates on its own every few seconds while this page is open.";
+                    font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.dim;
+                    wrap: word-wrap;
                 }
             }
-
-            // ---- Settings page ----
-            if nav == 1: VerticalLayout {
-                vertical-stretch: 1;
-                alignment: start;
-                padding: 24px;
-                spacing: 14px;
-                Text { text: "Settings"; font-size: 20px; font-weight: 700; color: Pal.ink; }
-                Card {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 8px;
-                        Text { text: "Desktop vibrance"; font-weight: 600; color: Pal.ink; }
-                        Text {
-                            text: "Saturates your whole desktop now, and is the default when no game profile is active. Leave at 0% to keep the desktop untouched.";
-                            color: Pal.muted; font-size: 12px; wrap: word-wrap;
-                        }
-                        HorizontalLayout {
-                            spacing: 12px;
-                            VibSlider {
-                                minimum: -100; maximum: 100; value: default-percent;
-                                horizontal-stretch: 1;
-                                y: (parent.height - self.height) / 2;
-                                changed(v) => { root.default-changed(v); }
-                            }
-                            Text { text: (default-percent > 0 ? "+" : "") + default-percent + "%"; color: Pal.ink; font-weight: 700; width: 52px; vertical-alignment: center; }
-                        }
-                        HorizontalLayout {
-                            Button { text: "↺ Restore desktop to normal"; clicked => { root.default-changed(0); } }
-                            Rectangle { horizontal-stretch: 1; }
-                        }
-                    }
-                }
-                Card {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 8px;
-                        Text { text: "Auto-apply per game"; font-weight: 600; color: Pal.ink; }
-                        Text {
-                            text: "Satur8 watches the focused game window and applies the matching profile automatically. No Steam launch options are required.";
-                            color: Pal.muted; font-size: 12px; wrap: word-wrap;
-                        }
-                        Text {
-                            text: "When you leave the game, Satur8 restores your desktop vibrance setting.";
-                            color: Pal.muted; font-size: 12px; wrap: word-wrap;
-                        }
-                    }
-                }
-                Rectangle { vertical-stretch: 1; }
+            if !root.live-daemon: Text {
+                x: 19px; y: 130px; width: parent.width - 38px; height: 80px;
+                text: "The background service is not running, so no game profile is active and nothing switches per game. The value above is the desktop setting.";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.soft;
+                wrap: word-wrap;
             }
+        }
 
-            // ---- About page ----
-            if nav == 2: VerticalLayout {
-                vertical-stretch: 1;
-                padding: 24px;
-                spacing: 14px;
-                Text { text: "About"; font-size: 20px; font-weight: 700; color: Pal.ink; }
-                ScrollView {
-                    vertical-stretch: 1;
-                    VerticalLayout {
-                        spacing: 14px;
-                        Card {
-                            VerticalLayout {
-                                padding: 18px;
-                                spacing: 10px;
-                                Text { text: "Satur8"; font-size: 28px; font-weight: 800; color: Pal.ink; }
-                                Text {
-                                    text: "Per-game digital vibrance for Linux. Satur8 watches focused game windows, applies the matching saturation profile, and restores your desktop setting when you leave the game.";
-                                    color: Pal.muted; font-size: 14px; wrap: word-wrap;
-                                }
-                            }
-                        }
-                        Card {
-                            VerticalLayout {
-                                padding: 18px;
-                                spacing: 8px;
-                                Text { text: "Why it is different"; font-size: 16px; font-weight: 700; color: Pal.ink; }
-                                Text {
-                                    text: "Satur8 changes the display color pipeline after the game renders. It does not inject into, read, or modify the game process.";
-                                    color: Pal.muted; font-size: 13px; wrap: word-wrap;
-                                }
-                                Text {
-                                    text: "That makes it a cleaner fit for games with trusted or anti-cheat modes than shader injectors like vkBasalt or ReShade-style tools.";
-                                    color: Pal.muted; font-size: 13px; wrap: word-wrap;
-                                }
-                            }
-                        }
-                        Card {
-                            VerticalLayout {
-                                padding: 18px;
-                                spacing: 8px;
-                                Text { text: "Built in Rust"; font-size: 16px; font-weight: 700; color: Pal.ink; }
-                                Text {
-                                    text: "The CLI, GUI, daemon, tray, profile model, and backends are written in Rust so the app stays native, small, and event-driven with no garbage collector running while you play.";
-                                    color: Pal.muted; font-size: 13px; wrap: word-wrap;
-                                }
-                            }
-                        }
-                        Card {
-                            VerticalLayout {
-                                padding: 18px;
-                                spacing: 12px;
-                                Text { text: "Links"; font-size: 16px; font-weight: 700; color: Pal.ink; }
-                                HorizontalLayout {
-                                    spacing: 10px;
-                                    Button { text: "satur8.app"; primary: true; clicked => { root.open-link("https://satur8.app"); } }
-                                    Button { text: "Twitter / X  @NtrpyDev"; clicked => { root.open-link("https://x.com/NtrpyDev"); } }
-                                    Button { text: "GitHub  NtrpyDev/satur8"; clicked => { root.open-link("https://github.com/NtrpyDev/satur8"); } }
-                                    Rectangle { horizontal-stretch: 1; }
-                                }
-                            }
-                        }
+        // ---------------- Settings ----------------
+        Rectangle {
+            x: 30px; y: status-page.mid-y; width: status-page.left-w; height: status-page.mid-h;
+            background: Pal.sheet;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            Section {
+                x: 19px; y: 11px; width: 200px; height: 35px;
+                text: "Settings"; font-size: 23px;
+            }
+            Rectangle { x: 19px; y: 52px; width: parent.width - 38px; height: 1px; background: Pal.line; }
+
+            Text {
+                x: 19px; y: 60px; width: parent.width - 90px; height: 20px;
+                text: "Automatic per-game switching";
+                font-family: Font.bold; font-weight: Font.bold-weight; font-size: 14px;
+                color: root.switch-available ? Pal.ink : Pal.muted;
+                vertical-alignment: center;
+            }
+            Text {
+                x: 19px; y: 80px; width: parent.width - 90px; height: 17px;
+                text: root.switch-busy ? "Applying..." : root.switch-detail;
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center; overflow: elide;
+            }
+            VibSwitch {
+                x: parent.width - 19px - 32px; y: 69px;
+                controlled: true;
+                checked: root.switch-on;
+                enabled: root.switch-available && !root.switch-busy && !root.checking && !root.repairing;
+                toggled => { root.set-switching(!root.switch-on); }
+            }
+            Rectangle { x: 19px; y: 105px; width: parent.width - 38px; height: 1px; background: Pal.line-soft; }
+
+            Text {
+                x: 19px; y: 112px; width: 230px; height: 20px;
+                text: "Starting saturation for new games";
+                font-family: Font.bold; font-weight: Font.bold-weight; font-size: 14px; color: Pal.ink;
+                vertical-alignment: center;
+            }
+            Text {
+                x: 19px; y: 132px; width: 230px; height: 17px;
+                text: "Used when you add a running game";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                vertical-alignment: center;
+            }
+            new-game-slider := VibSlider {
+                x: parent.width - 19px - self.width; y: 120px;
+                width: Math.max(150px, parent.width - 19px - 250px - 64px - 12px);
+                minimum: -100; maximum: 100;
+                value: root.new-game-percent;
+                changed(v) => { root.new-game-changed(v); }
+                released(v) => { root.new-game-released(v); }
+            }
+            Text {
+                x: new-game-slider.x - 12px - 60px; y: 112px; width: 60px; height: 28px;
+                text: (root.new-game-percent > 0 ? "+" : "") + root.new-game-percent + "%";
+                font-family: Font.head; font-weight: Font.head-weight; font-size: 18px; color: Pal.accent;
+                horizontal-alignment: right; vertical-alignment: center;
+            }
+        }
+
+        // ---------------- Help ----------------
+        Rectangle {
+            x: status-page.right-x; y: status-page.mid-y; width: status-page.right-w; height: status-page.mid-h;
+            background: Pal.sheet;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            Section {
+                x: 19px; y: 11px; width: 200px; height: 35px;
+                text: "Help"; font-size: 23px;
+            }
+            Rectangle { x: 19px; y: 52px; width: parent.width - 38px; height: 1px; background: Pal.line; }
+            help-para := Text {
+                x: 19px; y: 60px; width: parent.width - 38px;
+                text: "System info is your Satur8 version, desktop, GPU and the checks above, without your home folder, user or computer name. Nothing is sent.";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                wrap: word-wrap;
+            }
+            // Holds the system info text for the clipboard (Slint's own
+            // clipboard, the same one Ctrl+C in a text field uses).
+            sysinfo-input := TextInput {
+                x: 0; y: 0; width: 1px; height: 1px;
+                opacity: 0;
+                read-only: true;
+                text: root.sysinfo-text;
+            }
+            copy-btn := Btn {
+                x: 19px; y: parent.height - 19px - 36px;
+                width: (parent.width - 38px - 10px) / 2; height: 36px;
+                kind: 1;
+                text: "Copy system info";
+                enabled: root.sysinfo-text != "";
+                clicked => {
+                    sysinfo-input.select-all();
+                    sysinfo-input.copy();
+                    sysinfo-input.clear-selection();
+                    root.sysinfo-copied();
+                }
+            }
+            Btn {
+                x: copy-btn.x + copy-btn.width + 10px; y: copy-btn.y;
+                width: copy-btn.width; height: 36px;
+                kind: 2;
+                text: "Report a bug";
+                has-trailing: true; trailing: @image-url("icons/external.svg");
+                clicked => { root.report-bug(); }
+            }
+        }
+
+        // ---------------- Activity (compact) ----------------
+        Rectangle {
+            x: 30px; y: status-page.act-y; width: parent.width - 60px;
+            height: status-page.viewport-height - status-page.act-y - 28px;
+            background: Pal.sheet;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            Section {
+                x: 19px; y: 7px; width: 200px; height: 30px;
+                text: "Activity"; font-size: 20px;
+            }
+            Btn {
+                x: parent.width - 74px; y: 9px; width: 55px; height: 27px;
+                kind: 2; border-radius: 6px; font-size: 12px;
+                text: "Clear";
+                clicked => { root.clear-activity(); }
+            }
+            Rectangle { x: 19px; y: 43px; width: parent.width - 38px; height: 1px; background: Pal.line; }
+            if root.activity.length == 0: Text {
+                x: 19px; y: 47px; width: parent.width - 38px; height: parent.height - 55px;
+                text: "No activity yet. Checks, repairs and profile changes show up here.";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.muted;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+            Flickable {
+                x: 19px; y: 47px; width: parent.width - 38px; height: parent.height - 55px;
+                viewport-height: Math.max(self.height, root.activity.length * 35px);
+                for entry[i] in root.activity: Rectangle {
+                    x: 0; y: i * 35px; width: parent.width; height: 35px;
+                    Rectangle {
+                        x: 1px; y: 14px; width: 6px; height: 6px; border-radius: 3px;
+                        background: entry.ok ? Pal.accent : Pal.dim;
+                    }
+                    Text {
+                        x: 17px; y: 0; width: parent.width - 130px; height: 34px;
+                        text: entry.text;
+                        font-family: Font.med; font-weight: Font.med-weight; font-size: 13px; color: Pal.soft;
+                        vertical-alignment: center; overflow: elide;
+                    }
+                    Text {
+                        x: parent.width - 106px; y: 0; width: 103px; height: 34px;
+                        text: entry.time;
+                        font-family: Font.mono; font-weight: Font.mono-weight; font-size: 11px; color: Pal.muted;
+                        horizontal-alignment: right; vertical-alignment: center;
+                    }
+                    if i < root.activity.length - 1: Rectangle {
+                        x: 0; y: 33px; width: parent.width; height: 1px;
+                        background: Pal.line-soft;
                     }
                 }
             }
         }
     }
+
+    // ================= About (directions.py:52-65) =================
+    // Render layout, with the old Desktop page's "Auto-apply per game" card
+    // added as a third card in the middle row. Cards grow if text wraps.
+    if root.nav == 2: about-page := Flickable {
+        x: 0; y: 65px; width: root.width; height: root.page-h;
+        property <length> col-w: Math.floor((self.width - 60px - 32px) / 3 / 1px) * 1px;
+        property <length> cards-y: intro-card.y + intro-card.height + 16px;
+        property <length> cards-h: Math.max(237px, Math.max(why2.y + why2.height + 30px,
+            Math.max(auto2.y + auto2.height + 30px, rust-text.y + rust-text.height + 30px)));
+        property <length> links-y: self.cards-y + self.cards-h + 16px;
+        viewport-height: Math.max(self.height, self.links-y + 102px + 32px);
+
+        Heading {
+            x: 31px; y: 18px; width: 650px; height: 50px;
+            text: "About"; font-size: 39px;
+        }
+
+        intro-card := Rectangle {
+            x: 30px; y: 86px; width: parent.width - 60px;
+            height: Math.max(146px, intro-text.height + 42px);
+            background: Pal.surface;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            Image {
+                x: 27px; y: parent.height / 2 - 26px; width: 288px; height: 57px;
+                source: Pal.dark ? @image-url("word.png") : @image-url("word-light.png");
+                image-fit: fill;
+            }
+            Rectangle { x: 367px; y: parent.height / 2 - 45px; width: 1px; height: 90px; background: Pal.line; }
+            intro-text := Para {
+                x: 400px; y: 21px; width: parent.width - 454px;
+                text: "Per-game digital vibrance for Linux. Satur8 watches focused game windows, applies the matching saturation profile, and restores your desktop setting when you leave the game.";
+                font-family: Font.med; font-weight: Font.med-weight; font-size: 20px;
+            }
+        }
+
+        Rectangle {
+            x: 30px; y: about-page.cards-y; width: about-page.col-w; height: about-page.cards-h;
+            background: Pal.sheet;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            Section {
+                x: 22px; y: 17px; width: parent.width - 44px; height: 37px;
+                text: "Why it is different"; font-size: 25px;
+            }
+            why1 := Para {
+                x: 23px; y: 66px; width: parent.width - 45px;
+                text: "Satur8 changes the display color pipeline after the game renders. It does not inject into, read, or modify the game process.";
+                font-size: 14px;
+            }
+            why2 := Para {
+                x: 23px; y: why1.y + why1.height + 12px; width: parent.width - 45px;
+                text: "That makes it a cleaner fit for games with trusted or anti-cheat modes than shader injectors like vkBasalt or ReShade-style tools.";
+                font-size: 14px; color: Pal.muted;
+            }
+        }
+
+        // Moved here from the old Desktop page (directions.py:47-49).
+        Rectangle {
+            x: 30px + about-page.col-w + 16px; y: about-page.cards-y;
+            width: about-page.col-w; height: about-page.cards-h;
+            background: Pal.sheet;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            Section {
+                x: 22px; y: 17px; width: parent.width - 44px; height: 37px;
+                text: "Auto-apply per game"; font-size: 25px;
+            }
+            auto1 := Para {
+                x: 23px; y: 66px; width: parent.width - 45px;
+                text: "Satur8 watches the focused game window and applies the matching profile automatically. No Steam launch options are required.";
+                font-size: 14px;
+            }
+            auto2 := Para {
+                x: 23px; y: auto1.y + auto1.height + 12px; width: parent.width - 45px;
+                text: "When you leave the game, Satur8 restores your desktop vibrance setting.";
+                font-size: 14px; color: Pal.muted;
+            }
+        }
+
+        Rectangle {
+            x: 30px + 2 * (about-page.col-w + 16px); y: about-page.cards-y;
+            width: parent.width - 60px - 2 * (about-page.col-w + 16px); height: about-page.cards-h;
+            background: Pal.sheet;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            Section {
+                x: 22px; y: 17px; width: parent.width - 44px; height: 37px;
+                text: "Built in Rust"; font-size: 25px;
+            }
+            rust-text := Para {
+                x: 23px; y: 66px; width: parent.width - 45px;
+                text: "The CLI, GUI, daemon, tray, profile model, and backends are written in Rust so the app stays native, small, and event-driven with no garbage collector running while you play.";
+                font-size: 14px;
+            }
+        }
+
+        Rectangle {
+            x: 30px; y: about-page.links-y; width: parent.width - 60px; height: 102px;
+            background: Pal.surface;
+            border-radius: 12px; border-width: 1px; border-color: Pal.line;
+            Section {
+                x: 23px; y: 29px; width: 202px; height: 35px;
+                text: "Links"; font-size: 23px;
+            }
+            github := Btn {
+                x: parent.width - 335px; y: 31px; width: 308px; height: 38px;
+                kind: 2; font-size: 14px;
+                text: "GitHub  NtrpyDev/satur8";
+                has-trailing: true; trailing: @image-url("icons/external.svg");
+                clicked => { root.open-link("https://github.com/NtrpyDev/satur8"); }
+            }
+            twitter := Btn {
+                x: github.x - 277px; y: 31px; width: 263px; height: 38px;
+                kind: 2; font-size: 14px;
+                text: "Twitter / X  @NtrpyDev";
+                has-trailing: true; trailing: @image-url("icons/external.svg");
+                clicked => { root.open-link("https://x.com/NtrpyDev"); }
+            }
+            Btn {
+                x: twitter.x - 168px; y: 31px; width: 155px; height: 38px;
+                kind: 3; font-size: 14px;
+                text: "satur8.app";
+                has-trailing: true; trailing: @image-url("icons/external.svg");
+                clicked => { root.open-link("https://satur8.app"); }
+            }
+        }
+    }
+}

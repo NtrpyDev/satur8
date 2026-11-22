@@ -160,19 +160,18 @@ The gamescope-native path drives an already-running gamescope compositor through
 
 The screenshots below show the Satur8 GUI.
 
-<img src="assets/readme/gui-profiles-v031.png" alt="Satur8 profile editor" width="900">
+<img src="assets/readme/gui-main-v036.png" alt="Satur8 main page with desktop vibrance and game profiles" width="900">
 
-In the profile editor you can:
+On the Main page you can:
 
+- Set the desktop vibrance, which is also the default when no game profile is active, and restore the desktop to normal.
 - Add a currently running game.
 - Set the saturation level per game.
 - Enable or disable a profile.
-- Preview a profile on the desktop.
-- See the active backend and recent activity.
 
-<img src="assets/readme/gui-settings-v031.png" alt="Satur8 backend settings" width="900">
+<img src="assets/readme/gui-status-v036.png" alt="Satur8 status page with health checks and settings" width="900">
 
-Settings cover the default desktop vibrance, the manual restore action, and the auto-apply behavior. Profiles auto-save the moment you change them. The GUI also ships dark and bright themes and an in-app About page with project links.
+The Status page shows whether each part of Satur8 is working, with a Repair button, and the profile and saturation that are active right now. It also has the switch for automatic per-game switching, the starting saturation for newly added games, and recent activity. Copy system info and Report a bug help with bug reports; nothing is sent automatically. Profiles auto-save the moment you change them. The GUI also ships dark and bright themes and an in-app About page with project links.
 
 Configuration is stored at:
 
@@ -248,8 +247,8 @@ cargo test --workspace --locked
 Capture GUI screenshots off-screen (used for these README images):
 
 ```sh
-bash assets/gui-shot.sh /tmp/satur8-profiles.png 0
-SATUR8_GUI_DARK=1 bash assets/gui-shot.sh /tmp/satur8-settings.png 1
+SATUR8_GUI_DARK=1 bash assets/gui-shot.sh /tmp/satur8-main.png 0
+SATUR8_GUI_DARK=1 bash assets/gui-shot.sh /tmp/satur8-status.png 1
 ```
 
 Regenerate the rest of the README visuals:

@@ -1,20 +1,21 @@
 //! `satur8-gui` - the Satur8 desktop app (Slint).
 //!
-//! Sidebar + per-game profile rows with the game's real Steam icon, a satur8
-//! slider and an enable toggle; a before/after preview built from the game's own
-//! Steam art with the saturation applied; desktop vibrance settings and an
-//! activity log.
+//! Main page: the desktop vibrance strip and per-game cards with the game's
+//! real Steam icon, a saturation slider and an enable toggle. Status page:
+//! health checks, repair, per-game switching and an activity log. About page.
 //! Reads/writes the same `profiles.toml` the CLI and daemon use.
 //!
 //! Game art comes from the user's *local* Steam cache - nothing is bundled.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod status;
 mod steam;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use satur8_backend::{all_outputs, select_backend, RestoreGuard};
 use satur8_core::proc;
@@ -23,15 +24,6 @@ use serde::{Deserialize, Serialize};
 use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
 slint::include_modules!();
-
-const SWATCHES: [(u8, u8, u8); 6] = [
-    (128, 128, 128),
-    (229, 57, 53),
-    (253, 216, 53),
-    (67, 160, 71),
-    (38, 166, 154),
-    (30, 136, 229),
-];
 
 const TILE_COLORS: [(u8, u8, u8); 8] = [
     (13, 148, 136),
@@ -47,21 +39,62 @@ const TILE_COLORS: [(u8, u8, u8); 8] = [
 struct State {
     backend: Option<RestoreGuard>,
     profiles: Profiles,
-    current_sat: f32,
-    /// True while a live desktop preview is applied, so we can restore it.
-    previewing: bool,
 }
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+/// Saturation a newly added running game starts at, unless the user picked
+/// another value on the Status page. (+40%; this was hard-coded before.)
+const NEW_GAME_SATURATION: f32 = 1.4;
+
+fn default_new_game_saturation() -> f32 {
+    NEW_GAME_SATURATION
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 struct GuiConfig {
     #[serde(default)]
     dark_mode: bool,
+    /// Status page > Settings > "Starting saturation for new games".
+    #[serde(default = "default_new_game_saturation")]
+    new_game_saturation: f32,
+}
+
+impl Default for GuiConfig {
+    fn default() -> Self {
+        // Existing saved choices still take precedence. Fresh installs match the
+        // app and site’s near-black visual language.
+        Self {
+            dark_mode: true,
+            new_game_saturation: NEW_GAME_SATURATION,
+        }
+    }
+}
+
+impl GuiConfig {
+    /// The saturation to give a newly added game, kept inside the control's
+    /// -100%..+100% range (0.0..2.0). A broken value falls back to the default.
+    fn new_game_saturation(&self) -> f32 {
+        if self.new_game_saturation.is_finite() {
+            self.new_game_saturation.clamp(0.0, 2.0)
+        } else {
+            NEW_GAME_SATURATION
+        }
+    }
+}
+
+/// True while the Status page is shown; the "Right now" poll runs only then.
+static STATUS_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+thread_local! {
+    /// The latest health facts, for "Report a bug". UI thread only.
+    static LAST_FACTS: RefCell<Option<status::Facts>> = const { RefCell::new(None) };
 }
 
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
     ui.set_version_text(format!("v{}", env!("CARGO_PKG_VERSION")).into());
-    ui.global::<Pal>().set_dark(load_gui_config().dark_mode);
+    let gui_config = Rc::new(RefCell::new(load_gui_config()));
+    ui.global::<Pal>().set_dark(gui_config.borrow().dark_mode);
+    ui.set_new_game_percent(sat_to_percent(gui_config.borrow().new_game_saturation()));
 
     let profiles = load_profiles(Profiles::default());
     let backend = match select_backend() {
@@ -83,14 +116,7 @@ fn main() -> Result<(), slint::PlatformError> {
             .into(),
     );
 
-    let first = profiles.profiles.first().cloned();
-    let first_sat = first.as_ref().map(|p| p.saturation).unwrap_or(1.0);
-    let state = Rc::new(RefCell::new(State {
-        backend,
-        profiles,
-        current_sat: first_sat,
-        previewing: false,
-    }));
+    let state = Rc::new(RefCell::new(State { backend, profiles }));
 
     // Games
     let games = Rc::new(VecModel::<GameRow>::default());
@@ -103,17 +129,6 @@ fn main() -> Result<(), slint::PlatformError> {
         &apps.borrow(),
     )));
     ui.set_running(ModelRc::from(running.clone()));
-
-    // Output note (honest about what the backend can target).
-    ui.set_outputs_note(
-        match state.borrow().backend.as_ref().map(|b| b.backend().name()) {
-            Some("kwin") | Some("gnome-shell") | Some("hyprland") => {
-                "On this compositor it affects all monitors.".into()
-            }
-            Some("drm-ctm") => "Targets the connected display(s).".into(),
-            _ => "".into(),
-        },
-    );
 
     // Activity
     let activity = Rc::new(VecModel::<LogRow>::default());
@@ -129,19 +144,10 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     ui.set_activity(ModelRc::from(activity.clone()));
 
-    // Preview (swatches always; real art when the profile is a known Steam game)
-    let after = Rc::new(VecModel::<Color>::from(after_swatches(first_sat)));
-    ui.set_before_swatches(ModelRc::from(Rc::new(VecModel::from(before_swatches()))));
-    ui.set_after_swatches(ModelRc::from(after.clone()));
-    if let Some(p) = &first {
-        ui.set_current_profile_name(p.name.clone().into());
-        ui.set_current_percent(sat_to_percent(p.saturation));
-        set_preview(&ui, profile_app_id(p), p.saturation, &after);
-    }
-
     ui.set_default_percent(sat_to_percent(state.borrow().profiles.default_saturation));
 
-    // Off-screen screenshot helper: jump straight to a page (0..3).
+    // Off-screen screenshot helper: jump straight to a page
+    // (0 = Main, 1 = Status, 2 = About).
     if let Ok(n) = std::env::var("VIBRANCE_GUI_NAV") {
         if let Ok(n) = n.parse::<i32>() {
             ui.set_nav(n);
@@ -153,13 +159,115 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // ---------------- callbacks ----------------
-    ui.on_dark_mode_changed(|dark_mode| {
-        save_gui_config(&GuiConfig { dark_mode });
+    ui.on_dark_mode_changed({
+        let gui_config = gui_config.clone();
+        move |dark_mode| {
+            let mut config = gui_config.borrow_mut();
+            config.dark_mode = dark_mode;
+            save_gui_config(&config);
+        }
+    });
+
+    // ---------------- Status page ----------------
+    // Read-only checks at startup; the live poll thread idles until the page
+    // is shown.
+    spawn_check(&ui, None);
+    STATUS_VISIBLE.store(ui.get_nav() == 1, Ordering::Release);
+    spawn_live_poll(ui.as_weak());
+    ui.on_page_shown({
+        let w = ui.as_weak();
+        move |page| {
+            STATUS_VISIBLE.store(page == 1, Ordering::Release);
+            if page == 1 {
+                if let Some(ui) = w.upgrade() {
+                    if !ui.get_checking() && !ui.get_repairing() && !ui.get_switch_busy() {
+                        spawn_check(&ui, None);
+                    }
+                }
+            }
+        }
+    });
+    ui.on_check_health({
+        let w = ui.as_weak();
+        move || {
+            if let Some(ui) = w.upgrade() {
+                spawn_check(&ui, Some("Checked system health"));
+            }
+        }
+    });
+    ui.on_repair({
+        let w = ui.as_weak();
+        move || {
+            if let Some(ui) = w.upgrade() {
+                spawn_repair(&ui);
+            }
+        }
+    });
+    ui.on_set_switching({
+        let w = ui.as_weak();
+        move |on| {
+            if let Some(ui) = w.upgrade() {
+                spawn_switching(&ui, on);
+            }
+        }
+    });
+    ui.on_new_game_changed({
+        let w = ui.as_weak();
+        move |percent| {
+            if let Some(ui) = w.upgrade() {
+                ui.set_new_game_percent(percent.round() as i32);
+            }
+        }
+    });
+    ui.on_new_game_released({
+        let gui_config = gui_config.clone();
+        let activity = activity.clone();
+        move |percent| {
+            let Some(sat) = percent_to_sat(percent.round()) else {
+                return;
+            };
+            let mut config = gui_config.borrow_mut();
+            config.new_game_saturation = sat;
+            save_gui_config(&config);
+            log(
+                &activity,
+                false,
+                &format!("New games now start at {:+.0}%", (sat - 1.0) * 100.0),
+            );
+        }
+    });
+    ui.on_sysinfo_copied({
+        let activity = activity.clone();
+        move || log(&activity, true, "Copied system info to the clipboard")
+    });
+    ui.on_report_bug({
+        let activity = activity.clone();
+        move || {
+            let info = LAST_FACTS.with(|facts| {
+                facts.borrow().as_ref().map(|facts| {
+                    status::system_info_for_this_machine(facts, &status::health_rows(facts))
+                })
+            });
+            match info {
+                Some(info) => {
+                    open_url(&status::bug_report_url(&info));
+                    log(
+                        &activity,
+                        true,
+                        "Opened a new bug report in your browser (nothing was sent)",
+                    );
+                }
+                None => log(
+                    &activity,
+                    false,
+                    "Still checking; try Report a bug again in a moment",
+                ),
+            }
+        }
     });
     ui.on_open_link(|url| {
         open_url(url.as_str());
     });
-
     ui.on_default_changed({
         let state = state.clone();
         let w = ui.as_weak();
@@ -168,18 +276,17 @@ fn main() -> Result<(), slint::PlatformError> {
                 eprintln!("satur8-gui: ignored non-finite default saturation input");
                 return;
             };
+            // Runs on every slider move: apply live, keep the value in memory.
+            // profiles.toml is written once, in on_default_released.
             {
                 let mut st = state.borrow_mut();
                 st.profiles.default_saturation = sat;
-                save(&st.profiles);
                 if let Some(b) = st.backend.as_mut() {
                     b.set_restore_to(Saturation::new(sat));
                     if apply_or_reset(b.backend_mut(), sat).is_ok() {
                         b.disarm();
                     }
                 }
-                // This is an explicit desktop setting, not a temporary preview.
-                st.previewing = false;
             }
             if let Some(ui) = w.upgrade() {
                 ui.set_default_percent(percent.round() as i32);
@@ -187,37 +294,38 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    // End of a desktop-slider drag (or the Restore button): save once.
+    ui.on_default_released({
+        let state = state.clone();
+        move |percent| {
+            let Some(sat) = percent_to_sat(percent) else {
+                eprintln!("satur8-gui: ignored non-finite default saturation input");
+                return;
+            };
+            let mut st = state.borrow_mut();
+            st.profiles.default_saturation = sat;
+            save(&st.profiles);
+        }
+    });
+
     ui.on_percent_changed({
         let state = state.clone();
         let games = games.clone();
-        let after = after.clone();
-        let w = ui.as_weak();
         move |i, percent| {
             let Some(sat) = percent_to_sat(percent) else {
                 eprintln!("satur8-gui: ignored non-finite profile saturation input");
                 return;
             };
-            let app_id;
-            let name;
             {
                 let mut st = state.borrow_mut();
                 if let Some(p) = st.profiles.profiles.get_mut(i as usize) {
                     p.saturation = sat;
                 }
-                st.current_sat = sat;
-                let p = st.profiles.profiles.get(i as usize);
-                name = p.map(|p| p.name.clone()).unwrap_or_default();
-                app_id = p.and_then(profile_app_id);
                 save(&st.profiles);
             }
             if let Some(mut row) = games.row_data(i as usize) {
                 row.percent = percent.round() as i32;
                 games.set_row_data(i as usize, row);
-            }
-            if let Some(ui) = w.upgrade() {
-                ui.set_current_profile_name(name.into());
-                ui.set_current_percent(sat_to_percent(sat));
-                set_preview(&ui, app_id, sat, &after);
             }
         }
     });
@@ -274,6 +382,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let games = games.clone();
         let apps = apps.clone();
         let activity = activity.clone();
+        let gui_config = gui_config.clone();
         move |i| {
             let app = apps
                 .borrow()
@@ -282,7 +391,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some((exe, app_id)) = app else { return };
             {
                 let mut st = state.borrow_mut();
-                add_or_update(&mut st.profiles, &exe, app_id, 1.4);
+                let saturation = gui_config.borrow().new_game_saturation();
+                add_or_update(&mut st.profiles, &exe, app_id, saturation);
                 save(&st.profiles);
             }
             rebuild_games(&games, &state.borrow().profiles);
@@ -299,112 +409,14 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    ui.on_preview_profile({
-        let state = state.clone();
-        let after = after.clone();
-        let activity = activity.clone();
-        let w = ui.as_weak();
-        move |i| {
-            let (name, sat, app_id) = {
-                let st = state.borrow();
-                match st.profiles.profiles.get(i as usize) {
-                    Some(p) => (p.name.clone(), p.saturation, profile_app_id(p)),
-                    None => return,
-                }
-            };
-            {
-                let mut st = state.borrow_mut();
-                st.current_sat = sat;
-                if let Some(b) = st.backend.as_mut() {
-                    if b.backend_mut()
-                        .apply(&all_outputs(), Saturation::new(sat))
-                        .is_ok()
-                    {
-                        b.arm();
-                        st.previewing = true;
-                    }
-                }
-            }
-            if let Some(ui) = w.upgrade() {
-                ui.set_current_profile_name(name.clone().into());
-                ui.set_current_percent(sat_to_percent(sat));
-                set_preview(&ui, app_id, sat, &after);
-            }
-            log(&activity, true, &format!("Previewing {name} on desktop"));
-        }
-    });
-
-    ui.on_apply_output({
-        let state = state.clone();
-        let activity = activity.clone();
-        move || {
-            let mut st = state.borrow_mut();
-            let sat = st.current_sat;
-            if let Some(b) = st.backend.as_mut() {
-                match b.backend_mut().apply(&all_outputs(), Saturation::new(sat)) {
-                    Ok(()) => {
-                        b.arm();
-                        st.previewing = true;
-                        log(
-                            &activity,
-                            true,
-                            &format!("Applied {:+.0}%", (sat - 1.0) * 100.0),
-                        );
-                    }
-                    Err(e) => log(&activity, false, &format!("Apply failed: {e}")),
-                }
-            }
-        }
-    });
-
-    ui.on_preview_output({
-        let state = state.clone();
-        let activity = activity.clone();
-        move || {
-            let mut st = state.borrow_mut();
-            let sat = st.current_sat;
-            if let Some(b) = st.backend.as_mut() {
-                if b.backend_mut()
-                    .apply(&all_outputs(), Saturation::new(sat))
-                    .is_ok()
-                {
-                    b.arm();
-                    st.previewing = true;
-                    log(
-                        &activity,
-                        false,
-                        &format!("Previewing {:+.0}% on desktop", (sat - 1.0) * 100.0),
-                    );
-                }
-            }
-        }
-    });
-
-    ui.on_restore_output({
-        let state = state.clone();
-        let activity = activity.clone();
-        move || {
-            let mut st = state.borrow_mut();
-            restore_desktop_default(&mut st);
-            st.previewing = false;
-            log(&activity, false, "Restored desktop");
-        }
-    });
-
     ui.on_clear_activity({
         let activity = activity.clone();
         move || activity.set_vec(Vec::<LogRow>::new())
     });
 
-    // Never leave a live preview applied after the window closes.
+    // Closing hides the window while the tray is running; otherwise it quits.
     ui.window().on_close_requested({
-        let state = state.clone();
         move || {
-            let mut st = state.borrow_mut();
-            if st.previewing {
-                restore_desktop_default(&mut st);
-                st.previewing = false;
-            }
             if satur8_tray_is_running() {
                 slint::CloseRequestResponse::HideWindow
             } else {
@@ -417,6 +429,189 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.run()
 }
 
+// ---------------- Status page helpers ----------------
+
+/// Add a line to the activity log from a closure that only has the window.
+fn log_ui(ui: &AppWindow, ok: bool, text: &str) {
+    let model = ui.get_activity();
+    if let Some(model) = model.as_any().downcast_ref::<VecModel<LogRow>>() {
+        log(model, ok, text);
+    }
+}
+
+/// Show freshly gathered facts: health rows, toggle, and system info.
+fn apply_facts(ui: &AppWindow, facts: status::Facts) {
+    let rows = status::health_rows(&facts);
+    let switch = status::switch_state(&facts);
+    ui.set_health(ModelRc::from(Rc::new(VecModel::from(
+        rows.iter()
+            .map(|row| HealthRowUi {
+                label: row.label.into(),
+                detail: row.detail.clone().into(),
+                level: match row.level {
+                    status::Level::Ok => 0,
+                    status::Level::Problem => 1,
+                    status::Level::NotApplicable => 2,
+                },
+            })
+            .collect::<Vec<_>>(),
+    ))));
+    ui.set_health_problem(rows.iter().any(|r| r.level == status::Level::Problem));
+    ui.set_switch_available(switch.available);
+    ui.set_switch_on(switch.on);
+    ui.set_switch_detail(switch.detail.into());
+    ui.set_sysinfo_text(status::system_info_for_this_machine(&facts, &rows).into());
+    LAST_FACTS.with(|last| *last.borrow_mut() = Some(facts));
+}
+
+/// Read-only health check off the UI thread.
+fn spawn_check(ui: &AppWindow, done_message: Option<&'static str>) {
+    ui.set_checking(true);
+    let w = ui.as_weak();
+    std::thread::spawn(move || {
+        let facts = status::probe();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = w.upgrade() {
+                apply_facts(&ui, facts);
+                ui.set_checking(false);
+                if let Some(message) = done_message {
+                    log_ui(&ui, true, message);
+                }
+            }
+        });
+    });
+}
+
+/// Run a plan built from fresh facts off the UI thread, log every step, then
+/// re-check so the page shows the real result.
+fn spawn_plan(
+    ui: &AppWindow,
+    busy: fn(&AppWindow, bool),
+    title: &'static str,
+    plan_for: fn(&status::Facts) -> Vec<status::Action>,
+) {
+    busy(ui, true);
+    let w = ui.as_weak();
+    std::thread::spawn(move || {
+        let before = status::probe();
+        let plan = plan_for(&before);
+        let results = status::execute(&mut status::RealSystem, &plan);
+        // Found in the live test: right after `systemctl start` the daemon is
+        // not on the bus yet, so the re-check showed it as "Not running".
+        // Its start can include `satur8 repair` (ExecStartPre), hence 20 s.
+        if status::plan_starts_daemon(&plan) {
+            status::wait_for_daemon(std::time::Duration::from_secs(20));
+        }
+        let after = status::probe();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = w.upgrade() {
+                if results.is_empty() {
+                    log_ui(&ui, false, &format!("{title}: nothing to do"));
+                }
+                for (ok, line) in &results {
+                    log_ui(&ui, *ok, line);
+                }
+                apply_facts(&ui, after);
+                busy(&ui, false);
+            }
+        });
+    });
+}
+
+fn spawn_repair(ui: &AppWindow) {
+    spawn_plan(
+        ui,
+        |ui, on| ui.set_repairing(on),
+        "Repair",
+        status::plan_repair,
+    );
+}
+
+fn spawn_switching(ui: &AppWindow, on: bool) {
+    // The plan is only run when the toggle is usable in this session.
+    fn enable(facts: &status::Facts) -> Vec<status::Action> {
+        if status::switch_state(facts).available {
+            status::plan_enable(facts)
+        } else {
+            Vec::new()
+        }
+    }
+    fn disable(facts: &status::Facts) -> Vec<status::Action> {
+        if status::switch_state(facts).available {
+            status::plan_disable(facts)
+        } else {
+            Vec::new()
+        }
+    }
+    let (title, plan): (&'static str, fn(&status::Facts) -> Vec<status::Action>) = if on {
+        ("Turn on per-game switching", enable)
+    } else {
+        ("Turn off per-game switching", disable)
+    };
+    spawn_plan(ui, |ui, busy| ui.set_switch_busy(busy), title, plan);
+}
+
+fn percent_text(sat: f32) -> String {
+    let percent = sat_to_percent(sat);
+    if percent > 0 {
+        format!("+{percent}%")
+    } else {
+        format!("{percent}%")
+    }
+}
+
+/// "Right now" poll: every 2 seconds while the Status page is shown, read the
+/// daemon's properties and the compositor's current saturation (read-only).
+fn spawn_live_poll(w: slint::Weak<AppWindow>) {
+    std::thread::spawn(move || loop {
+        if STATUS_VISIBLE.load(Ordering::Acquire) {
+            let live = status::probe_live();
+            let (saturation, note) = match live.applied {
+                Some(sat) => (
+                    percent_text(sat),
+                    if (sat - 1.0).abs() < 1e-3 {
+                        "normal colors, read from the compositor".to_string()
+                    } else {
+                        "read from the compositor".to_string()
+                    },
+                ),
+                None => {
+                    // Not readable here: show what should be applied.
+                    let profiles = load_profiles(Profiles::default());
+                    let sat = live
+                        .active_profile
+                        .as_deref()
+                        .filter(|name| !name.is_empty())
+                        .and_then(|name| profiles.by_name(name))
+                        .map(|p| p.saturation)
+                        .unwrap_or(profiles.default_saturation);
+                    (
+                        percent_text(sat),
+                        "expected; this session cannot report it".to_string(),
+                    )
+                }
+            };
+            let active = status::describe_active(&live);
+            let focused = status::describe_focused(&live);
+            let w = w.clone();
+            let keep_going = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    ui.set_live_daemon(live.daemon_running);
+                    ui.set_live_profile(active.into());
+                    ui.set_live_saturation(saturation.into());
+                    ui.set_live_saturation_note(note.into());
+                    ui.set_live_has_focused(focused.is_some());
+                    ui.set_live_focused(focused.unwrap_or_default().into());
+                }
+            });
+            if keep_going.is_err() {
+                return;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    });
+}
+
 // ---------------- helpers ----------------
 
 fn apply_or_reset(backend: &mut dyn Backend, sat: f32) -> Result<(), satur8_core::BackendError> {
@@ -424,15 +619,6 @@ fn apply_or_reset(backend: &mut dyn Backend, sat: f32) -> Result<(), satur8_core
         backend.reset(&all_outputs())
     } else {
         backend.apply(&all_outputs(), Saturation::new(sat))
-    }
-}
-fn restore_desktop_default(st: &mut State) {
-    let sat = st.profiles.default_saturation;
-    if let Some(b) = st.backend.as_mut() {
-        b.set_restore_to(Saturation::new(sat));
-        if let Err(error) = b.restore_now() {
-            eprintln!("satur8-gui: failed to restore desktop colors: {error}");
-        }
     }
 }
 fn percent_to_sat(percent: f32) -> Option<f32> {
@@ -482,25 +668,6 @@ fn rebuild_games(model: &VecModel<GameRow>, profiles: &Profiles) {
     model.set_vec(rows);
 }
 
-/// Set the right-panel before/after: real Steam art if we have it, swatches else.
-fn set_preview(
-    ui: &AppWindow,
-    app_id: Option<u32>,
-    sat: f32,
-    after_swatch_model: &VecModel<Color>,
-) {
-    after_swatch_model.set_vec(after_swatches(sat));
-    if let Some(path) = app_id.and_then(steam::preview_path) {
-        if let Some((before, after)) = load_preview_pair(&path, sat) {
-            ui.set_before_image(before);
-            ui.set_after_image(after);
-            ui.set_has_image(true);
-            return;
-        }
-    }
-    ui.set_has_image(false);
-}
-
 fn to_slint(img: &image::RgbaImage) -> Image {
     let buf =
         SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(img.as_raw(), img.width(), img.height());
@@ -514,54 +681,14 @@ fn load_icon(path: &Path) -> Option<Image> {
     let side = w.min(h);
     let cropped =
         image::imageops::crop_imm(&img, (w - side) / 2, (h - side) / 2, side, side).to_image();
-    let small = image::imageops::thumbnail(&cropped, 96, 96);
+    // Steam's game icon is only 32x32; enlarge it smoothly instead of with the
+    // thumbnail filter, which is meant for shrinking.
+    let small = if side < 96 {
+        image::imageops::resize(&cropped, 96, 96, image::imageops::FilterType::Lanczos3)
+    } else {
+        image::imageops::thumbnail(&cropped, 96, 96)
+    };
     Some(to_slint(&small))
-}
-
-/// (before, after) preview pair from a wide art image, after = saturation applied.
-fn load_preview_pair(path: &Path, sat: f32) -> Option<(Image, Image)> {
-    let base = image::open(path).ok()?.into_rgba8();
-    let tw = 360u32;
-    let th = (tw as f32 * base.height() as f32 / base.width() as f32).round() as u32;
-    let base = image::imageops::thumbnail(&base, tw, th.max(1));
-    let before = to_slint(&base);
-
-    let m = Saturation::new(sat).matrix();
-    let mut after = base.clone();
-    for px in after.pixels_mut() {
-        let (r, g, b) = (
-            px[0] as f32 / 255.0,
-            px[1] as f32 / 255.0,
-            px[2] as f32 / 255.0,
-        );
-        let o = |row: [f32; 3]| {
-            ((row[0] * r + row[1] * g + row[2] * b).clamp(0.0, 1.0) * 255.0).round() as u8
-        };
-        px[0] = o(m[0]);
-        px[1] = o(m[1]);
-        px[2] = o(m[2]);
-    }
-    Some((before, to_slint(&after)))
-}
-
-fn before_swatches() -> Vec<Color> {
-    SWATCHES
-        .iter()
-        .map(|&(r, g, b)| Color::from_rgb_u8(r, g, b))
-        .collect()
-}
-fn after_swatches(sat: f32) -> Vec<Color> {
-    let m = Saturation::new(sat).matrix();
-    SWATCHES
-        .iter()
-        .map(|&(r, g, b)| {
-            let (rf, gf, bf) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
-            let o = |row: [f32; 3]| {
-                ((row[0] * rf + row[1] * gf + row[2] * bf).clamp(0.0, 1.0) * 255.0).round() as u8
-            };
-            Color::from_rgb_u8(o(m[0]), o(m[1]), o(m[2]))
-        })
-        .collect()
 }
 
 fn tile_color(name: &str) -> Color {
@@ -733,4 +860,51 @@ fn reload_daemon_profiles() {
         return;
     };
     let _: Result<(), _> = proxy.call("Reload", &());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_game_default_is_the_old_hard_coded_value() {
+        assert_eq!(GuiConfig::default().new_game_saturation(), 1.4);
+        // A gui.toml written before the setting existed keeps the old value.
+        let old: GuiConfig = toml::from_str("dark_mode = true\n").unwrap();
+        assert_eq!(old.new_game_saturation(), 1.4);
+        assert_eq!(sat_to_percent(old.new_game_saturation()), 40);
+    }
+
+    #[test]
+    fn new_game_setting_round_trips_through_gui_toml() {
+        let config = GuiConfig {
+            dark_mode: false,
+            new_game_saturation: 0.75,
+        };
+        let text = toml::to_string(&config).unwrap();
+        let back: GuiConfig = toml::from_str(&text).unwrap();
+        assert_eq!(back, config);
+        assert_eq!(sat_to_percent(back.new_game_saturation()), -25);
+    }
+
+    #[test]
+    fn out_of_range_new_game_value_is_clamped_and_broken_falls_back() {
+        let low: GuiConfig = toml::from_str("new_game_saturation = -3.0\n").unwrap();
+        assert_eq!(low.new_game_saturation(), 0.0);
+        let high: GuiConfig = toml::from_str("new_game_saturation = 9.0\n").unwrap();
+        assert_eq!(high.new_game_saturation(), 2.0);
+        let broken = GuiConfig {
+            dark_mode: true,
+            new_game_saturation: f32::NAN,
+        };
+        assert_eq!(broken.new_game_saturation(), 1.4);
+    }
+
+    #[test]
+    fn added_game_uses_the_given_saturation() {
+        let mut profiles = Profiles::default();
+        add_or_update(&mut profiles, "EscapeFromTarkov.exe", None, 0.5);
+        assert_eq!(profiles.profiles[0].saturation, 0.5);
+        assert_eq!(profiles.profiles[0].name, "EscapeFromTarkov");
+    }
 }

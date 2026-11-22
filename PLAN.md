@@ -4,7 +4,7 @@
 > boost, applied **outside** the game process so it cannot trip anti-cheat,
 > with as close to **zero CPU cost** as the hardware allows.
 
-Status: v0.3.5 is the current release. KDE Plasma Wayland, GNOME Wayland,
+Status: v0.3.6 is the current release. KDE Plasma Wayland, GNOME Wayland,
 Hyprland, NVIDIA X11 NV-CONTROL, gamescope-native, and the nested gamescope
 fallback are verified. DRM CTM remains implemented with a passing read-only
 probe, while runtime apply/off verification is deferred. The KWin effect is

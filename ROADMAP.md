@@ -7,7 +7,7 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.3.5 is the current release. Six of the seven backend paths are verified on
+v0.3.6 is the current release. Six of the seven backend paths are verified on
 real hardware: KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland,
 NVIDIA X11 NV-CONTROL, gamescope-native for a running full-screen gamescope
 compositor, and the nested gamescope fallback for unsupported Wayland sessions.
@@ -126,8 +126,7 @@ other backends.
       -1.5% Avg / +0.038 ms/frame. Treat the result as within run-to-run noise,
       not a precise zero-cost claim.
 - [x] Update the backend status table on the website. Done: satur8.app shows
-      v0.3.5 with six backends Verified and DRM/KMS Implemented, matching the
-      README table.
+      six backends Verified and DRM/KMS Implemented, matching the README table.
 
 ## v0.4: SteamOS / Bazzite support
 

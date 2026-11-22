@@ -3,10 +3,45 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
-## Unreleased
+## v0.3.6 - RELEASE_DATE
 
-- ROADMAP.md and PLAN.md now name v0.3.5 as the current release and describe
-  the backends and distribution channels as they are today (#22).
+Redesigned desktop app with a new Status tab, plus documentation fixes.
+
+- Redesign the desktop app. The window now has three tabs, Main, Status and
+  About, in the dark teal look of satur8.app, with a light mode on the theme
+  button. Fonts and icons are bundled, so the app looks the same on every
+  desktop.
+- Main puts desktop vibrance in a compact strip above the game cards. Dragging
+  the desktop slider changes the desktop live and saves once when you let go,
+  instead of rewriting `profiles.toml` on every step of the drag.
+- Game cards show each game's real Steam icon from the local Steam cache,
+  including the newer cache layout where Steam keeps art in subfolders. Games
+  without Steam art get a lettered tile.
+- New Status tab:
+  - Health checks for the color backend, the KWin effect, the background
+    service and game detection, in plain words, with Repair and Check again.
+    Repair does what `satur8 repair` does, and also starts the background
+    service and game detection when those are meant to be on but are not
+    running. Rows that only apply to KDE Plasma show as not applicable on other
+    desktops instead of as failures.
+  - A Right now view of the active profile, the saturation the compositor is
+    applying, and the last window the daemon saw focused.
+  - An Automatic per-game switching toggle that shows the real system state
+    and does the three setup steps the installer used to print, plus starting
+    game detection in the running session. It is turned off with a reason on
+    sessions where per-game switching does not work yet.
+  - A Starting saturation for new games setting (default +40%, the old fixed
+    value), saved in `gui.toml`.
+  - Copy system info, which leaves out your home folder, user name and
+    computer name, and Report a bug, which opens a new GitHub issue in your
+    browser with that information filled in. Nothing is sent automatically.
+  - The activity log moved here from the main window.
+- The daemon exposes a new read-only `LastFocused` D-Bus property for the
+  Status tab. The app still works with an older daemon that lacks it.
+- Remove the Live Preview panel and the per-game Preview button. The app no
+  longer changes the desktop just to preview a profile.
+- ROADMAP.md and PLAN.md now name the current release and describe the
+  backends and distribution channels as they are today (#22).
 - The roadmap and packager guide no longer say AUR publication is blocked.
   They now match the README: `satur8` and `satur8-bin` are on the AUR,
   published and maintained by a community member.
