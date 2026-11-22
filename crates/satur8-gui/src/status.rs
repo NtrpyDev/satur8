@@ -1097,12 +1097,14 @@ pub fn applied_from_look(look: &satur8_gamescope::session::Look) -> Option<f32> 
     }
 }
 
-/// "Active profile" line.
-pub fn describe_active(live: &Live, game_mode: bool) -> String {
+/// "Active profile" line. `off` says the active profile is turned off: it is
+/// still its game's profile, and the game shows normal colors.
+pub fn describe_active(live: &Live, game_mode: bool, off: bool) -> String {
     match live.active_profile.as_deref() {
+        Some(name) if !name.is_empty() && off => format!("{name}, off: normal colors"),
         Some(name) if !name.is_empty() => name.to_string(),
-        // Steam Game Mode has no desktop: its first row is "Everything else".
-        _ if game_mode => "None, Everything else".to_string(),
+        // Steam Game Mode has no desktop: its first row is "General".
+        _ if game_mode => "None, General".to_string(),
         _ => "None, desktop default".to_string(),
     }
 }
@@ -1686,11 +1688,18 @@ mod tests {
     #[test]
     fn live_descriptions() {
         let mut live = Live::default();
-        assert_eq!(describe_active(&live, false), "None, desktop default");
+        assert_eq!(
+            describe_active(&live, false, false),
+            "None, desktop default"
+        );
         assert_eq!(describe_focused(&live), None);
         live.active_profile = Some("cs2".into());
         live.last_focused = Some(String::new());
-        assert_eq!(describe_active(&live, false), "cs2");
+        assert_eq!(describe_active(&live, false, false), "cs2");
+        assert_eq!(
+            describe_active(&live, false, true),
+            "cs2, off: normal colors"
+        );
         assert_eq!(
             describe_focused(&live).as_deref(),
             Some("Desktop or nothing reported yet")
@@ -1938,10 +1947,19 @@ mod tests {
             active_profile: Some(String::new()),
             ..Live::default()
         };
-        assert_eq!(describe_active(&live, true), "None, Everything else");
-        assert_eq!(describe_active(&live, false), "None, desktop default");
+        assert_eq!(describe_active(&live, true, false), "None, General");
+        assert_eq!(
+            describe_active(&live, false, false),
+            "None, desktop default"
+        );
+        // No active profile is never "off", whatever the caller passes.
+        assert_eq!(describe_active(&live, true, true), "None, General");
         live.active_profile = Some("ELDEN RING".into());
-        assert_eq!(describe_active(&live, true), "ELDEN RING");
+        assert_eq!(describe_active(&live, true, false), "ELDEN RING");
+        assert_eq!(
+            describe_active(&live, true, true),
+            "ELDEN RING, off: normal colors"
+        );
     }
 
     #[test]

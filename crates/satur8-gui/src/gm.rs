@@ -43,7 +43,7 @@ pub enum Part {
     Remove,
 }
 
-/// The parts of the "Everything else" row, left to right.
+/// The parts of the "General" row, left to right.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestPart {
     Slider,
@@ -84,7 +84,7 @@ pub enum Item {
 /// What the screen holds right now: all the focus model needs to know.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Layout {
-    /// Percent (-100..=100) of the "Everything else" row.
+    /// Percent (-100..=100) of the "General" row.
     pub rest_percent: i32,
     /// Each game row's percent and whether it is turned on.
     pub games: Vec<(i32, bool)>,
@@ -476,7 +476,7 @@ fn press_on_games(state: &mut State, layout: &Layout, press: Press, effects: &mu
     let games = layout.games.len();
     let first = press.repeat == 0;
     state.focus = match (state.focus, press.button) {
-        // Rows, top to bottom: Everything else, Add a game, then the games.
+        // Rows, top to bottom: General, Add a game, then the games.
         (Focus::Rest(_), Down) => Focus::AddGame,
         (Focus::AddGame, Up) => Focus::Rest(RestPart::Slider),
         (Focus::AddGame, Down) if games > 0 => Focus::Game(0, Part::Slider),

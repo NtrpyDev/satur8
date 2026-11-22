@@ -439,7 +439,7 @@ impl App {
     }
 
     /// The saturation of everything without a profile ("Desktop vibrance";
-    /// "Everything else" in Game Mode): show it on screen now, and save it
+    /// "General" in Game Mode): show it on screen now, and save it
     /// when the change is `done`.
     fn set_rest(&self, percent: f32, done: bool) {
         let Some(sat) = percent_to_sat(percent) else {
@@ -1296,7 +1296,7 @@ fn spawn_live_poll(w: slint::Weak<AppWindow>) {
                         .as_deref()
                         .filter(|name| !name.is_empty())
                         .and_then(|name| profiles.by_name(name))
-                        .map(|p| p.saturation)
+                        .map(|p| p.shown_saturation().get())
                         .unwrap_or(profiles.default_saturation);
                     (
                         percent_text(sat),
@@ -1304,7 +1304,20 @@ fn spawn_live_poll(w: slint::Weak<AppWindow>) {
                     )
                 }
             };
-            let active = status::describe_active(&live, live.game_mode);
+            // A profile that is off is still the game's profile; say so. And
+            // name it the way its row does.
+            let mut live = live;
+            let mut active_is_off = false;
+            if let Some(name) = live.active_profile.clone().filter(|name| !name.is_empty()) {
+                if let Some(profile) = load_profiles(Profiles::default()).by_name(&name) {
+                    active_is_off = !profile.enabled;
+                    let library = std::cell::OnceCell::new();
+                    live.active_profile = Some(picker::display_name(profile, |app_id| {
+                        library_name(&library, app_id)
+                    }));
+                }
+            }
+            let active = status::describe_active(&live, live.game_mode, active_is_off);
             let focused = status::describe_focused(&live);
             let w = w.clone();
             let keep_going = slint::invoke_from_event_loop(move || {
@@ -1354,23 +1367,37 @@ fn profile_app_id(p: &Profile) -> Option<u32> {
     })
 }
 
+/// The Steam library name of an installed game. The library is read at most
+/// once per `library`, and only when a profile needs a name from it.
+fn library_name(
+    library: &std::cell::OnceCell<Vec<satur8_core::steam::SteamGame>>,
+    app_id: u32,
+) -> Option<String> {
+    library
+        .get_or_init(satur8_core::steam::installed_games)
+        .iter()
+        .find(|game| game.app_id == app_id)
+        .map(|game| game.name.clone())
+}
+
 fn rebuild_games(model: &VecModel<GameRow>, profiles: &Profiles) {
+    let library = std::cell::OnceCell::new();
     let rows: Vec<GameRow> = profiles
         .profiles
         .iter()
         .map(|p| {
             let exe = picker::card_subtitle(p);
+            let name = picker::display_name(p, |app_id| library_name(&library, app_id));
             let icon = profile_app_id(p)
                 .and_then(steam::icon_path)
                 .and_then(|path| load_icon(&path));
             GameRow {
-                name: p.name.clone().into(),
+                name: name.as_str().into(),
                 exe: exe.into(),
                 percent: sat_to_percent(p.saturation),
                 enabled: p.enabled,
-                accent: tile_color(&p.name),
-                initial: p
-                    .name
+                accent: tile_color(&name),
+                initial: name
                     .chars()
                     .next()
                     .unwrap_or('?')
