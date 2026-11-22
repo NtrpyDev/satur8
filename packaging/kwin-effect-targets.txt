@@ -1,0 +1,14 @@
+# Systems the release tarball carries a prebuilt KWin effect for, built by
+# packaging/build-kwin-effect.sh inside each system's own package set.
+#
+# One target per line: "steamos <branch>" (a branch on Valve's package mirror)
+# or "fedora <release>", optionally followed by "testing" for Fedora's
+# updates-testing repository. Oldest first: when two targets give the same key
+# (same family and KWin version), the first one wins, so the effect is built
+# against the oldest Qt that the KWin version meets.
+steamos 3.9
+steamos 3.10
+steamos main
+fedora 44
+fedora 45
+fedora 45 testing
