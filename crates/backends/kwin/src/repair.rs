@@ -297,6 +297,10 @@ pub fn pick_from_set(
             });
         }
     }
+    // Another system's effect: Qt is the only requirement checked against
+    // this host. The build gate in packaging/build-kwin-effect.sh (floors in
+    // packaging/abi-floors.sh) guarantees every bundled effect needs no newer
+    // GLIBC, GLIBCXX or CXXABI version than the tarball's own binaries do.
     let qt = installed_qt?;
     usable
         .iter()

@@ -312,6 +312,10 @@ choose_effect() {
         effect_pick=build
         return
     fi
+    # Another system's effect: Qt is the only requirement checked against this
+    # host. The build gate in packaging/build-kwin-effect.sh (floors in
+    # packaging/abi-floors.sh) guarantees every bundled effect needs no newer
+    # GLIBC, GLIBCXX or CXXABI version than the tarball's own binaries do.
     qt="$(installed_qt_minor)"
     for dir in "$effect_set"/*/; do
         dir="${dir%/}"

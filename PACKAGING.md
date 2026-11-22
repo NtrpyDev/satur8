@@ -51,7 +51,11 @@ Qt minor than the installed one. So build the effect against the target's own
 KWin and Qt packages, in the package build. Using an effect built on another
 system is only a guarded fallback, as the release tarball's installer does it:
 the KWin version must be equal and the installed Qt at least as new as the one
-the effect needs.
+the effect needs. Qt is the only requirement checked against the host there:
+`packaging/build-kwin-effect.sh` refuses to build or merge an effect that needs
+a newer GLIBC, GLIBCXX or CXXABI version than Ubuntu 22.04 has (the floors in
+`packaging/abi-floors.sh`), so a bundled effect never needs more of the C and
+C++ runtime than the tarball's own binaries do.
 
 The packaged `.so` goes stale the moment the distro updates KWin. The daemon's
 unit runs `satur8 repair` at session start, which asks the running KWin whether
