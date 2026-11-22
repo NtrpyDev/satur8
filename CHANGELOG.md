@@ -20,9 +20,10 @@ GitHub release notes for that tag.
   effect and script rows read as not applicable or built into the service.
   Other sessions are unchanged.
 - The desktop app shows its own icon in the title bar and taskbar instead of a
-  generic one (checked on a Steam Deck in Desktop Mode). It now sets its app ID to satur8, so the desktop matches the
-  window to satur8.desktop, and every install path (the tarball's installer,
-  the Arch package and the Fedora package) installs the icon that entry names.
+  generic one (checked on a Steam Deck in Desktop Mode). It now sets its app
+  ID to satur8, so the desktop matches the window to satur8.desktop, and every
+  install path (the tarball's installer, the Arch package and the Fedora
+  package) installs the icon that entry names.
 
 ## v0.4.1 - 2026-11-22
 
