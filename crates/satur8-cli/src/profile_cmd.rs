@@ -2,9 +2,10 @@
 
 use anyhow::{bail, Result};
 use clap::Subcommand;
+use satur8_core::steam::{self, SteamGame};
 use satur8_core::{MatchRule, Profile, Profiles};
 
-use crate::config;
+use crate::{config, games_cmd};
 
 #[derive(Subcommand)]
 pub enum ProfileCmd {
@@ -27,6 +28,9 @@ pub enum ProfileCmd {
         /// Match by Steam AppID, e.g. 730.
         #[arg(long)]
         steam_app_id: Option<u32>,
+        /// Match by an installed Steam game, by name or AppID (see `satur8 games`).
+        #[arg(long, conflicts_with = "steam_app_id")]
+        steam_game: Option<String>,
     },
     /// Remove a profile by name.
     Remove { name: String },
@@ -48,7 +52,25 @@ pub fn run(cmd: ProfileCmd) -> Result<()> {
             exe,
             window_class,
             steam_app_id,
-        } => add(name, saturation, exe, window_class, steam_app_id),
+            steam_game,
+        } => {
+            let game = match steam_game {
+                Some(query) => Some(
+                    games_cmd::resolve_game(&steam::installed_games(), &query)
+                        .map_err(anyhow::Error::msg)?,
+                ),
+                None => None,
+            };
+            let steam_app_id = game.as_ref().map(|game| game.app_id).or(steam_app_id);
+            add(
+                name,
+                saturation,
+                exe,
+                window_class,
+                steam_app_id,
+                game.as_ref(),
+            )
+        }
         ProfileCmd::Remove { name } => remove(&name),
         ProfileCmd::Enable { name } => set_enabled(&name, true),
         ProfileCmd::Disable { name } => set_enabled(&name, false),
@@ -101,16 +123,27 @@ fn add(
     exe: Option<String>,
     window_class: Option<String>,
     steam_app_id: Option<u32>,
+    game: Option<&SteamGame>,
 ) -> Result<()> {
     let mut profiles = config::load_profiles()?;
     let profile = build_profile(name.clone(), saturation, exe, window_class, steam_app_id)?;
-    if add_or_replace_profile(&mut profiles, profile) {
-        println!("updated profile '{name}'");
-    } else {
-        println!("added profile '{name}'");
-    }
+    let updated = add_or_replace_profile(&mut profiles, profile);
+    println!("{}", added_line(&name, updated, game));
     config::save_profiles(&profiles)?;
     Ok(())
+}
+
+/// `added profile 'NAME'` (or `updated ...`), followed by the resolved game
+/// when `--steam-game` picked one. Scripts match on the first words.
+fn added_line(name: &str, updated: bool, game: Option<&SteamGame>) -> String {
+    let verb = if updated { "updated" } else { "added" };
+    match game {
+        Some(game) => format!(
+            "{verb} profile '{name}' ({}, AppID {})",
+            game.name, game.app_id
+        ),
+        None => format!("{verb} profile '{name}'"),
+    }
 }
 
 fn remove(name: &str) -> Result<()> {
@@ -141,7 +174,7 @@ fn build_profile(
 ) -> Result<Profile> {
     satur8_core::Saturation::try_new(saturation)?;
     if exe.is_none() && window_class.is_none() && steam_app_id.is_none() {
-        bail!("a profile needs at least one match rule (--exe, --window-class, or --steam-app-id)");
+        bail!("a profile needs at least one match rule (--exe, --window-class, --steam-app-id, or --steam-game)");
     }
     Ok(Profile {
         name,
@@ -233,6 +266,29 @@ mod tests {
         assert!(build_profile("CS2".into(), 1.6, Some("cs2".into()), None, None).is_ok());
         assert!(build_profile("CS2".into(), 1.6, None, Some("cs2".into()), None).is_ok());
         assert!(build_profile("CS2".into(), 1.6, None, None, Some(730)).is_ok());
+    }
+
+    #[test]
+    fn added_line_names_the_resolved_game() {
+        let game = SteamGame {
+            app_id: 4555040,
+            name: "Sushiamo".into(),
+            library: std::path::PathBuf::from("/home/deck/.local/share/Steam"),
+        };
+        assert_eq!(
+            added_line("sushiamo", false, Some(&game)),
+            "added profile 'sushiamo' (Sushiamo, AppID 4555040)"
+        );
+        assert_eq!(
+            added_line("sushiamo", true, Some(&game)),
+            "updated profile 'sushiamo' (Sushiamo, AppID 4555040)"
+        );
+    }
+
+    #[test]
+    fn added_line_without_a_game_is_unchanged() {
+        assert_eq!(added_line("cs2", false, None), "added profile 'cs2'");
+        assert_eq!(added_line("cs2", true, None), "updated profile 'cs2'");
     }
 
     #[test]

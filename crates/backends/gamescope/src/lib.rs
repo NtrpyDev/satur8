@@ -9,8 +9,16 @@
 //! backend everywhere one exists; this is for niche wlroots compositors (Sway,
 //! minimal) that expose no color hook at all.
 //!
-//! Unlike the other backends this is launch-only (it wraps the game's lifetime),
-//! so it is not a `Backend` impl - it's a run strategy used by `satur8 run`.
+//! The nested launch and the `gamescope-native` override in this file wrap the
+//! game's lifetime, so they are run strategies used by `satur8 run`, not a
+//! `Backend` impl. Steam Game Mode, where gamescope is already the session
+//! compositor, has a real `Backend` in [`GamescopeBackend`] (`backend.rs`).
+
+mod backend;
+pub mod look;
+pub mod session;
+
+pub use backend::GamescopeBackend;
 
 use std::io::Write;
 use std::path::PathBuf;

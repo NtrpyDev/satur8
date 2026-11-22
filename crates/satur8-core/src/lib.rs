@@ -9,6 +9,7 @@ pub mod ctm;
 pub mod env;
 pub mod proc;
 pub mod profile;
+pub mod steam;
 
 pub use env::{Desktop, Environment, Gpu, SessionType};
 pub use proc::{resolve_exe, running_apps, RunningApp};

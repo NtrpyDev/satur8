@@ -268,6 +268,27 @@ mod tests {
         }
     }
 
+    /// The Sushiamo window's process on a Steam Deck under Proton 11, read in
+    /// Game Mode on 2026-11-21 (the start of the `exe` path was not recorded):
+    /// `exe` is the Wine loader and `argv[0]` is the game on the `S:` drive.
+    /// These are the two steps `resolve_exe` takes.
+    #[test]
+    fn proton_game_on_the_steam_library_drive_resolves_to_the_game() {
+        let exe = "Proton 11.0/files/lib/wine/x86_64-unix/wine64-preloader";
+        let base = std::path::Path::new(exe)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(is_wine_loader(base));
+        let cmdline = b"S:\\steamapps\\common\\Sushiamo\\Sushiamo.exe\0";
+        let arg0 = cmdline.split(|&byte| byte == 0).next().unwrap();
+        assert_eq!(
+            wine_game_from_arg0(&String::from_utf8_lossy(arg0)).as_deref(),
+            Some("Sushiamo.exe")
+        );
+    }
+
     #[test]
     fn our_own_pid_resolves() {
         let pid = std::process::id();
