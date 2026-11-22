@@ -7,7 +7,7 @@ which claims are honest today.
 
 ## Current Package Status
 
-- Fedora: live on COPR as `ntrpydev/satur8`, built for Fedora 43 and 44.
+- Fedora: live on COPR as `ntrpydev/satur8`, built for Fedora 43, 44 and 45.
 - Arch: `packaging/PKGBUILD` and generated `.SRCINFO` are ready and tested from
   a checkout.
 - AUR: two packages are published and maintained by a community member, not by
@@ -45,13 +45,19 @@ platform cannot support part of it:
 - desktop launcher from `packaging/satur8.desktop`.
 - GPL license text.
 
-The KWin effect ABI is not stable. Do not reuse a KWin `.so` built on another
-distro or another incompatible KWin/Qt version; build it in the package build.
+The KWin effect ABI is not stable. KWin loads an effect only when its embedded
+ID names KWin's exact x.y.z version, and Qt refuses one built against a newer
+Qt minor than the installed one. So build the effect against the target's own
+KWin and Qt packages, in the package build. Using an effect built on another
+system is only a guarded fallback, as the release tarball's installer does it:
+the KWin version must be equal and the installed Qt at least as new as the one
+the effect needs.
 
 The packaged `.so` goes stale the moment the distro updates KWin. The daemon's
 unit runs `satur8 repair` at session start, which asks the running KWin whether
-it accepts the effect and, when it does not, rebuilds it from the installed
-source into `~/.local/lib/qt6/plugins`. A package should therefore pull in the
+it accepts the effect and, when it does not, installs the matching effect from
+the release tarball's set if one is installed (`~/.local/share/satur8/kwin-effects`),
+else rebuilds it from the installed source into `~/.local/lib/qt6/plugins`. A package should therefore pull in the
 effect's build toolchain at runtime as well: a hard dependency where the distro
 has no weak ones (Arch), `Recommends` where it does (Fedora). The end-to-end
 check for this path is `assets/kwin-effect/sandbox-repair-test.sh`.
@@ -166,17 +172,50 @@ When changing the spec:
 ## Release Tarball
 
 The binary release tarball is for users who want a direct download rather than a
-distro package. It includes prebuilt Linux x86_64 binaries, the KWin effect, the
-installer, and the runtime assets.
+distro package. It includes prebuilt Linux x86_64 binaries, a set of prebuilt
+KWin effects, the installer, and the runtime assets.
 
-Build locally on Linux x86_64:
+- **Binaries.** `packaging/build-portable.sh OUT_DIR` builds the four programs
+  in an Ubuntu 22.04 container with a pinned Rust toolchain, so they need glibc
+  2.35 or newer. It ends with `packaging/check-portability.sh`, which fails
+  when a program asks for a newer glibc symbol version or links a library
+  outside the allowed list. `packaging/portability-test.sh` then starts every
+  program in containers of Ubuntu 22.04, Debian 12, Ubuntu 24.04, openSUSE Leap
+  16.0 and Fedora 43, the desktop app under a virtual display; with
+  `--negative-control` it shows the check catches the problem, using the
+  v0.3.6 tarball. These are container checks, not tests on hardware.
+- **KWin effects.** `packaging/build-kwin-effect.sh` builds one effect per line
+  of `packaging/kwin-effect-targets.txt`, inside that system's own packages:
+  SteamOS branches against Valve's package mirror, Fedora releases in a Fedora
+  container. Each lands in `<key>/satur8.so` with a `build-info.txt`, where the
+  key is `steamos-<kwin>` or `fedora<NN>-<kwin>`; when two targets give the
+  same key, the first wins. The tarball carries them in
+  `prebuilt/linux-x86_64/kwin/effects/<key>/`.
+- **Assembly.** `packaging/release-tarball.sh --bin-dir DIR --effects-dir DIR`
+  puts the portable binaries and the effect set into the archive. Without
+  `--effects-dir` it builds one effect on this machine, keyed for its family and
+  KWin version.
+- **Installer tests.** `packaging/install-prebuilt-effect-test.sh` checks
+  which effect the installer picks on faked SteamOS and Bazzite systems with no
+  build tools, and `packaging/install-nokwin-test.sh` checks an install on a
+  system with no KWin.
+
+To rebuild locally on Linux x86_64 (needs podman or docker):
 
 ```sh
-packaging/release-tarball.sh
+packaging/build-portable.sh target/portable-bin
+packaging/build-kwin-effect.sh --all target/effects
+packaging/release-tarball.sh --bin-dir target/portable-bin --effects-dir target/effects
+packaging/portability-test.sh target/dist/satur8-vX.Y.Z-linux-x86_64.tar.gz
 ```
 
-The CI workflow builds the same tarball inside Fedora so dependencies are
-repeatable and close to the Fedora package environment.
+On GitHub, `.github/workflows/build-tarball.yml` builds the portable binaries
+and the effect set, assembles the tarball, and runs the installer and
+portability tests on it; `release.yml` publishes the result.
+
+`install-prebuilt-effect-test.sh` names the keys `steamos-6.7.3` and
+`fedora45-6.8.3`. When those targets move to a new KWin version, update the
+test's keys, KWin versions and Qt library names with them.
 
 ## Verification Expectations
 
@@ -207,15 +246,16 @@ not been tested on real hardware.
 Bazzite specifics (stable 45.20261117.1, checked 2026-11-21 from source and in a
 container, not on a Bazzite device):
 
-- It is Fedora 45 based. A Fedora 45 build target was added to the COPR project
-  on 2026-11-22 (it built Fedora 43 and 44 only before). Layering that package
-  on Bazzite has not been tested, and Bazzite's documentation calls
+- It is Fedora 45 based. The COPR project builds Fedora 45 too. Layering that
+  package on Bazzite has not been tested, and Bazzite's documentation calls
   `rpm-ostree` layering a last resort.
 - `/usr` is read-only, so `install.sh --system` cannot work there and the
   installer refuses it; the per-user install writes only under `$HOME`, which
   persists.
 - The images ship no `cmake` and no KWin development headers, so the KWin
-  effect cannot be rebuilt on the machine after a KWin update. The tarball's
-  bundled effect is used when its KWin version matches.
+  effect cannot be rebuilt on the machine after a KWin update. Since v0.4.1 the
+  tarball carries `fedora45-6.8.3`, built in Fedora 45's packages, and the
+  installer picked it in the Bazzite container. After a KWin update the effect
+  stays off until a newer Satur8 release includes that KWin version.
 - The GNOME images run GNOME 51, which the GNOME Shell extension's metadata does
   not list yet.
