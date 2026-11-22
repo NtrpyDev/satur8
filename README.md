@@ -292,7 +292,7 @@ Status legend:
 - Verified: tested on real hardware
 - Implemented: built and behind environment detection, not yet independently verified
 
-KDE Plasma is Verified for one value on every output. A different value per output is new and is not yet in a release: it was checked on headless KWin with two virtual outputs (in pixels on KWin 6.7.3, and as the effect's reported state on KWin 6.8.2), and it has not been run on real monitors. See [Multiple monitors](#multiple-monitors).
+KDE Plasma is Verified for one value on every output. A different value per output is new in v0.5.0 and is Implemented, not Verified: it was checked on headless KWin with two virtual outputs and software rendering, in pixels on KWin 6.7.3, 6.8.2 and 6.8.3, and on a real KWin 6.8.3 session with three monitors the focus script reported which monitor a window was on as it moved. A different value on each of several real monitors has not been seen yet. See [Multiple monitors](#multiple-monitors).
 
 In Steam Game Mode, the focus daemon sets gamescope's look table per game, so Steam's own vibrancy and color temperature keep working on top; see [Steam Deck](#steam-deck). The gamescope-native path is a launch option that drives an already-running gamescope compositor through its Xwayland color override atoms, instead of launching a nested gamescope. While it runs, it replaces Steam's color settings.
 
@@ -368,7 +368,7 @@ A profile needs at least one match rule: `--exe`, `--window-class`, `--steam-app
 
 ### Multiple monitors
 
-By default every setting applies to every output, as it always has. On KDE Plasma, Satur8 can also give each output its own value. This is implemented and checked on headless KWin with two virtual outputs (pixels on KWin 6.7.3, the effect's reported state on KWin 6.8.2); it has not been run on real monitors yet. Every other desktop applies one saturation to every output, and `satur8 outputs`, `satur8 doctor` and `satur8 status` say so when the file asks for more.
+By default every setting applies to every output, as it always has. On KDE Plasma, Satur8 can also give each output its own value. This is new in v0.5.0: it was checked on headless KWin with two virtual outputs and software rendering, in pixels on KWin 6.7.3, 6.8.2 and 6.8.3, and on a real KWin 6.8.3 session with three monitors the focus script reported which monitor a window was on as it moved. A different value on each of several real monitors has not been seen yet. Every other desktop applies one saturation to every output, and `satur8 outputs`, `satur8 doctor` and `satur8 status` say so when the file asks for more.
 
 Outputs are named by port, as `satur8 outputs` lists them (for example `DP-2` or `HDMI-A-1`), so a setting follows the port, not the monitor.
 
