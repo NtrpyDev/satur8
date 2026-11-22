@@ -10,8 +10,9 @@ GitHub release notes for that tag.
   the extension is installed and which GNOME versions it lists, the state GNOME
   Shell reports for it (with the error text when it failed to load), whether
   its D-Bus service is running so Satur8 can apply, and one next step.
-  `satur8 status` shows a matching short line. KDE, Game Mode, Hyprland and
-  NVIDIA X11 reports are unchanged.
+  `satur8 status` shows a matching short line. KDE and Game Mode reports are
+  unchanged. The doctor's DRM CTM note no longer says KWin outside KDE: on
+  GNOME it names GNOME Shell, elsewhere it is generic.
 
 ## v0.4.1 - 2026-11-22
 
