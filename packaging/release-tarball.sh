@@ -15,6 +15,9 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
+# The runtime floors a bundled effect must stay within, and their check.
+# shellcheck source=packaging/abi-floors.sh
+. "$repo/packaging/abi-floors.sh"
 bin_dir=""
 effects_dir=""
 while [ "$#" -gt 0 ]; do
@@ -110,6 +113,12 @@ if [ -n "$effects_dir" ]; then
         id="$(effect_id "$dir/satur8.so")"
         if [ "$id" != "${key##*-}" ]; then
             echo "$dir/satur8.so embeds KWin ${id:-no version}, but its folder says ${key##*-}" >&2
+            exit 1
+        fi
+        # build-info.txt must record what the effect needs from the C and C++
+        # runtime, within the floors (packaging/abi-floors.sh).
+        if ! problems="$(effect_abi_problems "$dir/build-info.txt" "$key")"; then
+            echo "$problems" >&2
             exit 1
         fi
         effect_entries+=("$key"$'\t'"$dir")
