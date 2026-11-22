@@ -33,8 +33,9 @@ Redesigned desktop app with a new Status tab, plus documentation fixes.
   - A Starting saturation for new games setting (default +40%, the old fixed
     value), saved in `gui.toml`.
   - Copy system info, which leaves out your home folder, user name and
-    computer name, and Report a bug, which opens a new GitHub issue in your
-    browser with that information filled in. Nothing is sent automatically.
+    computer name, and Report a bug, which copies that information and opens
+    a new GitHub issue in your browser for you to paste it into. Nothing is
+    sent until you submit the issue.
   - The activity log moved here from the main window.
 - The daemon exposes a new read-only `LastFocused` D-Bus property for the
   Status tab. The app still works with an older daemon that lacks it.

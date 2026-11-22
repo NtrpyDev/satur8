@@ -249,12 +249,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 })
             });
             match info {
-                Some(info) => {
-                    open_url(&status::bug_report_url(&info));
+                // The page copied the system info to the clipboard before
+                // calling this; the address opened here carries none of it.
+                Some(_) => {
+                    open_url(&status::bug_report_url());
                     log(
                         &activity,
                         true,
-                        "Opened a new bug report in your browser (nothing was sent)",
+                        "Opened a new bug report in your browser; paste the copied system info into it",
                     );
                 }
                 None => log(

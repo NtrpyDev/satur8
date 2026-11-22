@@ -955,17 +955,18 @@ pub fn system_info_for_this_machine(facts: &Facts, rows: &[HealthRow]) -> String
 const NEW_ISSUE: &str = "https://github.com/NtrpyDev/satur8/issues/new";
 
 /// The new-issue page with a body that follows .github/ISSUE_TEMPLATE/
-/// bug_report.md and carries the (already sanitized) system info. Only the
-/// documented `body` parameter is used, so the prefill does not depend on how
-/// GitHub combines `template` with `body`.
-pub fn bug_report_url(system_info: &str) -> String {
-    let body = format!(
-        "## What happened\n\n\n\n## What you expected\n\n\n\n## Steps to reproduce\n\n1.\n2.\n\n\
-         ## Environment\n\nInstall method: \n\n```\n{}\n```\n\n\
-         ## Diagnostics\n\n<!-- If you can, paste the output of `satur8 doctor` and `satur8 status`. -->\n",
-        system_info.trim_end()
-    );
-    format!("{NEW_ISSUE}?body={}", percent_encode(&body))
+/// bug_report.md. The address carries no information about this machine: a
+/// browser sends the whole address to GitHub as soon as the page opens, before
+/// the user has submitted anything. The system info goes on the clipboard
+/// instead, for the user to paste after reading it. Only the documented `body`
+/// parameter is used, so the prefill does not depend on how GitHub combines
+/// `template` with `body`.
+pub fn bug_report_url() -> String {
+    let body = "## What happened\n\n\n\n## What you expected\n\n\n\n## Steps to reproduce\n\n1.\n2.\n\n\
+                ## Environment\n\nInstall method: \n\n\
+                <!-- Paste here: Report a bug copied your system info to the clipboard. -->\n\n\
+                ## Diagnostics\n\n<!-- If you can, paste the output of `satur8 doctor` and `satur8 status`. -->\n";
+    format!("{NEW_ISSUE}?body={}", percent_encode(body))
 }
 
 fn percent_encode(text: &str) -> String {
@@ -1288,13 +1289,16 @@ mod tests {
     }
 
     #[test]
-    fn bug_report_url_prefills_the_template_sections_with_encoded_info() {
-        let url = bug_report_url("Satur8 v0.3.6\nDesktop: KDE Plasma & more");
+    fn bug_report_url_prefills_the_template_and_carries_nothing_about_the_machine() {
+        let url = bug_report_url();
         assert!(url.starts_with("https://github.com/NtrpyDev/satur8/issues/new?body="));
         let query = url.split_once("?body=").unwrap().1;
         assert!(!query.contains(' ') && !query.contains('\n') && !query.contains('&'));
         assert!(query.contains("%23%23%20What%20happened"));
-        assert!(query.contains("Satur8%20v0.3.6%0ADesktop%3A%20KDE%20Plasma%20%26%20more"));
+        assert!(query.contains("Paste%20here"));
+        // The address is the same on every machine, so it cannot leak anything.
+        assert_eq!(url, bug_report_url());
+        assert!(!query.contains("Satur8%20v"));
     }
 
     #[test]
