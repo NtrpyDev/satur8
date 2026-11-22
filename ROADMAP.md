@@ -7,11 +7,14 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.3.6 is the current release. Six of the seven backend paths are verified on
+v0.4.0 is the current release. Seven of the eight backend paths are verified on
 real hardware: KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland,
-NVIDIA X11 NV-CONTROL, gamescope-native for a running full-screen gamescope
-compositor, and the nested gamescope fallback for unsupported Wayland sessions.
-The remaining implemented-but-unverified path is DRM/KMS. The KWin effect is
+NVIDIA X11 NV-CONTROL, automatic per-game switching in Steam Game Mode through
+gamescope's look table (verified on a Steam Deck OLED with SteamOS 3.9.5 and
+gamescope 3.16.30.1), the gamescope-native launch option for a running
+full-screen gamescope compositor, and the nested gamescope fallback for
+unsupported Wayland sessions. The remaining implemented-but-unverified path is
+DRM/KMS. The KWin effect is
 built against KWin 6.8, and since v0.3.4 `satur8 repair` rebuilds it at login
 when a KWin update rejects the installed copy. Distribution today is a Linux
 x86_64 tarball served from [satur8.app](https://satur8.app), a tested Arch
@@ -22,9 +25,11 @@ member rather than by this project. They were at v0.3.3 when checked on
 2026-11-21, so they can trail the latest release.
 
 The north star is **v1.0 = Satur8 running well on SteamOS and Bazzite**. Both run
-gamescope rather than KWin. The gamescope path has been proven in v0.3; the next
-major work is landing and field-testing Deck/Bazzite support in v0.4 on real
-hardware, then stamping 1.0 once it is proven. Broader desktop reach
+gamescope rather than KWin. The gamescope path was proven in v0.3, and v0.4.0
+landed automatic per-game switching in Steam Game Mode and verified it on a
+Steam Deck. The next work is Bazzite and other gamescope-session systems on real
+hardware and the remaining Steam Deck items, then stamping 1.0 once it is
+proven. Broader desktop reach
 (Debian/Ubuntu, non-gaming uses) comes after 1.0.
 
 ## Guiding principle
@@ -139,15 +144,24 @@ and Bazzite is Fedora-based (the live COPR work carries over).
 - [x] Build a gamescope-native backend that drives the running compositor's color
       saturation per-game at runtime (zero extra pass, no injection), instead of
       the nested-gamescope reshade fallback. Landed in v0.3.0 and verified on a
-      full-screen gamescope session; on-Deck field-testing is the remaining work.
-- [ ] Per-game auto-apply in Game Mode, from the same Satur8 profiles used on
-      the desktop. vibrantDeck, an existing Decky plugin, already applies
-      per-app saturation in Game Mode, so this is not unique to Satur8.
-- [ ] SteamOS: install story on a read-only root (a Decky plugin is the likely
-      path); ship only honest, tested docs.
+      full-screen gamescope session. It is still the `satur8 run --via
+      gamescope-native` launch option and still replaces Steam's color settings
+      while the game runs.
+- [x] Per-game auto-apply in Game Mode, from the same Satur8 profiles used on
+      the desktop. Done in v0.4.0: the focus daemon follows gamescope's focused
+      app and sets gamescope's look table, so Steam's own vibrancy and color
+      temperature keep working on top. Verified on a Steam Deck OLED (SteamOS
+      3.9.5, gamescope 3.16.30.1) with a camera on the screen. vibrantDeck, an
+      existing Decky plugin, already applies per-app saturation in Game Mode, so
+      this is not unique to Satur8.
+- [x] SteamOS: install story on a read-only root. Done in v0.4.0 without a Decky
+      plugin: the release tarball's per-user installer puts everything in the
+      home folder, which survives SteamOS updates, `--enable-daemon` turns on
+      the background service, and `--system` is refused on SteamOS.
 - [ ] Bazzite (atomic Fedora): evaluate rpm-ostree layering versus a Decky/
       Flatpak split.
-- [ ] Document clearly what works and what does not on each.
+- [ ] Document clearly what works and what does not on each. SteamOS is done in
+      the README's Steam Deck section (v0.4.0); Bazzite is open.
 
 ## v1.0: Stable on the north star
 
@@ -183,6 +197,13 @@ Not blocking the packaging spine; picked up as time allows.
       red as `(54,54,54)` while linear-light output sampled red as
       `(127,127,127)`, matching the expected sRGB transfer-function path.
 - [ ] Multi-monitor and per-output profiles.
+- [ ] Steam Deck: pick a game from a list of installed Steam games instead of
+      typing its AppID.
+- [ ] Steam Deck: the desktop app in Game Mode.
+- [ ] Steam Deck: a Decky panel.
+- [ ] Steam Deck: HDR games, through gamescope's separate HDR look table. The
+      v0.4.0 look table only changes SDR content.
+- [ ] Steam Deck: check the Deck's Desktop Mode.
 - [ ] Re-check whether a future KWin release exposes a client CTM path that would
       make the KDE backend zero-cost (none in KWin 6.7, see PLAN.md section 10).
 - [x] `CONTRIBUTING.md`, issue and PR templates, and the dedicated
