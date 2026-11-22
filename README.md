@@ -134,7 +134,7 @@ In Steam Game Mode, use the focus daemon instead; see [Steam Deck](#steam-deck).
 
 ## Steam Deck
 
-Satur8 switches saturation per game in Steam Game Mode. This was tested on a Steam Deck OLED with SteamOS 3.9.5 and gamescope 3.16.30.1.
+Satur8 switches saturation per game in Steam Game Mode. This was tested on a Steam Deck OLED with SteamOS 3.9.5 and gamescope 3.16.30.1. The Deck's Desktop Mode does not work yet; see [Desktop Mode](#desktop-mode).
 
 Satur8 applies the color through gamescope's look table, so Steam's own Color Vibrancy and Color Temperature settings keep working on top of it. Satur8 never changes them.
 
@@ -148,19 +148,21 @@ cd satur8-*-linux-x86_64
 packaging/install.sh --enable-daemon
 ```
 
-Without `--enable-daemon`, the installer prints the command that turns the service on. Everything is installed in your home folder, so it survives SteamOS updates. `--system` is refused on SteamOS. If the installer says the KWin effect was not installed, that is fine: Game Mode does not use it.
+Without `--enable-daemon`, the installer prints the command that turns the service on. Everything is installed in your home folder, so it survives SteamOS updates. `--system` is refused on SteamOS. If the installer says the KWin effect was not installed, Game Mode still works without it.
 
-The commands are installed to `~/.local/bin`. If your shell does not find `satur8`, run it as `~/.local/bin/satur8`.
+The commands are installed to `~/.local/bin`. An SSH login on SteamOS does not have that folder on its PATH, so over SSH a plain `satur8` gives "command not found"; the installer prints a hint about this. The examples below use the full path, `~/.local/bin/satur8`, which works everywhere. (Konsole in Desktop Mode was not checked.)
 
 ### Add a game
 
 On a Deck, profiles match a game by its Steam AppID. The AppID is the number in the game's `~/.local/share/Steam/steamapps/appmanifest_<AppID>.acf` file name, and in the game's Steam store URL.
 
 ```sh
-satur8 profile add sushiamo 1.75 --steam-app-id 4555040
+~/.local/bin/satur8 profile add sushiamo 1.75 --steam-app-id 4555040
 ```
 
 Matching by executable also works for Proton games. Use the Windows executable name, for example `--exe Sushiamo.exe`.
+
+A profile you add while the service runs takes effect right away.
 
 The Steam home screen and games without a profile get `default_saturation` from `~/.config/satur8/profiles.toml`. At 1.0, the default, Satur8 loads nothing there.
 
@@ -172,21 +174,29 @@ The background service does the switching. If you installed without `--enable-da
 systemctl --user enable --now satur8-daemon
 ```
 
-In Game Mode, a game's profile loads when the game takes focus and is removed when you leave or close the game. Opening Steam's overlay menu over the game keeps its profile. If the service is killed, systemd restarts it within 5 seconds. Stopping the service puts `default_saturation` back; `satur8 off` removes Satur8's table at any value.
+The service starts with the Game Mode session. This was checked by switching the Deck to Desktop Mode and back; a cold boot was not tested.
+
+In Game Mode, a game's profile loads when the game takes focus and is removed when you leave or close the game. Opening Steam's overlay menu over the game keeps its profile. If the service is killed, systemd restarts it within 5 seconds. Stopping the service puts `default_saturation` back; `~/.local/bin/satur8 off` removes Satur8's table at any value.
 
 ### Check it
 
 Over SSH while the Deck is in Game Mode:
 
 ```sh
-satur8 doctor
+~/.local/bin/satur8 doctor
 ```
 
-It reports `Steam Game Mode (gamescope on :0)`, whether a Satur8 table is loaded and at what saturation, the focused app's AppID, whether the background service is running, and Steam's own color settings, which Satur8 leaves alone. `satur8 status` shows the same. `satur8 on`, `satur8 set` and `satur8 off` also work in Game Mode, including over SSH.
+It reports `Steam Game Mode (gamescope on :0)`, whether a Satur8 table is loaded and at what saturation, the focused app's AppID, whether the background service is running, and Steam's own color settings, which Satur8 leaves alone. `~/.local/bin/satur8 status` shows the same. `~/.local/bin/satur8 on`, `set` and `off` also work in Game Mode, including over SSH.
+
+Run these checks in Game Mode only. An SSH shell has none of the desktop session's settings, so in Desktop Mode `doctor` over SSH prints a report that does not apply to the desktop.
 
 ### The launch option
 
 The `satur8 run --via gamescope-native -- %command%` launch option still works as before. It replaces Steam's color settings while the game runs, and it wins over a profile's table until the game ends. Use the background service instead, and do not use both on one game.
+
+### Desktop Mode
+
+Satur8 does not work in the Deck's Desktop Mode yet. Desktop Mode runs KDE Plasma (KWin 6.7.3 on the tested Deck), and KWin only loads Satur8's effect when it was built for that exact KWin version. The effect bundled in the release tarball is built for a different KWin, and SteamOS has no build tools (no `cmake`) to rebuild it, so the service starts in Desktop Mode but cannot apply anything there. Game Mode is not affected and works again when you switch back.
 
 ### Uninstall from the Deck
 
@@ -196,13 +206,14 @@ From the extracted release folder:
 packaging/install.sh --uninstall
 ```
 
-This turns the service off, runs `satur8 off`, and removes the commands, the service and Satur8's table files.
+This stops the service, removes Satur8's table, and removes the commands, the service and the table folder. It was checked on the Deck with a game running and its table loaded: the picture went back to normal. Your profiles in `~/.config/satur8/profiles.toml` are kept, so they come back if you reinstall.
 
 ### Not tested yet
 
+- A cold boot of the Deck straight into Game Mode.
 - HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged.
 - An external display.
-- The desktop app (`satur8-gui`) on the Deck, and the Deck's Desktop Mode.
+- The desktop app (`satur8-gui`) on the Deck.
 - A Bazzite device (see [Bazzite](#bazzite)) and other systems that run a gamescope session.
 - gamescope versions other than 3.16.30.1.
 
