@@ -37,6 +37,10 @@ if [ -z "$runtime" ]; then
 fi
 [ -n "$runtime" ] || { echo "FAIL: needs podman or docker" >&2; exit 1; }
 
+# The archive carries the app icon in the hicolor layout the installer reads.
+tar -tzf "$tarball" | grep -q '^[^/]*/assets/icons/hicolor/256x256/apps/satur8\.png$' ||
+    { echo "FAIL: the tarball has no assets/icons/hicolor/256x256/apps/satur8.png" >&2; exit 1; }
+
 # The cases need these keys in the tarball's set.
 set_keys="$(tar -tzf "$tarball" | sed -n 's|^[^/]*/prebuilt/linux-x86_64/kwin/effects/\([^/]*\)/satur8\.so$|\1|p')"
 for key in steamos-6.7.3 fedora45-6.8.3; do
@@ -80,6 +84,7 @@ set_src=prebuilt/linux-x86_64/kwin/effects
 effect="$HOME/.local/lib/qt6/plugins/kwin/effects/plugins/satur8.so"
 set_dst="$HOME/.local/share/satur8/kwin-effects"
 conf="$HOME/.config/environment.d/60-satur8.conf"
+icon="$HOME/.local/share/icons/hicolor/256x256/apps/satur8.png"
 
 packaging/install.sh --pick-effect > /root/pick.txt 2>&1 || fail "--pick-effect exited non-zero"
 packaging/install.sh > /root/install.log 2>&1 || fail "the installer exited non-zero"
@@ -109,9 +114,10 @@ fi
 [ -d "$set_dst" ] || fail "the effect set was not copied to $set_dst"
 [ "$(cd "$set_src" && ls)" = "$(cd "$set_dst" && ls)" ] || fail "the copied effect set differs from the bundled one"
 [ -f "$conf" ] || fail "60-satur8.conf was not installed"
+cmp -s "$icon" assets/icons/hicolor/256x256/apps/satur8.png || fail "the app icon was not installed at $icon"
 
 packaging/install.sh --uninstall > /root/uninstall.log 2>&1 || fail "uninstall exited non-zero"
-for path in "$effect" "$set_dst" "$conf" "$HOME/.local/bin/satur8"; do
+for path in "$effect" "$set_dst" "$conf" "$icon" "$HOME/.local/bin/satur8"; do
     [ ! -e "$path" ] || fail "uninstall left $path"
 done
 echo "--- pick: $(tr "\n" " " < /root/pick.txt)"

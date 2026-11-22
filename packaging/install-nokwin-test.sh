@@ -53,7 +53,12 @@ done
 [ ! -e "$HOME/.local/lib/qt6/plugins/kwin/effects/plugins/satur8.so" ] || { echo "FAIL: an effect was installed with no KWin present"; exit 1; }
 [ ! -e "$HOME/.local/share/satur8/kwin-effects" ] || { echo "FAIL: the KWin effect set was copied with no KWin present"; exit 1; }
 [ -f "$HOME/.config/systemd/user/satur8-daemon.service" ] || { echo "FAIL: the daemon unit was not installed"; exit 1; }
+icon="$HOME/.local/share/icons/hicolor/256x256/apps/satur8.png"
+[ -f "$icon" ] || { echo "FAIL: the app icon was not installed at $icon"; exit 1; }
+cmp -s "$icon" assets/icons/hicolor/256x256/apps/satur8.png || { echo "FAIL: the installed app icon is not the one in the archive"; exit 1; }
 "$HOME/.local/bin/satur8" --version
 "$HOME/.local/bin/satur8" repair
+packaging/install.sh --uninstall > /root/uninstall.log 2>&1 || { cat /root/uninstall.log; echo "FAIL: uninstall exited non-zero"; exit 1; }
+[ ! -e "$icon" ] || { echo "FAIL: uninstall left the app icon"; exit 1; }
 echo "PASS: installs without KWin and leaves the KWin effect out"
 '
