@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use satur8_core::{Desktop, Environment, SessionType};
+use satur8_kwin::repair::Step as RepairStep;
 use zbus::blocking::Connection;
 
 /// The daemon's systemd user unit (installed by install.sh and the packages).
@@ -48,6 +49,14 @@ pub struct EffectFacts {
     pub system: Option<String>,
     /// KWin version the per-user effect was built for.
     pub user: Option<String>,
+    /// What Repair would do here, from the same decision `satur8 repair`
+    /// makes; `None` when it was not worked out.
+    pub repair: Option<RepairStep>,
+    /// KWin version of a per-user effect file that is for neither the running
+    /// nor the installed KWin, from `satur8_kwin::repair::stale_user_file`.
+    /// KWin can still accept the copy it loaded earlier, so the row must not
+    /// say the effect matches.
+    pub stale_user: Option<String>,
 }
 
 /// Everything the Status page knows about the system. Gathered read-only.
@@ -73,6 +82,19 @@ pub struct Facts {
 
 pub fn kde_wayland(env: &Environment) -> bool {
     env.session == SessionType::Wayland && env.desktop == Desktop::Kde
+}
+
+/// Steam Game Mode: the backend Satur8 selected is gamescope. Selection only
+/// reaches gamescope when no desktop backend answered, so this is never true
+/// in a KDE Plasma, GNOME, Hyprland or NVIDIA X11 session. There the daemon
+/// follows gamescope's focus by itself: no KWin effect, no KWin script.
+pub fn game_mode(facts: &Facts) -> bool {
+    facts.backend.as_deref() == Some("gamescope")
+}
+
+/// KDE Plasma on Wayland, where the KWin effect and focus script apply.
+fn kde_desktop(facts: &Facts) -> bool {
+    kde_wayland(&facts.env) && !game_mode(facts)
 }
 
 // ------------------------------------------------------------- health rows
@@ -109,13 +131,18 @@ fn row(label: &'static str, level: Level, detail: impl Into<String>) -> HealthRo
     }
 }
 
-/// Whether the user has asked for per-game switching in any way.
+/// Whether the user has asked for per-game switching in any way. In Game Mode
+/// only the service counts: the KWin script setting belongs to Desktop Mode.
 fn switching_wanted(facts: &Facts) -> bool {
+    if game_mode(facts) {
+        return facts.unit == UnitState::Enabled;
+    }
     facts.unit == UnitState::Enabled || facts.script_enabled
 }
 
 fn backend_detail(name: &str) -> String {
     match name {
+        "gamescope" => "Working through Steam Game Mode (gamescope)".into(),
         "kwin" => "Working through KDE Plasma's compositor (kwin)".into(),
         "gnome-shell" => "Working through the GNOME Shell extension (gnome-shell)".into(),
         "hyprland" => "Working through a Hyprland screen shader (hyprland)".into(),
@@ -127,7 +154,8 @@ fn backend_detail(name: &str) -> String {
 
 /// Map the facts to the four Health rows, in display order.
 pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
-    let kde = kde_wayland(&facts.env);
+    let kde = kde_desktop(facts);
+    let game = game_mode(facts);
     let mut rows = Vec::with_capacity(4);
 
     // 1. Color backend.
@@ -154,7 +182,7 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
         )
     } else {
         match &facts.effect {
-            Some(e) if e.reachable && e.supported => {
+            Some(e) if e.reachable && e.supported && e.stale_user.is_none() => {
                 let version = facts
                     .kwin_version
                     .as_deref()
@@ -174,14 +202,34 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
             }
             Some(e) if e.reachable => {
                 let built = e.user.as_deref().or(e.system.as_deref());
-                let detail = match (built, e.headers.as_deref()) {
-                    (None, _) => "Not installed. Repair can build it".to_string(),
-                    (Some(built), Some(needed)) if built != needed => format!(
-                        "Built for KDE {built}, but KDE {needed} is installed. Repair rebuilds it"
-                    ),
-                    (Some(built), _) => format!(
-                        "Built for KDE {built}, but the running KDE will not load it. Repair rebuilds it"
-                    ),
+                // Promise only what Repair can do on this system.
+                let (add, fix) = match e.repair {
+                    Some(RepairStep::InstallFromSet) => {
+                        ("Repair can install it", "Repair replaces it")
+                    }
+                    Some(RepairStep::CannotRepair) => {
+                        ("Repair cannot add it", "Repair cannot fix it")
+                    }
+                    Some(RepairStep::DropUserCopy) => ("Repair can build it", "Repair removes it"),
+                    _ => ("Repair can build it", "Repair rebuilds it"),
+                };
+                // A stale per-user file is wrong for the running KDE even
+                // where no development headers name the installed version.
+                let needed = e.headers.as_deref().or(if e.stale_user.is_some() {
+                    facts.kwin_version.as_deref()
+                } else {
+                    None
+                });
+                let detail = match (built, needed) {
+                    (None, _) => format!("Not installed. {add}"),
+                    (Some(built), Some(needed)) if built != needed => {
+                        format!("Built for KDE {built}, but KDE {needed} is installed. {fix}")
+                    }
+                    (Some(built), _) => {
+                        format!(
+                            "Built for KDE {built}, but the running KDE will not load it. {fix}"
+                        )
+                    }
                 };
                 row("Saturation effect", Level::Problem, detail)
             }
@@ -207,7 +255,7 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
             "Running, but it will not start at the next login",
         ),
         (Some(true), _) => row("Background service", Level::Ok, "Running"),
-        (Some(false), _) if !kde => row(
+        (Some(false), _) if !kde && !game => row(
             "Background service",
             Level::NotApplicable,
             "Only needed for per-game switching on KDE Plasma (Wayland)",
@@ -233,8 +281,18 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
         ),
     });
 
-    // 4. Focus script.
-    rows.push(if !kde {
+    // 4. Focus script. In Game Mode the service reads gamescope's focus itself.
+    rows.push(if game {
+        row(
+            "Game detection",
+            if facts.daemon_running == Some(true) {
+                Level::Ok
+            } else {
+                Level::NotApplicable
+            },
+            "Built into the service in Game Mode",
+        )
+    } else if !kde {
         row(
             "Game detection",
             Level::NotApplicable,
@@ -285,8 +343,51 @@ pub struct SwitchState {
     pub detail: String,
 }
 
+/// The line under the toggle when switching is not fully on: what is done.
+fn partly_detail(done: &[&str]) -> String {
+    if done.is_empty() {
+        "Off. Game profiles are not applied automatically".to_string()
+    } else {
+        format!("Partly on ({}). Turn on to finish", done.join(", "))
+    }
+}
+
+/// The toggle in Steam Game Mode, where switching is only the user service.
+fn game_mode_switch_state(facts: &Facts) -> SwitchState {
+    if facts.unit == UnitState::NotInstalled {
+        return SwitchState {
+            available: false,
+            on: false,
+            detail: "The background service is not installed; reinstall Satur8".into(),
+        };
+    }
+    let running = facts.daemon_running == Some(true);
+    if running && facts.unit != UnitState::Disabled {
+        return SwitchState {
+            available: true,
+            on: true,
+            detail: "Each game's profile applies when its window is focused".into(),
+        };
+    }
+    let mut done = Vec::new();
+    if running {
+        done.push("service running");
+    }
+    if facts.unit == UnitState::Enabled {
+        done.push("service starts at login");
+    }
+    SwitchState {
+        available: true,
+        on: false,
+        detail: partly_detail(&done),
+    }
+}
+
 /// Derive the toggle from the real system state (never from a stored flag).
 pub fn switch_state(facts: &Facts) -> SwitchState {
+    if game_mode(facts) {
+        return game_mode_switch_state(facts);
+    }
     if !kde_wayland(&facts.env) {
         return SwitchState {
             available: false,
@@ -337,15 +438,10 @@ pub fn switch_state(facts: &Facts) -> SwitchState {
     if loaded {
         done.push("detection running");
     }
-    let detail = if done.is_empty() {
-        "Off. Game profiles are not applied automatically".to_string()
-    } else {
-        format!("Partly on ({}). Turn on to finish", done.join(", "))
-    };
     SwitchState {
         available: true,
         on: false,
-        detail,
+        detail: partly_detail(&done),
     }
 }
 
@@ -371,7 +467,7 @@ pub enum Action {
 impl Action {
     pub fn describe(&self) -> String {
         match self {
-            Action::RepairEffect => "Check and rebuild the saturation effect".into(),
+            Action::RepairEffect => "Check and repair the saturation effect".into(),
             Action::Systemctl(args) => format!("systemctl --user {} {DAEMON_UNIT}", args.join(" ")),
             Action::SetFocusEnabled(on) => {
                 format!("kwriteconfig6 --file kwinrc --group Plugins --key {FOCUS_KEY} {on}")
@@ -384,8 +480,12 @@ impl Action {
 }
 
 /// The installer's three steps, plus loading the script into the running
-/// KWin (reconfigure alone does not hot-load it).
+/// KWin (reconfigure alone does not hot-load it). In Game Mode only the
+/// service step applies.
 pub fn plan_enable(facts: &Facts) -> Vec<Action> {
+    if game_mode(facts) {
+        return vec![Action::Systemctl(vec!["enable", "--now"])];
+    }
     let mut plan = vec![
         Action::Systemctl(vec!["enable", "--now"]),
         Action::SetFocusEnabled(true),
@@ -400,7 +500,10 @@ pub fn plan_enable(facts: &Facts) -> Vec<Action> {
 }
 
 /// The reverse of [`plan_enable`].
-pub fn plan_disable(_facts: &Facts) -> Vec<Action> {
+pub fn plan_disable(facts: &Facts) -> Vec<Action> {
+    if game_mode(facts) {
+        return vec![Action::Systemctl(vec!["disable", "--now"])];
+    }
     vec![
         Action::SetFocusEnabled(false),
         Action::KwinReconfigure,
@@ -410,10 +513,11 @@ pub fn plan_disable(_facts: &Facts) -> Vec<Action> {
 }
 
 /// `satur8 repair`, plus starting the daemon and loading the focus script when
-/// those rows are failing.
+/// those rows are failing. In Game Mode there is no KWin effect or script, so
+/// only starting the service applies.
 pub fn plan_repair(facts: &Facts) -> Vec<Action> {
     let mut plan = Vec::new();
-    if kde_wayland(&facts.env) {
+    if kde_desktop(facts) {
         plan.push(Action::RepairEffect);
     }
     if facts.daemon_running == Some(false)
@@ -422,7 +526,7 @@ pub fn plan_repair(facts: &Facts) -> Vec<Action> {
     {
         plan.push(Action::Systemctl(vec!["start"]));
     }
-    if kde_wayland(&facts.env) && facts.script_enabled && facts.script_loaded == Some(false) {
+    if kde_desktop(facts) && facts.script_enabled && facts.script_loaded == Some(false) {
         if let Some(path) = &facts.script_path {
             plan.push(Action::LoadScript(path.clone()));
         }
@@ -710,6 +814,36 @@ pub fn kwin_version_in(support: &str) -> Option<String> {
     })
 }
 
+/// The effect facts for a reachable KWin, from what repair reads (`state`),
+/// what KWin says (`supported`, `loaded`) and the running KWin's version.
+/// Repair's decision and the stale-file check need `running`: KWin keeps
+/// accepting an effect it loaded earlier after the file on disk was replaced
+/// by one for another KWin. With `running` unknown, KWin's answer is trusted.
+pub fn effect_facts(
+    state: satur8_kwin::repair::EffectState,
+    supported: bool,
+    loaded: bool,
+    running: Option<String>,
+) -> EffectFacts {
+    let state = satur8_kwin::repair::EffectState {
+        supported,
+        running,
+        ..state
+    };
+    let repair = Some(satur8_kwin::repair::decide(&state));
+    let stale_user = satur8_kwin::repair::stale_user_file(&state).map(String::from);
+    EffectFacts {
+        reachable: true,
+        supported,
+        loaded,
+        headers: state.headers,
+        system: state.system,
+        user: state.user,
+        repair,
+        stale_user,
+    }
+}
+
 /// Gather [`Facts`]. Read-only: D-Bus queries, `systemctl --user is-enabled`,
 /// and file reads. Can take a moment, so call it off the UI thread.
 pub fn probe() -> Facts {
@@ -721,21 +855,9 @@ pub fn probe() -> Facts {
     let conn = session().ok();
 
     let (effect, kwin_version, script_loaded) = if kde {
-        let effect = match satur8_kwin::KwinBackend::connect() {
-            Some(kwin) => {
-                let supported = kwin.is_supported().unwrap_or(false);
-                let state = satur8_kwin::repair::inspect(supported);
-                EffectFacts {
-                    reachable: true,
-                    supported,
-                    loaded: kwin.is_loaded().unwrap_or(false),
-                    headers: state.headers,
-                    system: state.system,
-                    user: state.user,
-                }
-            }
-            None => EffectFacts::default(),
-        };
+        // The running KWin's version, from the support information repair and
+        // doctor read too. Asked once: it serves the effect check and the
+        // version shown on the page.
         let version = conn.as_ref().and_then(|c| {
             call::<String>(
                 c,
@@ -748,6 +870,18 @@ pub fn probe() -> Facts {
             .ok()
             .and_then(|text| kwin_version_in(&text))
         });
+        let effect = match satur8_kwin::KwinBackend::connect() {
+            Some(kwin) => {
+                let supported = kwin.is_supported().unwrap_or(false);
+                effect_facts(
+                    satur8_kwin::repair::inspect(supported),
+                    supported,
+                    kwin.is_loaded().unwrap_or(false),
+                    version.clone(),
+                )
+            }
+            None => EffectFacts::default(),
+        };
         (Some(effect), version, conn.as_ref().and_then(script_loaded))
     } else {
         (None, None, None)
@@ -1006,6 +1140,8 @@ mod tests {
                 headers: Some("6.8.3".into()),
                 system: Some("6.8.3".into()),
                 user: None,
+                repair: Some(RepairStep::Healthy),
+                stale_user: None,
             }),
             kwin_version: Some("6.8.3".into()),
             daemon_running: Some(true),
@@ -1072,11 +1208,103 @@ mod tests {
             headers: Some("6.8.3".into()),
             system: Some("6.8.2".into()),
             user: None,
+            repair: Some(RepairStep::Build),
+            stale_user: None,
         });
         let rows = health_rows(&facts);
         assert_eq!(rows[0].level, Level::Problem);
         assert_eq!(rows[1].level, Level::Problem);
         assert!(rows[1].detail.contains("6.8.2") && rows[1].detail.contains("6.8.3"));
+        assert!(rows[1].detail.ends_with("Repair rebuilds it"));
+    }
+
+    fn effect_detail(user: Option<&str>, headers: &str, repair: RepairStep) -> String {
+        let mut facts = healthy();
+        facts.effect = Some(EffectFacts {
+            reachable: true,
+            supported: false,
+            loaded: false,
+            headers: Some(headers.into()),
+            system: None,
+            user: user.map(Into::into),
+            repair: Some(repair),
+            stale_user: None,
+        });
+        health_rows(&facts)[1].detail.clone()
+    }
+
+    #[test]
+    fn effect_row_promises_only_what_repair_can_do_here() {
+        // The Deck after an OS update: the set has the new effect.
+        assert_eq!(
+            effect_detail(Some("6.7.3"), "6.8.2", RepairStep::InstallFromSet),
+            "Built for KDE 6.7.3, but KDE 6.8.2 is installed. Repair replaces it"
+        );
+        assert_eq!(
+            effect_detail(None, "6.7.3", RepairStep::InstallFromSet),
+            "Not installed. Repair can install it"
+        );
+        // No set entry and no build tools: no promise of a rebuild.
+        for detail in [
+            effect_detail(Some("6.8.2"), "6.9.0", RepairStep::CannotRepair),
+            effect_detail(Some("6.9.0"), "6.9.0", RepairStep::CannotRepair),
+            effect_detail(None, "6.9.0", RepairStep::CannotRepair),
+        ] {
+            assert!(!detail.contains("build"), "{detail}");
+            assert!(detail.contains("cannot"), "{detail}");
+        }
+        assert_eq!(
+            effect_detail(None, "6.8.3", RepairStep::Build),
+            "Not installed. Repair can build it"
+        );
+    }
+
+    fn stale_detail(headers: Option<&str>, repair: RepairStep) -> (Level, String) {
+        // KWin still accepts the 6.7.3 copy it loaded, but the per-user file on
+        // disk was replaced by one for KWin 6.7.9.
+        let mut facts = healthy();
+        facts.kwin_version = Some("6.7.3".into());
+        facts.effect = Some(EffectFacts {
+            reachable: true,
+            supported: true,
+            loaded: true,
+            headers: headers.map(Into::into),
+            system: None,
+            user: Some("6.7.9".into()),
+            repair: Some(repair),
+            stale_user: Some("6.7.9".into()),
+        });
+        let row = &health_rows(&facts)[1];
+        (row.level, row.detail.clone())
+    }
+
+    #[test]
+    fn a_stale_per_user_file_kwin_still_accepts_is_not_reported_as_matching() {
+        assert_eq!(
+            stale_detail(Some("6.7.3"), RepairStep::InstallFromSet),
+            (
+                Level::Problem,
+                "Built for KDE 6.7.9, but KDE 6.7.3 is installed. Repair replaces it".into()
+            )
+        );
+        // No development headers: the running version names what is needed.
+        assert_eq!(
+            stale_detail(None, RepairStep::InstallFromSet).1,
+            "Built for KDE 6.7.9, but KDE 6.7.3 is installed. Repair replaces it"
+        );
+        // A good system copy: repair deletes the per-user file.
+        assert_eq!(
+            stale_detail(Some("6.7.3"), RepairStep::DropUserCopy).1,
+            "Built for KDE 6.7.9, but KDE 6.7.3 is installed. Repair removes it"
+        );
+        let (_, detail) = stale_detail(Some("6.7.3"), RepairStep::CannotRepair);
+        assert!(detail.ends_with("Repair cannot fix it"), "{detail}");
+        // The same file without the stale flag is the healthy case.
+        let mut facts = healthy();
+        if let Some(effect) = facts.effect.as_mut() {
+            effect.user = Some("6.8.3".into());
+        }
+        assert_eq!(health_rows(&facts)[1].level, Level::Ok);
     }
 
     #[test]
@@ -1313,5 +1541,418 @@ mod tests {
             describe_focused(&live).as_deref(),
             Some("Desktop or nothing reported yet")
         );
+    }
+
+    /// What probe() hands effect_facts() on the Deck: KWin 6.7.3 running and
+    /// installed, the per-user file replaced by one for 6.7.9, the set holding
+    /// steamos-6.7.3, and KWin still answering supported from memory.
+    fn deck_state_with_a_wrong_file() -> satur8_kwin::repair::EffectState {
+        satur8_kwin::repair::EffectState {
+            headers: Some("6.7.3".into()),
+            user: Some("6.7.9".into()),
+            user_source_current: true,
+            set_match: Some(satur8_kwin::repair::SetPick {
+                key: "steamos-6.7.3".into(),
+                other_system: false,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn effect_row_uses_the_running_version_for_a_file_kwin_still_accepts() {
+        let mut facts = healthy();
+        facts.kwin_version = Some("6.7.3".into());
+        facts.effect = Some(effect_facts(
+            deck_state_with_a_wrong_file(),
+            true,
+            true,
+            Some("6.7.3".into()),
+        ));
+        let row = &health_rows(&facts)[1];
+        assert_eq!(row.level, Level::Problem);
+        assert_eq!(
+            row.detail,
+            "Built for KDE 6.7.9, but KDE 6.7.3 is installed. Repair replaces it"
+        );
+        let effect = facts
+            .effect
+            .as_ref()
+            .map(|e| (e.repair, e.stale_user.clone()));
+        assert_eq!(
+            effect,
+            Some((Some(RepairStep::InstallFromSet), Some("6.7.9".into())))
+        );
+
+        // Running version unknown: KWin's answer is trusted, as before.
+        facts.effect = Some(effect_facts(
+            deck_state_with_a_wrong_file(),
+            true,
+            true,
+            None,
+        ));
+        let row = &health_rows(&facts)[1];
+        assert_eq!(row.level, Level::Ok);
+        assert!(
+            row.detail.starts_with("Installed and matches"),
+            "{}",
+            row.detail
+        );
+    }
+
+    // ------------------------------- pinned: Desktop Mode text and plans as they are
+
+    fn details(facts: &Facts) -> Vec<String> {
+        health_rows(facts)
+            .into_iter()
+            .map(|row| row.detail)
+            .collect()
+    }
+
+    fn script_path() -> PathBuf {
+        PathBuf::from("/usr/share/kwin/scripts/satur8-focus/contents/code/main.js")
+    }
+
+    #[test]
+    fn kde_rows_toggle_and_plans_are_pinned() {
+        assert_eq!(
+            details(&healthy()),
+            [
+                "Working through KDE Plasma's compositor (kwin)",
+                "Installed and matches this KDE version (6.8.3); idle until a profile needs it",
+                "Running",
+                "On: KDE tells Satur8 which window is focused",
+            ]
+        );
+        assert_eq!(
+            switch_state(&healthy()),
+            SwitchState {
+                available: true,
+                on: true,
+                detail: "Each game's profile applies when its window is focused".into(),
+            }
+        );
+        assert_eq!(
+            plan_disable(&healthy()),
+            vec![
+                Action::SetFocusEnabled(false),
+                Action::KwinReconfigure,
+                Action::UnloadScript,
+                Action::Systemctl(vec!["disable", "--now"]),
+            ]
+        );
+
+        // Switching off on purpose.
+        let mut off = healthy();
+        off.daemon_running = Some(false);
+        off.unit = UnitState::Disabled;
+        off.script_enabled = false;
+        off.script_loaded = Some(false);
+        assert_eq!(
+            details(&off)[2..],
+            ["Off; only needed for automatic per-game switching", "Off"]
+        );
+        assert_eq!(
+            switch_state(&off).detail,
+            "Off. Game profiles are not applied automatically"
+        );
+        assert_eq!(
+            plan_enable(&off),
+            vec![
+                Action::Systemctl(vec!["enable", "--now"]),
+                Action::SetFocusEnabled(true),
+                Action::KwinReconfigure,
+                Action::LoadScript(script_path()),
+            ]
+        );
+        assert_eq!(plan_repair(&off), vec![Action::RepairEffect]);
+
+        // Wanted, but the service and the script are not running.
+        let mut partly = healthy();
+        partly.daemon_running = Some(false);
+        partly.script_loaded = Some(false);
+        assert_eq!(
+            details(&partly)[2..],
+            [
+                "Not running, so games are not switched automatically",
+                "Turned on, but not running in this session. Repair starts it",
+            ]
+        );
+        assert_eq!(
+            switch_state(&partly).detail,
+            "Partly on (service starts at login, detection turned on). Turn on to finish"
+        );
+        assert_eq!(
+            plan_repair(&partly),
+            vec![
+                Action::RepairEffect,
+                Action::Systemctl(vec!["start"]),
+                Action::LoadScript(script_path()),
+            ]
+        );
+        assert_eq!(
+            Action::RepairEffect.describe(),
+            "Check and repair the saturation effect"
+        );
+    }
+
+    fn desktop(session: SessionType, desktop: Desktop, gpu: Gpu, backend: &str) -> Facts {
+        Facts {
+            env: Environment {
+                session,
+                desktop,
+                gpu,
+            },
+            backend: Some(backend.into()),
+            effect: None,
+            kwin_version: None,
+            daemon_running: Some(false),
+            unit: UnitState::Disabled,
+            script_enabled: false,
+            script_loaded: None,
+            script_path: None,
+        }
+    }
+
+    #[test]
+    fn gnome_hyprland_and_nvidia_rows_toggle_and_plans_are_pinned() {
+        for (facts, color) in [
+            (
+                desktop(
+                    SessionType::Wayland,
+                    Desktop::Gnome,
+                    Gpu::Intel,
+                    "gnome-shell",
+                ),
+                "Working through the GNOME Shell extension (gnome-shell)",
+            ),
+            (
+                desktop(
+                    SessionType::Wayland,
+                    Desktop::Hyprland,
+                    Gpu::Amd,
+                    "hyprland",
+                ),
+                "Working through a Hyprland screen shader (hyprland)",
+            ),
+            (
+                desktop(SessionType::X11, Desktop::Kde, Gpu::Nvidia, "nv-control"),
+                "Working through the NVIDIA driver setting (nv-control)",
+            ),
+        ] {
+            assert_eq!(
+                details(&facts),
+                [
+                    color,
+                    "Only used on KDE Plasma (Wayland)",
+                    "Only needed for per-game switching on KDE Plasma (Wayland)",
+                    "Only available on KDE Plasma (Wayland)",
+                ]
+            );
+            assert_eq!(
+                levels(&facts)[1..],
+                [
+                    Level::NotApplicable,
+                    Level::NotApplicable,
+                    Level::NotApplicable
+                ]
+            );
+            assert_eq!(
+                switch_state(&facts),
+                SwitchState {
+                    available: false,
+                    on: false,
+                    detail: format!(
+                        "Needs KDE Plasma on Wayland; this session is {} / {}",
+                        facts.env.session, facts.env.desktop
+                    ),
+                }
+            );
+            assert!(plan_repair(&facts).is_empty());
+            let mut running = facts.clone();
+            running.daemon_running = Some(true);
+            running.unit = UnitState::Enabled;
+            assert_eq!(details(&running)[2], "Running");
+            assert!(plan_repair(&running).is_empty());
+        }
+    }
+
+    // ----------------------------------------------------------- Steam Game Mode
+
+    /// Game Mode as the Deck reports it: the gamescope backend is selected, no
+    /// KWin answers, and the KWin script is still installed from Desktop Mode.
+    fn game(daemon_running: Option<bool>, unit: UnitState) -> Facts {
+        Facts {
+            env: Environment {
+                session: SessionType::X11,
+                desktop: Desktop::Other,
+                gpu: Gpu::Amd,
+            },
+            backend: Some("gamescope".into()),
+            effect: None,
+            kwin_version: None,
+            daemon_running,
+            unit,
+            script_enabled: false,
+            script_loaded: None,
+            script_path: Some(script_path()),
+        }
+    }
+
+    fn rows_of(facts: &Facts) -> Vec<(Level, String)> {
+        health_rows(facts)
+            .into_iter()
+            .map(|row| (row.level, row.detail))
+            .collect()
+    }
+
+    fn r(level: Level, detail: &str) -> (Level, String) {
+        (level, detail.to_string())
+    }
+
+    #[test]
+    fn game_mode_with_the_service_off() {
+        let facts = game(Some(false), UnitState::Disabled);
+        assert!(game_mode(&facts));
+        assert_eq!(
+            rows_of(&facts),
+            [
+                r(Level::Ok, "Working through Steam Game Mode (gamescope)"),
+                r(Level::NotApplicable, "Only used on KDE Plasma (Wayland)"),
+                r(
+                    Level::NotApplicable,
+                    "Off; only needed for automatic per-game switching"
+                ),
+                r(Level::NotApplicable, "Built into the service in Game Mode"),
+            ]
+        );
+        assert_eq!(
+            switch_state(&facts),
+            SwitchState {
+                available: true,
+                on: false,
+                detail: "Off. Game profiles are not applied automatically".into(),
+            }
+        );
+        assert!(plan_repair(&facts).is_empty());
+    }
+
+    #[test]
+    fn game_mode_with_the_service_enabled_but_not_running() {
+        let facts = game(Some(false), UnitState::Enabled);
+        let rows = rows_of(&facts);
+        assert_eq!(
+            rows[2],
+            r(
+                Level::Problem,
+                "Not running, so games are not switched automatically"
+            )
+        );
+        assert_eq!(
+            rows[3],
+            r(Level::NotApplicable, "Built into the service in Game Mode")
+        );
+        assert_eq!(
+            switch_state(&facts),
+            SwitchState {
+                available: true,
+                on: false,
+                detail: "Partly on (service starts at login). Turn on to finish".into(),
+            }
+        );
+        assert_eq!(plan_repair(&facts), vec![Action::Systemctl(vec!["start"])]);
+        assert!(plan_starts_daemon(&plan_repair(&facts)));
+    }
+
+    #[test]
+    fn game_mode_with_the_service_running() {
+        let facts = game(Some(true), UnitState::Enabled);
+        assert_eq!(
+            rows_of(&facts),
+            [
+                r(Level::Ok, "Working through Steam Game Mode (gamescope)"),
+                r(Level::NotApplicable, "Only used on KDE Plasma (Wayland)"),
+                r(Level::Ok, "Running"),
+                r(Level::Ok, "Built into the service in Game Mode"),
+            ]
+        );
+        assert_eq!(
+            switch_state(&facts),
+            SwitchState {
+                available: true,
+                on: true,
+                detail: "Each game's profile applies when its window is focused".into(),
+            }
+        );
+        assert!(plan_repair(&facts).is_empty());
+
+        // Running now, but not set to start with the session.
+        let facts = game(Some(true), UnitState::Disabled);
+        assert_eq!(
+            rows_of(&facts)[2],
+            r(
+                Level::Ok,
+                "Running, but it will not start at the next login"
+            )
+        );
+        assert_eq!(
+            switch_state(&facts).detail,
+            "Partly on (service running). Turn on to finish"
+        );
+    }
+
+    #[test]
+    fn game_mode_without_the_service_installed() {
+        let facts = game(Some(false), UnitState::NotInstalled);
+        assert_eq!(
+            rows_of(&facts)[2],
+            r(
+                Level::NotApplicable,
+                "Not installed (no satur8-daemon service found)"
+            )
+        );
+        let switch = switch_state(&facts);
+        assert!(!switch.available && !switch.on);
+        assert_eq!(
+            switch.detail,
+            "The background service is not installed; reinstall Satur8"
+        );
+    }
+
+    #[test]
+    fn game_mode_toggle_is_only_the_service() {
+        let facts = game(Some(false), UnitState::Disabled);
+        assert_eq!(
+            plan_enable(&facts),
+            vec![Action::Systemctl(vec!["enable", "--now"])]
+        );
+        assert!(plan_starts_daemon(&plan_enable(&facts)));
+        let facts = game(Some(true), UnitState::Enabled);
+        assert_eq!(
+            plan_disable(&facts),
+            vec![Action::Systemctl(vec!["disable", "--now"])]
+        );
+    }
+
+    #[test]
+    fn game_mode_repair_never_touches_the_kwin_effect_or_script() {
+        // The KWin script setting from Desktop Mode does not count as wanting
+        // switching in Game Mode, and a KDE-looking environment does not bring
+        // the KWin steps back.
+        for env_kde in [false, true] {
+            let mut facts = game(Some(false), UnitState::Disabled);
+            facts.script_enabled = true;
+            facts.script_loaded = Some(false);
+            if env_kde {
+                facts.env = kde();
+            }
+            assert!(plan_repair(&facts).is_empty(), "{facts:?}");
+            facts.unit = UnitState::Enabled;
+            assert_eq!(plan_repair(&facts), vec![Action::Systemctl(vec!["start"])]);
+            assert_eq!(
+                plan_enable(&facts),
+                vec![Action::Systemctl(vec!["enable", "--now"])]
+            );
+        }
     }
 }

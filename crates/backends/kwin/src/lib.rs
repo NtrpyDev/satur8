@@ -52,6 +52,23 @@ impl KwinBackend {
         Some(backend)
     }
 
+    /// The running KWin's version, from its support information; `None` when
+    /// KWin does not answer or the text has no version line.
+    pub fn running_version(&self) -> Option<String> {
+        let reply = self
+            .conn
+            .call_method(
+                Some(KWIN_SERVICE),
+                "/KWin",
+                Some("org.kde.KWin"),
+                "supportInformation",
+                &(),
+            )
+            .ok()?;
+        let text = reply.body().deserialize::<String>().ok()?;
+        repair::abi_in_support_information(&text)
+    }
+
     /// Whether our effect is currently loaded in KWin.
     pub fn is_loaded(&self) -> Result<bool, BackendError> {
         let reply = self
@@ -89,9 +106,10 @@ impl KwinBackend {
             return Ok(());
         }
         if !self.is_supported()? {
-            return Err(BackendError::Unavailable(
-                "the Satur8 KWin effect is missing or was built for a different KWin version; run `satur8 repair` to rebuild it for the running compositor".into(),
-            ));
+            return Err(BackendError::Unavailable(format!(
+                "the Satur8 KWin effect is missing or was built for a different KWin version; {}",
+                repair::advice_here()
+            )));
         }
         let reply = self
             .conn

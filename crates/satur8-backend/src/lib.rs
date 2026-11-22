@@ -13,6 +13,12 @@ use satur8_kwin::KwinBackend;
 use satur8_nv_control::NvControlBackend;
 use signal_hook::iterator::{Handle, Signals};
 
+/// The GNOME extension's names, for reports that check it without the backend.
+pub use satur8_gnome::{
+    EXTENSION_UUID as GNOME_EXTENSION_UUID, IFACE as GNOME_IFACE, PATH as GNOME_PATH,
+    SERVICE as GNOME_SERVICE,
+};
+
 /// Sentinel used when an operation targets every output.
 pub fn all_outputs() -> Output {
     Output {
@@ -94,7 +100,8 @@ fn run_probe(probe: Probe) -> ProbeResult {
             if KwinBackend::connect().is_some() {
                 ProbeResult::Refused(anyhow!(
                     "the Satur8 KWin effect is missing or was built for a different KWin \
-                     version than the one running. Run `satur8 repair` to rebuild it."
+                     version than the one running; {}.",
+                    satur8_kwin::repair::advice_here()
                 ))
             } else {
                 ProbeResult::Absent
