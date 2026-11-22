@@ -52,6 +52,11 @@ pub struct EffectFacts {
     /// What Repair would do here, from the same decision `satur8 repair`
     /// makes; `None` when it was not worked out.
     pub repair: Option<RepairStep>,
+    /// KWin version of a per-user effect file that is for neither the running
+    /// nor the installed KWin, from `satur8_kwin::repair::stale_user_file`.
+    /// KWin can still accept the copy it loaded earlier, so the row must not
+    /// say the effect matches.
+    pub stale_user: Option<String>,
 }
 
 /// Everything the Status page knows about the system. Gathered read-only.
@@ -158,7 +163,7 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
         )
     } else {
         match &facts.effect {
-            Some(e) if e.reachable && e.supported => {
+            Some(e) if e.reachable && e.supported && e.stale_user.is_none() => {
                 let version = facts
                     .kwin_version
                     .as_deref()
@@ -186,9 +191,17 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
                     Some(RepairStep::CannotRepair) => {
                         ("Repair cannot add it", "Repair cannot fix it")
                     }
+                    Some(RepairStep::DropUserCopy) => ("Repair can build it", "Repair removes it"),
                     _ => ("Repair can build it", "Repair rebuilds it"),
                 };
-                let detail = match (built, e.headers.as_deref()) {
+                // A stale per-user file is wrong for the running KDE even
+                // where no development headers name the installed version.
+                let needed = e.headers.as_deref().or(if e.stale_user.is_some() {
+                    facts.kwin_version.as_deref()
+                } else {
+                    None
+                });
+                let detail = match (built, needed) {
                     (None, _) => format!("Not installed. {add}"),
                     (Some(built), Some(needed)) if built != needed => {
                         format!("Built for KDE {built}, but KDE {needed} is installed. {fix}")
@@ -742,6 +755,7 @@ pub fn probe() -> Facts {
                 let supported = kwin.is_supported().unwrap_or(false);
                 let state = satur8_kwin::repair::inspect(supported);
                 let repair = Some(satur8_kwin::repair::decide(&state));
+                let stale_user = satur8_kwin::repair::stale_user_file(&state).map(String::from);
                 EffectFacts {
                     reachable: true,
                     supported,
@@ -750,6 +764,7 @@ pub fn probe() -> Facts {
                     system: state.system,
                     user: state.user,
                     repair,
+                    stale_user,
                 }
             }
             None => EffectFacts::default(),
@@ -1025,6 +1040,7 @@ mod tests {
                 system: Some("6.8.3".into()),
                 user: None,
                 repair: Some(RepairStep::Healthy),
+                stale_user: None,
             }),
             kwin_version: Some("6.8.3".into()),
             daemon_running: Some(true),
@@ -1092,6 +1108,7 @@ mod tests {
             system: Some("6.8.2".into()),
             user: None,
             repair: Some(RepairStep::Build),
+            stale_user: None,
         });
         let rows = health_rows(&facts);
         assert_eq!(rows[0].level, Level::Problem);
@@ -1110,6 +1127,7 @@ mod tests {
             system: None,
             user: user.map(Into::into),
             repair: Some(repair),
+            stale_user: None,
         });
         health_rows(&facts)[1].detail.clone()
     }
@@ -1138,6 +1156,54 @@ mod tests {
             effect_detail(None, "6.8.3", RepairStep::Build),
             "Not installed. Repair can build it"
         );
+    }
+
+    fn stale_detail(headers: Option<&str>, repair: RepairStep) -> (Level, String) {
+        // KWin still accepts the 6.7.3 copy it loaded, but the per-user file on
+        // disk was replaced by one for KWin 6.7.9.
+        let mut facts = healthy();
+        facts.kwin_version = Some("6.7.3".into());
+        facts.effect = Some(EffectFacts {
+            reachable: true,
+            supported: true,
+            loaded: true,
+            headers: headers.map(Into::into),
+            system: None,
+            user: Some("6.7.9".into()),
+            repair: Some(repair),
+            stale_user: Some("6.7.9".into()),
+        });
+        let row = &health_rows(&facts)[1];
+        (row.level, row.detail.clone())
+    }
+
+    #[test]
+    fn a_stale_per_user_file_kwin_still_accepts_is_not_reported_as_matching() {
+        assert_eq!(
+            stale_detail(Some("6.7.3"), RepairStep::InstallFromSet),
+            (
+                Level::Problem,
+                "Built for KDE 6.7.9, but KDE 6.7.3 is installed. Repair replaces it".into()
+            )
+        );
+        // No development headers: the running version names what is needed.
+        assert_eq!(
+            stale_detail(None, RepairStep::InstallFromSet).1,
+            "Built for KDE 6.7.9, but KDE 6.7.3 is installed. Repair replaces it"
+        );
+        // A good system copy: repair deletes the per-user file.
+        assert_eq!(
+            stale_detail(Some("6.7.3"), RepairStep::DropUserCopy).1,
+            "Built for KDE 6.7.9, but KDE 6.7.3 is installed. Repair removes it"
+        );
+        let (_, detail) = stale_detail(Some("6.7.3"), RepairStep::CannotRepair);
+        assert!(detail.ends_with("Repair cannot fix it"), "{detail}");
+        // The same file without the stale flag is the healthy case.
+        let mut facts = healthy();
+        if let Some(effect) = facts.effect.as_mut() {
+            effect.user = Some("6.8.3".into());
+        }
+        assert_eq!(health_rows(&facts)[1].level, Level::Ok);
     }
 
     #[test]
