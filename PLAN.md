@@ -233,6 +233,16 @@ and gamescope 3.16.30.1.
   drops it re-probes. It acts only while the selected backend is gamescope's,
   so it never competes with a desktop's focus script.
 
+**Bazzite.** Bazzite's Game Mode (the `bazzite-deck` images) runs the
+OpenGamingCollective gamescope fork, packaged by Terra as `terra-gamescope`
+3.17.0-ogc1 in stable 45.20261117.1, started by OpenGamingCollective's
+`gamescope-session-plus@.service` with `--steam` and two Xwayland servers.
+The fork's color, look and focus code matches upstream 3.17.0, so the look
+table path applies unchanged. Desktop Mode is KDE Plasma 6.8 or GNOME 51 and
+uses the KWin or GNOME backend as on any Fedora desktop. Checked from source and
+in a container only (Bazzite's gamescope, run headless with `--steam`, accepted
+a Satur8 look table); Satur8 has not been run on a Bazzite device.
+
 **gamescope-native (running compositor, launch option).**
 `satur8 run --via gamescope-native -- %command%` is for a session that already
 runs inside gamescope, such as Steam Game Mode, where Steam launch options run
