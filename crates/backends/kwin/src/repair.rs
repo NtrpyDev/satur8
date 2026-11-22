@@ -153,7 +153,8 @@ pub fn repair_advice(step: Step, family: &Family) -> String {
             .into(),
         Step::Build => "run `satur8 repair` to rebuild it for the installed KWin".into(),
         Step::CannotRepair => "this Satur8 has no effect for the installed KWin and this system \
-                               cannot build one; run `satur8 repair` to see what to do"
+                               cannot build one; install a newer Satur8 release that includes \
+                               one (`satur8 repair` says how to check a release)"
             .into(),
         Step::WaitForLogin => format!(
             "an effect for the installed KWin is already in place; {}",
@@ -536,9 +537,12 @@ fn cannot_repair_message(kwin: &str, family: &Family, ostree: bool, blocker: &st
     let image_based = ostree || *family == Family::SteamOs;
     let published = family.key_prefix().is_some();
     match (published, image_based) {
-        (true, true) => {
-            format!("{base} Install a newer Satur8 release that includes an effect for KWin {kwin}")
-        }
+        (true, true) => format!(
+            "{base} Install a newer Satur8 release that includes an effect for KWin {kwin}: \
+             in the unpacked release, `packaging/install.sh --pick-effect` says whether it has \
+             one without changing anything, and `packaging/install.sh` installs it. Until then \
+             the KDE desktop shows normal colors; Steam Game Mode does not use this effect"
+        ),
         (true, false) => format!(
             "{base} Install a newer Satur8 release that includes an effect for KWin {kwin}, or \
              install cmake, a C++ compiler, and the Qt 6 and KWin development files and run \
@@ -1461,6 +1465,18 @@ mod tests {
             bazzite.contains("Install a newer Satur8 release"),
             "{bazzite}"
         );
+        // Bazzite has no build tools: the message says how to check a release
+        // and that Game Mode is not affected (seen in the Bazzite KDE VM).
+        assert!(
+            bazzite.contains("`packaging/install.sh --pick-effect`"),
+            "{bazzite}"
+        );
+        assert!(
+            bazzite.contains("Steam Game Mode does not use this effect"),
+            "{bazzite}"
+        );
+        assert!(repair_advice(Step::CannotRepair, &Family::Fedora(45))
+            .contains("install a newer Satur8 release that includes one"));
         let fedora = cannot_repair_message("6.8.4", &Family::Fedora(45), false, blocker);
         assert!(fedora.contains("newer Satur8 release") && fedora.contains("install cmake"));
         let arch = cannot_repair_message("6.8.4", &Family::Other, false, blocker);

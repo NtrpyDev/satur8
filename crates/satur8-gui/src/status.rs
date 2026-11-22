@@ -217,9 +217,12 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
                     Some(RepairStep::InstallFromSet) => {
                         ("Repair can install it", "Repair replaces it")
                     }
-                    Some(RepairStep::CannotRepair) => {
-                        ("Repair cannot add it", "Repair cannot fix it")
-                    }
+                    Some(RepairStep::CannotRepair) => (
+                        "Repair cannot add it; a newer Satur8 release that includes this \
+                             KDE version can",
+                        "Repair cannot fix it; a newer Satur8 release that includes this \
+                             KDE version can",
+                    ),
                     Some(RepairStep::DropUserCopy) => ("Repair can build it", "Repair removes it"),
                     _ => ("Repair can build it", "Repair rebuilds it"),
                 };
@@ -986,7 +989,12 @@ mod tests {
             "Built for KDE 6.7.9, but KDE 6.7.3 is installed. Repair removes it"
         );
         let (_, detail) = stale_detail(Some("6.7.3"), RepairStep::CannotRepair);
-        assert!(detail.ends_with("Repair cannot fix it"), "{detail}");
+        assert!(
+            detail.ends_with(
+                "Repair cannot fix it; a newer Satur8 release that includes this KDE version can"
+            ),
+            "{detail}"
+        );
         // The same file without the stale flag is the healthy case.
         let mut facts = healthy();
         if let Some(effect) = facts.effect.as_mut() {
