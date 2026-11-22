@@ -95,9 +95,14 @@ pub fn gamescope_forces_itself(pid: u32) -> Option<bool> {
     Some(forced_by_environment(&environ))
 }
 
-/// Whether a loaded look is on screen, as `satur8 doctor` reports it.
+/// Whether Satur8's look shows on screen in Steam Game Mode. It shows only
+/// when gamescope's color management is on and either the GPU is AMD or
+/// something makes gamescope composite.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnScreen {
+    /// `GAMESCOPE_COLOR_MANAGEMENT_DISABLE` is set: gamescope ignores every
+    /// color setting, the look included, on any GPU.
+    ColorManagementOff,
     /// AMD: gamescope colors directly shown windows too.
     Always,
     /// Another GPU, with composition forced by the root property.
@@ -111,10 +116,18 @@ pub enum OnScreen {
     TurnedOffByOther,
 }
 
-/// Where the look shows on `gpu`, given the root's
-/// `GAMESCOPE_COMPOSITE_FORCE` (`None` when absent) and whether gamescope
-/// forces composition itself.
-pub fn on_screen(gpu: Gpu, composite_force: Option<u32>, forces_itself: Option<bool>) -> OnScreen {
+/// Where the look shows on `gpu`, given whether gamescope's color management
+/// is disabled, the root's `GAMESCOPE_COMPOSITE_FORCE` (`None` when absent)
+/// and whether gamescope forces composition itself.
+pub fn on_screen(
+    gpu: Gpu,
+    color_management_disabled: bool,
+    composite_force: Option<u32>,
+    forces_itself: Option<bool>,
+) -> OnScreen {
+    if color_management_disabled {
+        return OnScreen::ColorManagementOff;
+    }
     if !needs_forced_composition(gpu) {
         return OnScreen::Always;
     }
@@ -124,6 +137,50 @@ pub fn on_screen(gpu: Gpu, composite_force: Option<u32>, forces_itself: Option<b
         None if forces_itself == Some(true) => OnScreen::ComposedByGamescope,
         None => OnScreen::NotForDirectWindows,
     }
+}
+
+/// The words every report uses (`satur8 doctor`, `satur8 status`, the app's
+/// "Right now" card and Health row) when gamescope's color management is off.
+pub const COLOR_MANAGEMENT_OFF: &str =
+    "gamescope's color management is off, so Satur8's setting is not shown";
+
+/// The words for a loaded look on a GPU where nothing makes gamescope
+/// composite.
+pub const NOT_ON_SCREEN: &str = "Satur8's setting is not shown in a fullscreen game: on this \
+     GPU gamescope shows such a game directly, without it, unless it composites";
+
+/// The words for a GPU where another program set the force to 0.
+pub const FORCE_TURNED_OFF: &str = "Satur8's setting is not shown in a fullscreen game: another \
+     program set GAMESCOPE_COMPOSITE_FORCE to 0, so gamescope shows such a game directly";
+
+/// What is wrong with the screen in this state, in the shared words, or
+/// `None` when nothing is. Color management off, and another program's 0,
+/// matter whether or not a Satur8 look is loaded; with nothing making
+/// gamescope composite, only a loaded look is missing (Satur8 forces
+/// composition when it loads one).
+pub fn screen_problem(state: OnScreen, satur8_look_loaded: bool) -> Option<&'static str> {
+    match state {
+        OnScreen::ColorManagementOff => Some(COLOR_MANAGEMENT_OFF),
+        OnScreen::TurnedOffByOther => Some(FORCE_TURNED_OFF),
+        OnScreen::NotForDirectWindows if satur8_look_loaded => Some(NOT_ON_SCREEN),
+        _ => None,
+    }
+}
+
+/// [`screen_problem`] for gamescope's state as read from its root.
+pub fn problem_for(
+    gpu: Gpu,
+    state: &crate::session::ColorState,
+    forces_itself: Option<bool>,
+) -> Option<&'static str> {
+    let on = on_screen(
+        gpu,
+        state.color_management_disabled,
+        state.composite_force,
+        forces_itself,
+    );
+    let loaded = matches!(state.look, crate::session::Look::Satur8(_));
+    screen_problem(on, loaded)
 }
 
 #[cfg(test)]
@@ -188,24 +245,66 @@ mod tests {
 
     #[test]
     fn the_look_shows_on_amd_or_when_something_composites() {
-        assert_eq!(on_screen(Gpu::Amd, None, None), OnScreen::Always);
-        assert_eq!(on_screen(Gpu::Amd, Some(0), None), OnScreen::Always);
-        assert_eq!(on_screen(Gpu::Nvidia, Some(1), None), OnScreen::Composited);
+        assert_eq!(on_screen(Gpu::Amd, false, None, None), OnScreen::Always);
+        assert_eq!(on_screen(Gpu::Amd, false, Some(0), None), OnScreen::Always);
         assert_eq!(
-            on_screen(Gpu::Nvidia, None, Some(true)),
+            on_screen(Gpu::Nvidia, false, Some(1), None),
+            OnScreen::Composited
+        );
+        assert_eq!(
+            on_screen(Gpu::Nvidia, false, None, Some(true)),
             OnScreen::ComposedByGamescope
         );
         assert_eq!(
-            on_screen(Gpu::Intel, None, Some(false)),
+            on_screen(Gpu::Intel, false, None, Some(false)),
             OnScreen::NotForDirectWindows
         );
         assert_eq!(
-            on_screen(Gpu::Unknown, None, None),
+            on_screen(Gpu::Unknown, false, None, None),
             OnScreen::NotForDirectWindows
         );
         assert_eq!(
-            on_screen(Gpu::Nvidia, Some(0), Some(true)),
+            on_screen(Gpu::Nvidia, false, Some(0), Some(true)),
             OnScreen::TurnedOffByOther
         );
+    }
+
+    /// Color management off wins on every GPU and with any force: gamescope
+    /// then ignores the look entirely.
+    #[test]
+    fn color_management_off_hides_the_look_on_every_gpu() {
+        for gpu in [Gpu::Amd, Gpu::Nvidia, Gpu::Intel, Gpu::Unknown] {
+            for force in [None, Some(0), Some(1)] {
+                for itself in [None, Some(false), Some(true)] {
+                    assert_eq!(
+                        on_screen(gpu, true, force, itself),
+                        OnScreen::ColorManagementOff
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn each_state_has_one_message() {
+        use OnScreen::*;
+        for loaded in [false, true] {
+            assert_eq!(
+                screen_problem(ColorManagementOff, loaded),
+                Some(COLOR_MANAGEMENT_OFF)
+            );
+            assert_eq!(
+                screen_problem(TurnedOffByOther, loaded),
+                Some(FORCE_TURNED_OFF)
+            );
+            assert_eq!(screen_problem(Always, loaded), None);
+            assert_eq!(screen_problem(Composited, loaded), None);
+            assert_eq!(screen_problem(ComposedByGamescope, loaded), None);
+        }
+        assert_eq!(
+            screen_problem(NotForDirectWindows, true),
+            Some(NOT_ON_SCREEN)
+        );
+        assert_eq!(screen_problem(NotForDirectWindows, false), None);
     }
 }

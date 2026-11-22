@@ -80,6 +80,11 @@ pub struct Facts {
     pub script_loaded: Option<bool>,
     /// The installed focus script's main.js, if found.
     pub script_path: Option<PathBuf>,
+    /// Steam Game Mode: what keeps Satur8's setting off the screen (color
+    /// management off, or a GPU gamescope colors only when compositing with
+    /// nothing making it composite), in the words every report shares;
+    /// `None` when nothing does.
+    pub screen_problem: Option<&'static str>,
 }
 
 impl Facts {
@@ -170,6 +175,11 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
 
     // 1. Color backend.
     rows.push(match &facts.backend {
+        Some(_) if game && facts.screen_problem.is_some() => row(
+            "Color control",
+            Level::Problem,
+            facts.screen_problem.unwrap_or_default(),
+        ),
         Some(name) => row("Color control", Level::Ok, backend_detail(name)),
         None if kde => row(
             "Color control",
@@ -518,6 +528,14 @@ pub fn probe() -> Facts {
     };
 
     let script_enabled = script_enabled();
+    // Steam Game Mode: whether anything keeps Satur8's setting off the screen.
+    let screen_problem = if backend.as_deref() == Some("gamescope") {
+        satur8_gamescope::session::find_session()
+            .and_then(|(_, root)| satur8_gamescope::session::read_color_state(&root).ok())
+            .and_then(|state| game_mode_problem(env.gpu, &state))
+    } else {
+        None
+    };
 
     Facts {
         env,
@@ -529,6 +547,7 @@ pub fn probe() -> Facts {
         script_enabled,
         script_loaded,
         script_path: find_script(),
+        screen_problem,
     }
 }
 
@@ -548,9 +567,9 @@ pub struct Live {
     pub applied: Option<f32>,
     /// Steam Game Mode: gamescope's own session was found.
     pub game_mode: bool,
-    /// Steam Game Mode: Satur8's look is loaded but gamescope shows a
-    /// fullscreen game directly, without it (see [`look_hidden`]).
-    pub hidden: bool,
+    /// Steam Game Mode: what keeps Satur8's setting off the screen, as in
+    /// [`Facts::screen_problem`].
+    pub screen_problem: Option<&'static str>,
 }
 
 /// Light, read-only poll for the "Right now" card.
@@ -577,46 +596,49 @@ pub fn probe_live() -> Live {
     } else if let Some((_, root)) = satur8_gamescope::session::find_session() {
         // Steam Game Mode: the table gamescope has loaded says it.
         live.game_mode = true;
-        if let Ok(state) = satur8_gamescope::session::read_color_state(&root) {
-            live.applied = applied_from_look(&state.look);
-            live.hidden = look_hidden(
-                Environment::detect().gpu,
-                &state.look,
-                state.composite_force,
-                state
-                    .pid
-                    .and_then(satur8_gamescope::compose::gamescope_forces_itself),
-            );
-        }
+        let state = satur8_gamescope::session::read_color_state(&root).ok();
+        live.screen_problem = state
+            .as_ref()
+            .and_then(|state| game_mode_problem(Environment::detect().gpu, state));
+        live.applied = state.as_ref().and_then(applied_in_game_mode);
     }
     live
 }
 
-/// Whether Satur8's loaded look is kept off the screen in a fullscreen game:
-/// on a GPU where gamescope colors only the frames it composites, with
-/// nothing making it composite.
-pub fn look_hidden(
+/// What keeps Satur8's setting off the screen in Steam Game Mode, in the
+/// shared words: gamescope's color management off on any GPU, or a GPU that
+/// gamescope colors only when compositing with nothing making it composite.
+/// Reads gamescope's own settings from `/proc` for its pid.
+pub fn game_mode_problem(
     gpu: Gpu,
-    look: &satur8_gamescope::session::Look,
-    composite_force: Option<u32>,
-    forces_itself: Option<bool>,
-) -> bool {
-    use satur8_gamescope::compose::{on_screen, OnScreen};
-    matches!(look, satur8_gamescope::session::Look::Satur8(_))
-        && matches!(
-            on_screen(gpu, composite_force, forces_itself),
-            OnScreen::NotForDirectWindows | OnScreen::TurnedOffByOther
-        )
+    state: &satur8_gamescope::session::ColorState,
+) -> Option<&'static str> {
+    let forces_itself = state
+        .pid
+        .and_then(satur8_gamescope::compose::gamescope_forces_itself);
+    satur8_gamescope::compose::problem_for(gpu, state, forces_itself)
 }
 
-/// The note under the "Right now" saturation read from the compositor.
-pub fn applied_note(saturation: f32, hidden: bool) -> String {
-    if hidden {
-        "set, but not on screen in a fullscreen game on this GPU: see satur8 doctor".to_string()
+/// The saturation on screen in Steam Game Mode. While gamescope's color
+/// management is turned off (`GAMESCOPE_COLOR_MANAGEMENT_DISABLE`) it ignores
+/// every color setting, so the screen shows normal colors whatever table is
+/// loaded; otherwise the loaded look says it.
+pub fn applied_in_game_mode(state: &satur8_gamescope::session::ColorState) -> Option<f32> {
+    if state.color_management_disabled {
+        return Some(1.0);
+    }
+    applied_from_look(&state.look)
+}
+
+/// What the "applied" value's small line says: what keeps the setting off
+/// the screen when something does, else where the value came from.
+pub fn applied_note(saturation: f32, screen_problem: Option<&'static str>) -> &'static str {
+    if let Some(problem) = screen_problem {
+        problem
     } else if (saturation - 1.0).abs() < 1e-3 {
-        "normal colors, read from the compositor".to_string()
+        "normal colors, read from the compositor"
     } else {
-        "read from the compositor".to_string()
+        "read from the compositor"
     }
 }
 
@@ -811,6 +833,7 @@ fn percent_encode(text: &str) -> String {
 mod tests {
     use super::*;
     use satur8_core::Gpu;
+    use satur8_gamescope::compose::COLOR_MANAGEMENT_OFF;
 
     fn kde() -> Environment {
         Environment {
@@ -842,6 +865,7 @@ mod tests {
             script_path: Some(PathBuf::from(
                 "/usr/share/kwin/scripts/satur8-focus/contents/code/main.js",
             )),
+            screen_problem: None,
         }
     }
 
@@ -872,6 +896,7 @@ mod tests {
             script_enabled: false,
             script_loaded: None,
             script_path: None,
+            screen_problem: None,
         };
         assert_eq!(
             levels(&facts),
@@ -1046,9 +1071,46 @@ mod tests {
         let mut facts = healthy();
         facts.unit = UnitState::Disabled;
         assert!(!switch_state(&facts).on);
-        // systemctl unreachable: judge by what is running.
+        // Whether it starts at login could not be read: everything runs,
+        // but that is not "on", which promises the next login too.
         facts.unit = UnitState::Unknown;
+        let switch = switch_state(&facts);
+        assert!(switch.available && !switch.on && switch.login_unchecked);
+        assert!(
+            switch.detail.contains("could not be checked"),
+            "{}",
+            switch.detail
+        );
+        // Confirmed: on.
+        facts.unit = UnitState::Enabled;
         assert!(switch_state(&facts).on);
+    }
+
+    /// The same in Steam Game Mode, where switching is the service alone.
+    #[test]
+    fn game_mode_is_on_only_when_the_service_is_known_to_start_at_login() {
+        assert!(switch_state(&game(Some(true), UnitState::Enabled)).on);
+        let unchecked = switch_state(&game(Some(true), UnitState::Unknown));
+        assert!(unchecked.available && !unchecked.on && unchecked.login_unchecked);
+        assert_eq!(
+            unchecked.detail,
+            "Running now, but whether it starts at login could not be checked. Turn on to make sure"
+        );
+        assert!(
+            unchecked.detail.contains("could not be checked"),
+            "{}",
+            unchecked.detail
+        );
+        // Not running and not readable is simply off, as before.
+        let off = switch_state(&game(Some(false), UnitState::Unknown));
+        assert!(off.available && !off.on && !off.login_unchecked);
+        assert!(off.detail.starts_with("Off"));
+        // Turning it on from there runs the enable step, which does no harm
+        // to a service that is already enabled.
+        assert_eq!(
+            plan_enable(&game(Some(true), UnitState::Unknown)),
+            vec![Action::Systemctl(vec!["enable", "--now"])]
+        );
     }
 
     #[test]
@@ -1349,6 +1411,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: true,
+                login_unchecked: false,
                 detail: "Each game's profile applies when its window is focused".into(),
             }
         );
@@ -1431,6 +1494,7 @@ mod tests {
             script_enabled: false,
             script_loaded: None,
             script_path: None,
+            screen_problem: None,
         }
     }
 
@@ -1482,6 +1546,7 @@ mod tests {
                 SwitchState {
                     available: false,
                     on: false,
+                    login_unchecked: false,
                     detail: format!(
                         "Needs KDE Plasma on Wayland; this session is {} / {}",
                         facts.env.session, facts.env.desktop
@@ -1519,26 +1584,65 @@ mod tests {
         );
     }
 
+    /// The combined rule: a Game Mode look counts as on screen only when
+    /// gamescope's color management is on and the GPU is AMD or something
+    /// makes gamescope composite. One message per state, shared with
+    /// `satur8 doctor`.
     #[test]
-    fn a_look_gamescope_shows_without_is_reported_as_hidden() {
-        use satur8_gamescope::session::Look;
-        let ours = Look::Satur8(satur8_core::Saturation::new(1.75));
-        assert!(look_hidden(Gpu::Nvidia, &ours, None, Some(false)));
-        assert!(look_hidden(Gpu::Nvidia, &ours, Some(0), Some(true)));
-        assert!(!look_hidden(Gpu::Nvidia, &ours, Some(1), None));
-        assert!(!look_hidden(Gpu::Nvidia, &ours, None, Some(true)));
-        assert!(!look_hidden(Gpu::Amd, &ours, None, None));
-        assert!(!look_hidden(Gpu::Nvidia, &Look::None, None, None));
+    fn a_game_mode_look_shows_only_with_color_management_on_and_amd_or_compositing() {
+        use satur8_gamescope::compose::{FORCE_TURNED_OFF, NOT_ON_SCREEN};
+        use satur8_gamescope::session::{ColorState, Look};
+        let ours = || Look::Satur8(satur8_core::Saturation::new(1.75));
+        let state = |disabled: bool, look: Look, force: Option<u32>| ColorState {
+            pid: None,
+            color_management_disabled: disabled,
+            look,
+            sdr_gamut_wideness: None,
+            virtual_white: None,
+            night_mode: None,
+            composite_force: force,
+        };
+        // On screen: color management on, and AMD or composited.
+        assert_eq!(
+            game_mode_problem(Gpu::Amd, &state(false, ours(), None)),
+            None
+        );
+        assert_eq!(
+            game_mode_problem(Gpu::Nvidia, &state(false, ours(), Some(1))),
+            None
+        );
+        // Color management off: not shown on AMD either, forced or not.
+        for gpu in [Gpu::Amd, Gpu::Nvidia] {
+            for force in [None, Some(1)] {
+                assert_eq!(
+                    game_mode_problem(gpu, &state(true, ours(), force)),
+                    Some(COLOR_MANAGEMENT_OFF)
+                );
+            }
+        }
+        // Color management on, NVIDIA, nothing composites: not shown.
+        assert_eq!(
+            game_mode_problem(Gpu::Nvidia, &state(false, ours(), None)),
+            Some(NOT_ON_SCREEN)
+        );
+        // ...but with no Satur8 look loaded there is nothing missing.
+        assert_eq!(
+            game_mode_problem(Gpu::Nvidia, &state(false, Look::None, None)),
+            None
+        );
+        // Another program's 0.
+        assert_eq!(
+            game_mode_problem(Gpu::Nvidia, &state(false, ours(), Some(0))),
+            Some(FORCE_TURNED_OFF)
+        );
 
-        assert_eq!(
-            applied_note(1.75, true),
-            "set, but not on screen in a fullscreen game on this GPU: see satur8 doctor"
-        );
-        assert_eq!(applied_note(1.75, false), "read from the compositor");
-        assert_eq!(
-            applied_note(1.0, false),
-            "normal colors, read from the compositor"
-        );
+        // The card's line and the Health row say the same words.
+        let mut facts = game(Some(true), UnitState::Enabled);
+        facts.screen_problem = Some(NOT_ON_SCREEN);
+        let row = health_rows(&facts).remove(0);
+        assert_eq!(row.level, Level::Problem);
+        assert_eq!(row.detail, NOT_ON_SCREEN);
+        assert_eq!(applied_note(1.75, facts.screen_problem), NOT_ON_SCREEN);
     }
 
     #[test]
@@ -1553,6 +1657,79 @@ mod tests {
             applied_from_look(&Look::Foreign("/x/steam.cube".into())),
             None
         );
+    }
+
+    /// With `GAMESCOPE_COLOR_MANAGEMENT_DISABLE` set, gamescope ignores the
+    /// look, so a loaded Satur8 table is not what the screen shows.
+    #[test]
+    fn a_loaded_table_is_not_applied_while_color_management_is_off() {
+        use satur8_gamescope::session::{ColorState, Look};
+        let state = |disabled: bool, look: Look| ColorState {
+            pid: Some(6366),
+            color_management_disabled: disabled,
+            look,
+            sdr_gamut_wideness: None,
+            virtual_white: None,
+            night_mode: None,
+            composite_force: None,
+        };
+        let table = || Look::Satur8(satur8_core::Saturation::new(1.75));
+        // Color management on: the table's value, as before.
+        assert_eq!(applied_in_game_mode(&state(false, table())), Some(1.75));
+        assert_eq!(applied_in_game_mode(&state(false, Look::None)), Some(1.0));
+        assert_eq!(
+            applied_in_game_mode(&state(false, Look::Foreign("/x/steam.cube".into()))),
+            None
+        );
+        // Off: normal colors, whatever is loaded.
+        assert_eq!(applied_in_game_mode(&state(true, table())), Some(1.0));
+        assert_eq!(applied_in_game_mode(&state(true, Look::None)), Some(1.0));
+        assert_eq!(
+            applied_in_game_mode(&state(true, Look::Foreign("/x/steam.cube".into()))),
+            Some(1.0)
+        );
+        // And the line under the value says why.
+        assert_eq!(
+            applied_note(1.0, Some(COLOR_MANAGEMENT_OFF)),
+            "gamescope's color management is off, so Satur8's setting is not shown"
+        );
+        assert_eq!(
+            applied_note(1.0, None),
+            "normal colors, read from the compositor"
+        );
+        assert_eq!(applied_note(1.75, None), "read from the compositor");
+    }
+
+    /// With gamescope's color management off, Satur8's table changes nothing
+    /// on screen, so the first Health row must not say it is working.
+    #[test]
+    fn color_control_is_not_working_while_gamescopes_color_management_is_off() {
+        let mut facts = game(Some(true), UnitState::Enabled);
+        let color = |facts: &Facts| health_rows(facts).remove(0);
+        // On: as before.
+        let row = color(&facts);
+        assert_eq!(row.label, "Color control");
+        assert_eq!(row.level, Level::Ok);
+        assert_eq!(row.detail, "Working through Steam Game Mode (gamescope)");
+
+        facts.screen_problem = Some(COLOR_MANAGEMENT_OFF);
+        let row = color(&facts);
+        assert_eq!(row.label, "Color control");
+        assert_eq!(row.level, Level::Problem);
+        assert!(!row.detail.contains("Working"));
+        assert_eq!(
+            row.detail,
+            "gamescope's color management is off, so Satur8's setting is not shown"
+        );
+        // The same words as the line under the "Right now" value.
+        assert_eq!(row.detail, applied_note(1.0, Some(COLOR_MANAGEMENT_OFF)));
+        // The Game Mode page lists the row.
+        assert_eq!(game_mode_rows(health_rows(&facts))[0], row);
+
+        // The flag is gamescope's; a desktop session's row does not change.
+        let mut kde = healthy();
+        kde.screen_problem = Some(COLOR_MANAGEMENT_OFF);
+        assert_eq!(color(&kde).level, Level::Ok);
     }
 
     #[test]
@@ -1645,6 +1822,7 @@ mod tests {
             script_enabled: false,
             script_loaded: None,
             script_path: Some(script_path()),
+            screen_problem: None,
         }
     }
 
@@ -1680,6 +1858,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: false,
+                login_unchecked: false,
                 detail: "Off. Game profiles are not applied automatically".into(),
             }
         );
@@ -1706,6 +1885,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: false,
+                login_unchecked: false,
                 detail: "Partly on (service starts at login). Turn on to finish".into(),
             }
         );
@@ -1730,6 +1910,7 @@ mod tests {
             SwitchState {
                 available: true,
                 on: true,
+                login_unchecked: false,
                 detail: "Each game's profile applies when its window is focused".into(),
             }
         );

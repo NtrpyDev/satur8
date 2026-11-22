@@ -48,6 +48,19 @@ fn decide(on: bool, facts: &SwitchFacts, state: &SwitchState) -> Decision {
     })
 }
 
+/// Whether the state after the steps is what was asked for. `on` is reached
+/// when everything is confirmed on. Where the service's start at login
+/// cannot be read back, it is reached only if every step succeeded: the
+/// enable step then ran, and the status line says what is not known. `off`
+/// is reached only when nothing of it runs.
+fn reached(on: bool, after: &SwitchState, steps_ok: bool) -> bool {
+    if on {
+        after.on || (after.login_unchecked && steps_ok)
+    } else {
+        !after.on && !after.login_unchecked
+    }
+}
+
 /// One printed line per step, as the app's activity log shows them; a failed
 /// step's line already ends in "failed: why".
 fn step_line(ok: bool, line: &str) -> String {
@@ -77,7 +90,9 @@ pub fn run(cmd: AutoCmd) -> Result<()> {
         }
         Decision::Run(plan) => plan,
     };
+    let mut steps_ok = true;
     for (ok, line) in switching::execute(&mut RealSystem, &plan) {
+        steps_ok &= ok;
         println!("{}", step_line(ok, &line));
     }
     // `systemctl start` returns before the service is on the bus; the app
@@ -87,7 +102,7 @@ pub fn run(cmd: AutoCmd) -> Result<()> {
     }
     let after = switching::switch_state(&system::probe());
     println!("{}", switching::status_line(&after));
-    if after.on != on {
+    if !reached(on, &after, steps_ok) {
         bail!(
             "satur8: automatic per-game switching did not turn {}",
             if on { "on" } else { "off" }
@@ -155,6 +170,45 @@ mod tests {
             Decision::Nothing("automatic per-game switching is already on".into())
         );
         assert!(matches!(decide(false, &facts, &state), Decision::Run(_)));
+    }
+
+    /// Everything runs, but whether the service starts at login could not be
+    /// read. `on` must not answer "already on": it runs the enable step.
+    #[test]
+    fn on_runs_the_steps_when_starting_at_login_could_not_be_checked() {
+        let facts = SwitchFacts {
+            daemon_running: Some(true),
+            unit: UnitState::Unknown,
+            script_enabled: true,
+            script_loaded: Some(true),
+            ..kde_facts()
+        };
+        let state = switching::switch_state(&facts);
+        assert!(!state.on && state.login_unchecked);
+        assert_eq!(
+            decide(true, &facts, &state),
+            Decision::Run(switching::plan_enable(&facts))
+        );
+        // After the steps the state reads the same where it cannot be read
+        // back. That counts as turned on, and the line says what is unknown.
+        assert!(reached(true, &state, true));
+        // Not when a step failed: then nothing says it starts at login.
+        assert!(!reached(true, &state, false));
+        assert!(!reached(false, &state, true));
+        assert_eq!(
+            switching::status_line(&state),
+            "automatic per-game switching: on now (Running now, but whether it starts at login \
+             could not be checked. Turn on to make sure)"
+        );
+        // Confirmed on, and plainly off.
+        let confirmed = switching::switch_state(&SwitchFacts {
+            unit: UnitState::Enabled,
+            ..facts.clone()
+        });
+        assert!(reached(true, &confirmed, true) && reached(true, &confirmed, false));
+        assert!(!reached(false, &confirmed, true));
+        let off = switching::switch_state(&kde_facts());
+        assert!(reached(false, &off, true) && !reached(true, &off, true));
     }
 
     #[test]

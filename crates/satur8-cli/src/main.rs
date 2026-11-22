@@ -741,8 +741,8 @@ fn gamescope_report(
         .map_or_else(|| "unknown".to_string(), |pid| pid.to_string());
     let reachable = if state.color_management_disabled {
         format!(
-            "  [!!] gamescope reachable (pid {pid}), color management off: \
-             Satur8 tables have no effect until it is on"
+            "  [!!] gamescope reachable (pid {pid}), but {}",
+            compose::COLOR_MANAGEMENT_OFF
         )
     } else {
         format!("  [ok] gamescope reachable (pid {pid}), color management on")
@@ -803,14 +803,30 @@ fn gamescope_report(
 /// AMD, where it always does.
 fn screen_line(gpu: Gpu, state: &ColorState, forces_itself: Option<bool>) -> Option<String> {
     let loaded = matches!(state.look, Look::Satur8(_));
-    let line = match compose::on_screen(gpu, state.composite_force, forces_itself) {
-        OnScreen::Always => return None,
-        OnScreen::TurnedOffByOther => "  [!!] not on screen in a fullscreen game: something set \
-             GAMESCOPE_COMPOSITE_FORCE to 0, so gamescope shows such a game directly, without \
-             Satur8's look. Satur8 leaves another program's setting alone; remove it with \
-             `DISPLAY=:0 xprop -root -remove GAMESCOPE_COMPOSITE_FORCE`, then run \
-             `satur8 on <strength>`"
-            .to_string(),
+    let on = compose::on_screen(
+        gpu,
+        state.color_management_disabled,
+        state.composite_force,
+        forces_itself,
+    );
+    if let Some(problem) = compose::screen_problem(on, loaded) {
+        let what_to_do = match on {
+            // The gamescope line above already says it, in the same words.
+            OnScreen::ColorManagementOff => return None,
+            OnScreen::TurnedOffByOther => {
+                "Satur8 leaves another program's setting alone; remove it with \
+                 `DISPLAY=:0 xprop -root -remove GAMESCOPE_COMPOSITE_FORCE`, then run \
+                 `satur8 on <strength>`"
+            }
+            _ => {
+                "Run `satur8 on <strength>` again, or switch away from the game and back, and \
+                 Satur8 makes it composite"
+            }
+        };
+        return Some(format!("  [!!] {problem}. {what_to_do}"));
+    }
+    let line = match on {
+        OnScreen::Always | OnScreen::ColorManagementOff => return None,
         _ if !loaded => format!(
             "  [ok] on screen: on this GPU ({gpu}) gamescope colors only frames it composites, \
              so Satur8 makes it composite every frame while a look is on: one extra GPU pass \
@@ -823,12 +839,7 @@ fn screen_line(gpu: Gpu, state: &ColorState, forces_itself: Option<bool>) -> Opt
         OnScreen::ComposedByGamescope => {
             "  [ok] on screen: gamescope composites every frame by its own settings".to_string()
         }
-        OnScreen::NotForDirectWindows => format!(
-            "  [!!] look set but not on screen in a fullscreen game: on this GPU ({gpu}) \
-             gamescope shows such a game directly, without the look, unless it composites. \
-             Run `satur8 on <strength>` again, or switch away from the game and back, and \
-             Satur8 makes it composite"
-        ),
+        OnScreen::NotForDirectWindows | OnScreen::TurnedOffByOther => return None,
     };
     Some(line)
 }
@@ -1449,10 +1460,7 @@ mod tests {
         );
 
         let direct = nvidia_lines(ours.clone(), None, Some(false));
-        assert!(direct[5].starts_with(
-            "  [!!] look set but not on screen in a fullscreen game: on this GPU \
-             (NVIDIA (proprietary)) gamescope shows such a game directly"
-        ));
+        assert!(direct[5].starts_with(&format!("  [!!] {}.", compose::NOT_ON_SCREEN)));
         assert!(direct[5].contains("satur8 on <strength>"));
 
         let by_gamescope = nvidia_lines(ours.clone(), None, Some(true));
@@ -1462,7 +1470,7 @@ mod tests {
         );
 
         let zero = nvidia_lines(ours, Some(0), Some(true));
-        assert!(zero[5].starts_with("  [!!] not on screen in a fullscreen game: something set"));
+        assert!(zero[5].starts_with(&format!("  [!!] {}.", compose::FORCE_TURNED_OFF)));
         assert!(zero[5].contains("xprop -root -remove GAMESCOPE_COMPOSITE_FORCE"));
     }
 
@@ -1477,6 +1485,26 @@ mod tests {
         // The rest of the report keeps its order.
         assert_eq!(lines[4], "  [ok] Satur8 table: not loaded");
         assert_eq!(lines[6], "  [ok] focused app: 769");
+    }
+
+    /// Color management off wins over the GPU and the force: the gamescope
+    /// line says so in the app's words, and no line claims the look shows.
+    #[test]
+    fn color_management_off_is_reported_once_and_never_as_on_screen() {
+        let ours = Look::Satur8(satur8_core::Saturation::new(1.75));
+        for gpu in [Gpu::Amd, Gpu::Nvidia] {
+            for force in [None, Some(1)] {
+                let state = ColorState {
+                    color_management_disabled: true,
+                    composite_force: force,
+                    ..deck_state(ours.clone())
+                };
+                let lines = gamescope_report(":0", gpu, &state, Some(false), &home(), Some(true));
+                assert_eq!(lines.len(), 8, "{gpu:?} {force:?}: {lines:#?}");
+                assert!(lines[3].ends_with(compose::COLOR_MANAGEMENT_OFF));
+                assert!(lines.iter().all(|line| !line.contains("on screen")));
+            }
+        }
     }
 
     #[test]
@@ -1567,7 +1595,11 @@ mod tests {
         state.sdr_gamut_wideness = None;
         state.virtual_white = None;
         let lines = gamescope_report(":0", Gpu::Amd, &state, None, &home(), Some(true));
-        assert!(lines[3].starts_with("  [!!] gamescope reachable (pid 6366), color management off"));
+        assert_eq!(
+            lines[3],
+            "  [!!] gamescope reachable (pid 6366), but gamescope's color management is off, \
+             so Satur8's setting is not shown"
+        );
         assert_eq!(
             lines[7],
             "  Steam settings (left alone): vibrancy default, white point default, \

@@ -360,6 +360,7 @@ export component AppWindow inherits Window {
     in-out property <string> live-profile: "-";
     in-out property <string> live-saturation: "-";
     in-out property <string> live-saturation-note: "";
+    in-out property <bool> live-color-off: false;
     in-out property <bool> live-has-focused: false;
     in-out property <string> live-focused: "";
     in-out property <int> new-game-percent: 40;
@@ -1205,6 +1206,7 @@ export component AppWindow inherits Window {
         live-profile: root.live-profile;
         live-saturation: root.live-saturation;
         live-saturation-note: root.live-saturation-note;
+        live-color-off: root.live-color-off;
         new-game-percent: root.new-game-percent;
         sysinfo-text: root.sysinfo-text;
         activity: root.activity;

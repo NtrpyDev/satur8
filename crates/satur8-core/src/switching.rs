@@ -61,10 +61,42 @@ pub fn game_mode(backend: Option<&str>) -> bool {
 pub struct SwitchState {
     /// Switching can be turned on or off in this session.
     pub available: bool,
-    /// Every part of per-game switching is on right now.
+    /// Every part of per-game switching is on right now, and the service is
+    /// known to start at the next login.
     pub on: bool,
+    /// Every part is running right now, but whether the service starts at the
+    /// next login could not be read. Never set together with `on`.
+    pub login_unchecked: bool,
     /// One line saying why or what is done.
     pub detail: String,
+}
+
+/// The line when everything runs but the unit's state could not be read.
+const LOGIN_UNCHECKED: &str =
+    "Running now, but whether it starts at login could not be checked. Turn on to make sure";
+
+/// The line when every part is on.
+const ALL_ON: &str = "Each game's profile applies when its window is focused";
+
+/// Whether everything that runs is "on" in full. Switching is on only when
+/// the service is confirmed to start at login: a unit state that could not
+/// be read (no answer from the user's systemd) is not a yes.
+fn running_state(unit: UnitState) -> Option<SwitchState> {
+    match unit {
+        UnitState::Enabled => Some(SwitchState {
+            available: true,
+            on: true,
+            login_unchecked: false,
+            detail: ALL_ON.into(),
+        }),
+        UnitState::Unknown => Some(SwitchState {
+            available: true,
+            on: false,
+            login_unchecked: true,
+            detail: LOGIN_UNCHECKED.into(),
+        }),
+        UnitState::Disabled | UnitState::NotInstalled => None,
+    }
 }
 
 /// The line when switching is not fully on: what is done.
@@ -82,16 +114,15 @@ fn game_mode_switch_state(facts: &SwitchFacts) -> SwitchState {
         return SwitchState {
             available: false,
             on: false,
+            login_unchecked: false,
             detail: "The background service is not installed; reinstall Satur8".into(),
         };
     }
     let running = facts.daemon_running == Some(true);
-    if running && facts.unit != UnitState::Disabled {
-        return SwitchState {
-            available: true,
-            on: true,
-            detail: "Each game's profile applies when its window is focused".into(),
-        };
+    if running {
+        if let Some(state) = running_state(facts.unit) {
+            return state;
+        }
     }
     let mut done = Vec::new();
     if running {
@@ -103,6 +134,7 @@ fn game_mode_switch_state(facts: &SwitchFacts) -> SwitchState {
     SwitchState {
         available: true,
         on: false,
+        login_unchecked: false,
         detail: partly_detail(&done),
     }
 }
@@ -116,6 +148,7 @@ pub fn switch_state(facts: &SwitchFacts) -> SwitchState {
         return SwitchState {
             available: false,
             on: false,
+            login_unchecked: false,
             detail: format!(
                 "Needs KDE Plasma on Wayland; this session is {} / {}",
                 facts.env.session, facts.env.desktop
@@ -126,6 +159,7 @@ pub fn switch_state(facts: &SwitchFacts) -> SwitchState {
         return SwitchState {
             available: false,
             on: false,
+            login_unchecked: false,
             detail: "The focus script is not installed; reinstall Satur8".into(),
         };
     }
@@ -133,20 +167,17 @@ pub fn switch_state(facts: &SwitchFacts) -> SwitchState {
         return SwitchState {
             available: false,
             on: false,
+            login_unchecked: false,
             detail: "The background service is not installed; reinstall Satur8".into(),
         };
     }
 
     let running = facts.daemon_running == Some(true);
-    let at_login = facts.unit != UnitState::Disabled;
     let loaded = facts.script_loaded == Some(true);
-    let on = running && at_login && facts.script_enabled && loaded;
-    if on {
-        return SwitchState {
-            available: true,
-            on: true,
-            detail: "Each game's profile applies when its window is focused".into(),
-        };
+    if running && facts.script_enabled && loaded {
+        if let Some(state) = running_state(facts.unit) {
+            return state;
+        }
     }
 
     let mut done = Vec::new();
@@ -165,6 +196,7 @@ pub fn switch_state(facts: &SwitchFacts) -> SwitchState {
     SwitchState {
         available: true,
         on: false,
+        login_unchecked: false,
         detail: partly_detail(&done),
     }
 }
@@ -369,6 +401,8 @@ pub fn status_line(state: &SwitchState) -> String {
         "not available"
     } else if state.on {
         "on"
+    } else if state.login_unchecked {
+        "on now"
     } else {
         "off"
     };

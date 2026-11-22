@@ -45,9 +45,25 @@ main README.
 
 ## Installing the plugin
 
-- DeckyHub: find Satur8 on the Discover tab.
+Available from Satur8 v0.5.1.
+
 - Decky Loader: Settings, Developer, Install Plugin from URL, with
   `https://github.com/NtrpyDev/satur8/releases/latest/download/satur8-decky-plugin.zip`
+- DeckyHub: from its Discover tab, if DeckyHub lists Satur8. Its catalog is
+  built automatically from GitHub releases, and whether it lists Satur8 is
+  not something this page can promise.
+
+It is not on the official Decky store.
+
+## What was checked
+
+On a Steam Deck OLED with Decky Loader v3.3.1: Decky loads the plugin, its
+backend starts as the Deck user (uid 1000, not root), the panel shows in the
+Quick Access Menu, and Open Satur8 starts the app.
+
+Not checked yet: Install, Update and Reinstall, which download a published
+release and so are checked after v0.5.1 is out; the Add Satur8 to the Steam
+library button; Bazzite.
 
 ## Building
 

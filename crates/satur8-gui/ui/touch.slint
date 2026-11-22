@@ -599,6 +599,9 @@ export component GameModeUi inherits Rectangle {
     in property <string> live-profile;
     in property <string> live-saturation;
     in property <string> live-saturation-note;
+    // gamescope's color management is off: the note says so, and it matters
+    // more than the usual line.
+    in property <bool> live-color-off;
     in property <int> new-game-percent;
     in property <string> sysinfo-text;
     in property <[LogRow]> activity;
@@ -874,7 +877,7 @@ export component GameModeUi inherits Rectangle {
             }
             Text {
                 x: 14px; y: 70px; width: parent.width - 28px; height: 16px;
-                text: "While Satur8 is on screen, no game's setting shows.";
+                text: root.live-color-off ? root.live-saturation-note : "While Satur8 is on screen, no game's setting shows.";
                 font-family: Font.med; font-weight: Font.med-weight; font-size: 12px; color: Pal.dim;
                 vertical-alignment: center; overflow: elide;
             }
