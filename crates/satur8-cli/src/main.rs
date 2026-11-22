@@ -5,6 +5,7 @@
 //! wrapper (`run`), or via per-game profiles (`profile`).
 
 mod config;
+mod games_cmd;
 mod profile_cmd;
 mod run;
 
@@ -73,6 +74,12 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         command: Vec<String>,
     },
+    /// List the installed Steam games and the profile each one uses.
+    Games {
+        /// Print a JSON array instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
     /// Manage per-game profiles.
     Profile {
         #[command(subcommand)]
@@ -103,7 +110,7 @@ fn main() -> Result<()> {
     // default so they always reach their restore path.
     if matches!(
         cli.command,
-        Command::Status | Command::Doctor | Command::Outputs
+        Command::Status | Command::Doctor | Command::Outputs | Command::Games { .. }
     ) {
         // SAFETY: called once at startup, before any other thread exists.
         unsafe {
@@ -135,6 +142,7 @@ fn main() -> Result<()> {
             })?;
             std::process::exit(code);
         }
+        Command::Games { json } => games_cmd::run(json),
         Command::Profile { cmd } => profile_cmd::run(cmd),
         Command::Status => cmd_status(),
         Command::Doctor => cmd_doctor(),
@@ -542,6 +550,18 @@ mod tests {
         fn supports_linear_light(&self) -> bool {
             self.supports_linear
         }
+    }
+
+    #[test]
+    fn games_command_takes_json_flag() {
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "games", "--json"]).map(|cli| cli.command),
+            Ok(Command::Games { json: true })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "games"]).map(|cli| cli.command),
+            Ok(Command::Games { json: false })
+        ));
     }
 
     #[test]
