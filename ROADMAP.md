@@ -7,16 +7,19 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.3.2 is shipped and working. In the current v0.3.3 backend-sweep work, six of
-the seven backend paths are verified: KDE Plasma Wayland/KWin, GNOME Wayland
-Shell extension, Hyprland, NVIDIA X11 NV-CONTROL, gamescope-native for a running
-full-screen gamescope compositor, and the nested gamescope fallback for
-unsupported Wayland sessions. The remaining implemented-but-unverified path is
-DRM/KMS. Distribution today is a Linux x86_64 tarball served from
-[satur8.app](https://satur8.app), a tested Arch package, and a live Fedora
-package on COPR built for Fedora 43 and 44. AUR publication is prepared but
-blocked while new AUR account registration is disabled upstream, unless an
-existing AUR maintainer publishes the package.
+v0.3.6 is the current release. Six of the seven backend paths are verified on
+real hardware: KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland,
+NVIDIA X11 NV-CONTROL, gamescope-native for a running full-screen gamescope
+compositor, and the nested gamescope fallback for unsupported Wayland sessions.
+The remaining implemented-but-unverified path is DRM/KMS. The KWin effect is
+built against KWin 6.8, and since v0.3.4 `satur8 repair` rebuilds it at login
+when a KWin update rejects the installed copy. Distribution today is a Linux
+x86_64 tarball served from [satur8.app](https://satur8.app), a tested Arch
+package in `packaging/`, and a live Fedora package on COPR built for Fedora 43
+and 44. The AUR also has two packages, `satur8` (built from the source release)
+and `satur8-bin` (prebuilt binaries), published and maintained by a community
+member rather than by this project. They were at v0.3.3 when checked on
+2026-11-21, so they can trail the latest release.
 
 The north star is **v1.0 = Satur8 running well on SteamOS and Bazzite**. Both run
 gamescope rather than KWin. The gamescope path has been proven in v0.3; the next
@@ -46,8 +49,11 @@ including CachyOS, skew heavily toward enthusiast Linux gamers).
       `optdepends`.
 - [x] Generate `.SRCINFO`.
 - [x] Clean-chroot build test (`extra-x86_64-build` / `makechroot`).
-- [ ] Publish to the AUR as the tagged `satur8` package once new AUR account
-      registration reopens or an existing AUR maintainer can push it.
+- [x] Publish to the AUR. Done by an existing AUR maintainer from the
+      community: `satur8` builds from the tagged source release and
+      `satur8-bin` installs prebuilt binaries. This project does not maintain
+      them, so they can trail the latest release (v0.3.3 when checked on
+      2026-11-21).
 - [ ] Consider a `satur8-git` variant for bleeding-edge users.
 - [x] Add an "Install on Arch" section to the README.
 - [x] Release tarball + checksum, R2 download worker, and website (done in v0.1).
@@ -119,9 +125,8 @@ other backends.
       was OFF 409.4/166.0 FPS vs ON 402.4/165.0 FPS; paired median delta was
       -1.5% Avg / +0.038 ms/frame. Treat the result as within run-to-run noise,
       not a precise zero-cost claim.
-- [ ] Update the backend status table on the website when v0.3.3 ships. The
-      README table already reflects the current v0.3.3 backend-sweep state; the
-      live site remains on shipped v0.3.2 wording until release/deploy.
+- [x] Update the backend status table on the website. Done: satur8.app shows
+      six backends Verified and DRM/KMS Implemented, matching the README table.
 
 ## v0.4: SteamOS / Bazzite support
 
@@ -135,8 +140,9 @@ and Bazzite is Fedora-based (the live COPR work carries over).
       saturation per-game at runtime (zero extra pass, no injection), instead of
       the nested-gamescope reshade fallback. Landed in v0.3.0 and verified on a
       full-screen gamescope session; on-Deck field-testing is the remaining work.
-- [ ] Per-game auto-apply in Game Mode. This is the differentiator versus the
-      existing global-saturation tools (e.g. vibrantDeck).
+- [ ] Per-game auto-apply in Game Mode, from the same Satur8 profiles used on
+      the desktop. vibrantDeck, an existing Decky plugin, already applies
+      per-app saturation in Game Mode, so this is not unique to Satur8.
 - [ ] SteamOS: install story on a read-only root (a Decky plugin is the likely
       path); ship only honest, tested docs.
 - [ ] Bazzite (atomic Fedora): evaluate rpm-ostree layering versus a Decky/
@@ -195,5 +201,5 @@ answer, but it does not fit Satur8. Satur8 is a system-integration tool: it
 installs a KWin compositor plugin, a systemd user unit, a KWin focus script, and
 talks D-Bus to the compositor. A Flatpak sandbox cannot install a compositor
 plugin where KWin scans for it. That is why native per-distro packaging is the
-primary path, and it is the deeper reason the immutable targets (v0.5) are
+primary path, and it is the deeper reason the immutable targets (v0.4) are
 genuinely hard rather than a quick Flatpak away.
