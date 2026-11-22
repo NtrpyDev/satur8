@@ -3,7 +3,9 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
-## Unreleased
+## v0.5.1 - 2026-11-22
+
+Fixes for the Steam Deck launcher entry and the Bazzite installer, the logo as the app icon, and the last backend verified on real hardware.
 
 - Fix the app not opening from the application launcher on the Steam Deck:
   the launcher said "Could not find the program 'satur8-gui'", because

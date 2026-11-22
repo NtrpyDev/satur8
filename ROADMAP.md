@@ -7,7 +7,7 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.5.0 is the current release. All eight backend paths are verified on
+v0.5.1 is the current release. All eight backend paths are verified on
 real hardware: KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland,
 NVIDIA X11 NV-CONTROL, automatic per-game switching in Steam Game Mode through
 gamescope's look table (verified on a Steam Deck OLED with SteamOS 3.9.5 and
