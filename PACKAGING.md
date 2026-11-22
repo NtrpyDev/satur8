@@ -9,8 +9,11 @@ which claims are honest today.
 
 - Fedora: live on COPR as `ntrpydev/satur8`, built for Fedora 43 and 44.
 - Arch: `packaging/PKGBUILD` and generated `.SRCINFO` are ready and tested from
-  a checkout. AUR publication is pending because new AUR account registration is
-  disabled upstream, unless an existing AUR maintainer publishes it.
+  a checkout.
+- AUR: two packages are published and maintained by a community member, not by
+  this project: `satur8` builds from the source release and `satur8-bin`
+  installs prebuilt binaries. They can trail the latest release; both were at
+  v0.3.3 when checked on 2026-11-21.
 - Release tarball: GitHub release artifact for Linux x86_64, installed with
   `packaging/install.sh`.
 - Debian/Ubuntu, SteamOS, and Bazzite packages are not shipped yet.
@@ -182,8 +185,8 @@ Before claiming a package channel works:
 - Confirm uninstall or package removal leaves no surprising user-facing pieces.
 
 Do not document an install path as done until users can install from it. For
-example, the Arch package can be ready/tested while AUR publication remains
-blocked.
+example, the Arch package files in `packaging/` can be ready/tested before any
+AUR package for that version exists.
 
 ## Adding A New Package Channel
 
