@@ -319,6 +319,41 @@ mod tests {
         assert_eq!(profiles.match_exe("legacy-game").unwrap().name, "Legacy");
     }
 
+    /// A file written by a newer Satur8 must still load in this one: keys it
+    /// does not know, at the top level, in a table it does not know, and inside
+    /// a profile, are ignored and every known value is kept.
+    #[test]
+    fn unknown_keys_and_tables_are_ignored_when_loading() {
+        let profiles = Profiles::from_toml(
+            r#"
+default_saturation = 1.2
+some_future_setting = "focused"
+
+[some_future_table."DP-2"]
+default_saturation = 0.9
+
+[[profile]]
+name = "cs2"
+saturation = 1.6
+exe = "cs2"
+some_future_profile_key = ["HDMI-A-1"]
+another_one = 3
+"#,
+        )
+        .expect("unknown keys must not stop the file from loading");
+
+        assert_eq!(profiles.default_saturation, 1.2);
+        assert_eq!(profiles.profiles.len(), 1);
+        let cs2 = &profiles.profiles[0];
+        assert_eq!(cs2.name, "cs2");
+        assert_eq!(cs2.saturation, 1.6);
+        assert!(cs2.enabled);
+        assert_eq!(cs2.match_rule.exe.as_deref(), Some("cs2"));
+        assert_eq!(cs2.match_rule.window_class, None);
+        assert_eq!(cs2.match_rule.steam_app_id, None);
+        assert!(cs2.outputs.is_empty());
+    }
+
     #[test]
     fn toml_rejects_non_finite_saturation() {
         assert!(Profiles::from_toml("default_saturation = nan").is_err());
