@@ -186,7 +186,8 @@ the compositor shader paths (B1 KWin / B4 GNOME / Hyprland's screen-shader hook)
 The gamescope crate (`crates/backends/gamescope`) has one automatic backend and
 two run strategies. The Game Mode backend is part of the automatic backend
 selector (`select_backend` in `crates/satur8-backend/src/lib.rs`), so `satur8
-on`/`set`/`off`, the GUI, and the daemon use it in Steam Game Mode. The two run
+on`/`set`/`off`, the daemon, and the GUI (not tested on a Deck) use it in Steam
+Game Mode. The two run
 strategies are launch-only: they wrap one game launch with `satur8 run --via
 ...` and restore when it exits, and the selector never picks them.
 
@@ -279,8 +280,9 @@ The first seven rows are picked automatically. `select_backend` tries them in
 this order: KWin, GNOME, Hyprland, NV-CONTROL, then stops with a `satur8 repair`
 hint if KWin is running but rejects the effect, then Steam Game Mode, then DRM
 CTM. Game Mode comes after every desktop backend, so desktops behave as before,
-and before DRM CTM, which cannot take DRM master from gamescope. `satur8 doctor`
-and `satur8 status` follow the same order. The last two gamescope rows are not
+and before DRM CTM, which needs the DRM master that gamescope holds as the
+session compositor. `satur8 doctor` and `satur8 status` show the Game Mode
+report only when no desktop backend comes first. The last two gamescope rows are not
 automatic: the user chooses them per launch with `--via`, because both wrap a
 single game launch instead of applying and resetting on demand.
 
@@ -310,8 +312,10 @@ Three independent axes; only the compositor one is hard:
 
 **The guarantee:** every major environment gets a *native* backend - gamescope is
 no longer the answer for GNOME or NVIDIA-on-Wayland (those use compositor
-shaders). gamescope survives only as the last-resort floor for niche Wayland
-compositors that expose no hook at all, and even they get working per-game
+shaders). Steam Game Mode, where gamescope is the session compositor, gets its
+own native path through gamescope's look table. Nested gamescope survives only
+as the last-resort floor for niche Wayland compositors that expose no hook at
+all, and even they get working per-game
 satur8. The one genuine gap: desktop-wide *always-on* satur8 on those niche
 compositors (per-game still works via gamescope).
 
