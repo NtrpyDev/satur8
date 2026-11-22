@@ -86,6 +86,40 @@ impl Default for GuiConfig {
     }
 }
 
+/// What a change to "Starting saturation for new games" does to the settings
+/// file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NewGameSave {
+    /// Write it now.
+    Now,
+    /// Write it once the changes stop.
+    Soon,
+    /// The file already has it.
+    Nothing,
+}
+
+/// Take a value from the new-game slider. The setting in memory follows every
+/// change, so a game added right away starts at what the slider shows.
+/// `unsaved` says the settings file does not have the value yet. A change
+/// that is `done` is written now. One that is not must still be written:
+/// L2 and R2 change the slider and are never followed by a `done`.
+fn new_game_change(
+    config: &mut GuiConfig,
+    unsaved: &mut bool,
+    saturation: f32,
+    done: bool,
+) -> NewGameSave {
+    if config.new_game_saturation != saturation {
+        config.new_game_saturation = saturation;
+        *unsaved = true;
+    }
+    match (*unsaved, done) {
+        (false, _) => NewGameSave::Nothing,
+        (true, true) => NewGameSave::Now,
+        (true, false) => NewGameSave::Soon,
+    }
+}
+
 impl GuiConfig {
     /// The saturation to give a newly added game, kept inside the control's
     /// -100%..+100% range (0.0..2.0). A broken value falls back to the default.
@@ -136,6 +170,9 @@ struct App {
     gm_prompts: Rc<VecModel<GmPrompt>>,
     /// Saves a slider change made with the pad once the changes stop.
     save_timer: slint::Timer,
+    /// The new-game setting differs from the settings file.
+    new_game_unsaved: std::cell::Cell<bool>,
+    new_game_timer: slint::Timer,
     /// How often the key held on the keyboard has repeated.
     key_repeat: Cell<u32>,
     input_debug: bool,
@@ -223,6 +260,8 @@ fn main() -> Result<(), slint::PlatformError> {
         gm_picks: Rc::new(VecModel::default()),
         gm_prompts: Rc::new(VecModel::default()),
         save_timer: slint::Timer::default(),
+        new_game_unsaved: std::cell::Cell::new(false),
+        new_game_timer: slint::Timer::default(),
         key_repeat: Cell::new(0),
         input_debug,
     });
@@ -500,27 +539,48 @@ impl App {
         }
     }
 
-    /// Status page > Settings > "Starting saturation for new games".
+    /// Status page > Settings > "Starting saturation for new games". A change
+    /// that is `done` is written to the settings file at once; one that is
+    /// not (a drag in progress, or L2 and R2, which have no release) is
+    /// written once the changes stop, like the other sliders.
     fn set_new_game(&self, percent: f32, done: bool) {
         if let Some(ui) = self.ui.upgrade() {
             ui.set_new_game_percent(percent.round() as i32);
         }
-        if !done {
-            return;
-        }
         let Some(sat) = percent_to_sat(percent.round()) else {
             return;
         };
-        let mut config = self.gui_config.borrow_mut();
-        if config.new_game_saturation == sat {
+        let mut unsaved = self.new_game_unsaved.get();
+        let step = new_game_change(&mut self.gui_config.borrow_mut(), &mut unsaved, sat, done);
+        self.new_game_unsaved.set(unsaved);
+        match step {
+            NewGameSave::Now => {
+                self.new_game_timer.stop();
+                self.save_new_game();
+            }
+            NewGameSave::Soon => self.new_game_timer.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(400),
+                || with_app(|app| app.save_new_game()),
+            ),
+            NewGameSave::Nothing => {}
+        }
+    }
+
+    /// Write the new-game setting to the settings file, if it is not there.
+    fn save_new_game(&self) {
+        if !self.new_game_unsaved.replace(false) {
             return;
         }
-        config.new_game_saturation = sat;
+        let config = *self.gui_config.borrow();
         save_gui_config(&config);
         log(
             &self.activity,
             false,
-            &format!("New games now start at {:+.0}%", (sat - 1.0) * 100.0),
+            &format!(
+                "New games now start at {:+.0}%",
+                (config.new_game_saturation - 1.0) * 100.0
+            ),
         );
     }
 
@@ -1701,6 +1761,57 @@ mod tests {
         };
         assert!(ours.matches(b"DISPLAY=:0\0"));
         assert!(ours.matches(b""));
+    }
+
+    /// L2 and R2 on the Status page's slider send changes that are never
+    /// `done`. Each must still reach the setting, and the file once they stop.
+    #[test]
+    fn a_new_game_change_that_is_never_done_is_still_saved() {
+        let mut config = GuiConfig::default();
+        let mut unsaved = false;
+        // R2 once: +40% to +41%.
+        assert_eq!(
+            new_game_change(&mut config, &mut unsaved, 1.41, false),
+            NewGameSave::Soon
+        );
+        assert_eq!(config.new_game_saturation, 1.41);
+        assert!(unsaved);
+        // Held: every step moves the setting and keeps the save pending.
+        assert_eq!(
+            new_game_change(&mut config, &mut unsaved, 1.42, false),
+            NewGameSave::Soon
+        );
+        assert_eq!(config.new_game_saturation(), 1.42);
+        // The delayed save happens (the app clears the flag); nothing is left.
+        unsaved = false;
+        assert_eq!(
+            new_game_change(&mut config, &mut unsaved, 1.42, true),
+            NewGameSave::Nothing
+        );
+    }
+
+    #[test]
+    fn a_new_game_change_that_is_done_is_saved_at_once() {
+        let mut config = GuiConfig::default();
+        let mut unsaved = false;
+        // A drag: steps that are not done, then the release.
+        assert_eq!(
+            new_game_change(&mut config, &mut unsaved, 1.6, false),
+            NewGameSave::Soon
+        );
+        assert_eq!(
+            new_game_change(&mut config, &mut unsaved, 1.7, true),
+            NewGameSave::Now
+        );
+        assert_eq!(config.new_game_saturation, 1.7);
+        // A release at the value already in the file writes nothing.
+        let mut saved = GuiConfig::default();
+        let mut unsaved = false;
+        assert_eq!(
+            new_game_change(&mut saved, &mut unsaved, NEW_GAME_SATURATION, true),
+            NewGameSave::Nothing
+        );
+        assert!(!unsaved);
     }
 
     #[test]
