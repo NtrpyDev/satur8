@@ -33,6 +33,56 @@ const PROBE_WINDOW: Duration = Duration::from_secs(60);
 const SOCKET_RECHECK: Duration = Duration::from_secs(30);
 /// How often to retry the first sync while backend detection is pending.
 const SYNC_RETRY: Duration = Duration::from_millis(250);
+/// The shortest gap between two logged watch failures.
+const FAILURE_LOG_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Keeps the watcher's log readable when a session is found but watching it
+/// keeps failing: the first failure is logged, then at most one a minute, and
+/// one line when it works again.
+#[derive(Debug, Default)]
+struct WatchLog {
+    /// Watching has failed since it last worked.
+    failing: bool,
+    /// A failure in the current failing stretch was logged.
+    logged_this_stretch: bool,
+    last_failure_logged: Option<Instant>,
+}
+
+impl WatchLog {
+    /// The line to log, if any, when watching `display` fails at `now`.
+    fn failed(&mut self, display: &str, error: &anyhow::Error, now: Instant) -> Option<String> {
+        if !self.failing {
+            self.failing = true;
+            self.logged_this_stretch = false;
+        }
+        let due = self
+            .last_failure_logged
+            .is_none_or(|last| now.duration_since(last) >= FAILURE_LOG_INTERVAL);
+        if !due {
+            return None;
+        }
+        let again = self.logged_this_stretch;
+        self.last_failure_logged = Some(now);
+        self.logged_this_stretch = true;
+        Some(if again {
+            format!("satur8-daemon: gamescope on {display} still failing: {error:#}")
+        } else {
+            format!("satur8-daemon: lost gamescope on {display}: {error:#}")
+        })
+    }
+
+    /// The line to log, if any, when watching `display` starts working.
+    fn connected(&mut self, display: &str) -> Option<String> {
+        if !self.failing {
+            return Some(format!(
+                "satur8-daemon: watching gamescope focus on {display}"
+            ));
+        }
+        self.failing = false;
+        self.logged_this_stretch
+            .then(|| format!("satur8-daemon: gamescope focus on {display} works again"))
+    }
+}
 
 /// The window class and pid `react` takes for a gamescope focus. The class is
 /// `steam_app_<id>`, which profiles already match by Steam AppID.
@@ -60,6 +110,7 @@ fn run(connection: &Connection, running: &AtomicBool) {
             return;
         }
     };
+    let mut log = WatchLog::default();
     let mut sockets = session::x11_sockets();
     let mut probe_until = Instant::now() + PROBE_WINDOW;
     while running.load(Ordering::Acquire) {
@@ -68,9 +119,10 @@ fn run(connection: &Connection, running: &AtomicBool) {
         }
         if Instant::now() < probe_until {
             if let Some((display, root)) = session::find_session() {
-                eprintln!("satur8-daemon: watching gamescope focus on {display}");
-                if let Err(error) = watch(&root, &daemon, running) {
-                    eprintln!("satur8-daemon: lost gamescope on {display}: {error:#}");
+                if let Err(error) = watch(&root, &display, &daemon, running, &mut log) {
+                    if let Some(line) = log.failed(&display, &error, Instant::now()) {
+                        eprintln!("{line}");
+                    }
                 }
                 drop(root);
                 forget_current(&daemon, running);
@@ -94,9 +146,18 @@ fn run(connection: &Connection, running: &AtomicBool) {
 /// reconnect and clears a table a crashed daemon left behind. When backend
 /// detection has not finished yet, the sync is retried every `SYNC_RETRY`
 /// instead of waiting for the next focus change.
-fn watch(root: &X11Root, daemon: &InterfaceRef<Daemon>, running: &AtomicBool) -> Result<()> {
+fn watch(
+    root: &X11Root,
+    display: &str,
+    daemon: &InterfaceRef<Daemon>,
+    running: &AtomicBool,
+    log: &mut WatchLog,
+) -> Result<()> {
     root.watch_properties()?;
     let mut focus = session::read_focus(root)?;
+    if let Some(line) = log.connected(display) {
+        eprintln!("{line}");
+    }
     loop {
         let (class, pid) = activation(focus);
         let mut daemon = daemon.get_mut();
@@ -160,5 +221,43 @@ mod tests {
     #[test]
     fn nothing_focused_activates_as_no_class_and_no_pid() {
         assert_eq!(activation(Focus::default()), (String::new(), 0));
+    }
+
+    #[test]
+    fn a_failing_session_logs_once_a_minute_and_once_on_recovery() {
+        let mut log = WatchLog::default();
+        let error = anyhow::anyhow!("connection reset");
+        let start = Instant::now();
+        let at = |seconds| start + Duration::from_secs(seconds);
+
+        assert!(log.connected(":0").unwrap().contains("watching"));
+        assert!(log.failed(":0", &error, at(0)).unwrap().contains("lost"));
+        // Every 2 s probe finds the session again and watching fails at once.
+        for seconds in (2..60).step_by(2) {
+            assert_eq!(log.failed(":0", &error, at(seconds)), None);
+        }
+        assert!(log
+            .failed(":0", &error, at(60))
+            .unwrap()
+            .contains("still failing"));
+        assert_eq!(log.failed(":0", &error, at(62)), None);
+        assert!(log.connected(":0").unwrap().contains("works again"));
+        assert!(log.connected(":0").unwrap().contains("watching"));
+    }
+
+    #[test]
+    fn a_session_flapping_inside_a_minute_logs_no_more() {
+        let mut log = WatchLog::default();
+        let error = anyhow::anyhow!("connection reset");
+        let start = Instant::now();
+        assert!(log.failed(":0", &error, start).is_some());
+        assert!(log.connected(":0").is_some());
+        // Fails again 4 s later: inside the minute, so neither the failure nor
+        // the next recovery is logged.
+        assert_eq!(
+            log.failed(":0", &error, start + Duration::from_secs(4)),
+            None
+        );
+        assert_eq!(log.connected(":0"), None);
     }
 }
