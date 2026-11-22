@@ -12,3 +12,5 @@ packaging/*-namcap.log
 packaging/PKGBUILD-namcap.log
 __pycache__/
 HANDOFF.md
+# Local KWin effect builds from assets/kwin-effect/dev.sh
+/assets/kwin-effect/build/
