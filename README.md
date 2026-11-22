@@ -28,7 +28,7 @@ It is built for Linux gaming setups that want the punchy color controls common o
 - **Per-game profiles.** Tune saturation per game instead of changing your whole desktop. Profiles match by executable name, window class, or Steam AppID.
 - **Follows focus.** The profile applies when the game is focused and your desktop color comes back when you switch away.
 - **Outside the game.** No injection, no overlay, no Vulkan layer. See [How it works](#how-it-works).
-- **Native Linux backends.** Uses the compositor, driver, or display color path that fits your session, across Wayland and X11. See [Backend support](#backend-support).
+- **Native Linux backends.** Uses the compositor, driver, or display color path that fits your session, across Wayland and X11, and Steam Game Mode on a Steam Deck. See [Backend support](#backend-support).
 - **GUI and CLI.**
 
 ## Install
@@ -81,6 +81,8 @@ packaging/install.sh --uninstall
 
 If you clone the source repository instead, the same installer builds and installs Satur8 from source.
 
+On a Steam Deck, see [Steam Deck](#steam-deck).
+
 ## Quick start
 
 Start the focus daemon:
@@ -119,6 +121,82 @@ satur8 run --via gamescope-native -- %command%   # drive a running gamescope
 satur8 run --via gamescope -- %command%          # nested gamescope fallback
 ```
 
+In Steam Game Mode, use the focus daemon instead; see [Steam Deck](#steam-deck).
+
+## Steam Deck
+
+Satur8 switches saturation per game in Steam Game Mode. This was tested on a Steam Deck OLED with SteamOS 3.9.5 and gamescope 3.16.30.1.
+
+Satur8 applies the color through gamescope's look table, so Steam's own Color Vibrancy and Color Temperature settings keep working on top of it. Satur8 never changes them.
+
+### Install on the Deck
+
+Open Konsole in Desktop Mode, or connect to the Deck over SSH. Download the latest Linux x86_64 release from the [releases page](https://github.com/NtrpyDev/satur8/releases), then run the per-user installer with the background service turned on:
+
+```sh
+tar -xzf satur8-*-linux-x86_64.tar.gz
+cd satur8-*-linux-x86_64
+packaging/install.sh --enable-daemon
+```
+
+Without `--enable-daemon`, the installer prints the command that turns the service on. Everything is installed in your home folder, so it survives SteamOS updates. `--system` is refused on SteamOS. If the installer says the KWin effect was not installed, that is fine: Game Mode does not use it.
+
+The commands are installed to `~/.local/bin`. If your shell does not find `satur8`, run it as `~/.local/bin/satur8`.
+
+### Add a game
+
+On a Deck, profiles match a game by its Steam AppID. The AppID is the number in the game's `~/.local/share/Steam/steamapps/appmanifest_<AppID>.acf` file name, and in the game's Steam store URL.
+
+```sh
+satur8 profile add sushiamo 1.75 --steam-app-id 4555040
+```
+
+Matching by executable also works for Proton games. Use the Windows executable name, for example `--exe Sushiamo.exe`.
+
+The Steam home screen and games without a profile get `default_saturation` from `~/.config/satur8/profiles.toml`. At 1.0, the default, Satur8 loads nothing there.
+
+### Automatic switching
+
+The background service does the switching. If you installed without `--enable-daemon`, turn it on with:
+
+```sh
+systemctl --user enable --now satur8-daemon
+```
+
+In Game Mode, a game's profile loads when the game takes focus and is removed when you leave or close the game. Opening Steam's overlay menu over the game keeps its profile. If the service is killed, systemd restarts it within 5 seconds. Stopping the service puts `default_saturation` back; `satur8 off` removes Satur8's table at any value.
+
+### Check it
+
+Over SSH while the Deck is in Game Mode:
+
+```sh
+satur8 doctor
+```
+
+It reports `Steam Game Mode (gamescope on :0)`, whether a Satur8 table is loaded and at what saturation, the focused app's AppID, whether the background service is running, and Steam's own color settings, which Satur8 leaves alone. `satur8 status` shows the same. `satur8 on`, `satur8 set` and `satur8 off` also work in Game Mode, including over SSH.
+
+### The launch option
+
+The `satur8 run --via gamescope-native -- %command%` launch option still works as before. It replaces Steam's color settings while the game runs, and it wins over a profile's table until the game ends. Use the background service instead, and do not use both on one game.
+
+### Uninstall from the Deck
+
+From the extracted release folder:
+
+```sh
+packaging/install.sh --uninstall
+```
+
+This turns the service off, runs `satur8 off`, and removes the commands, the service and Satur8's table files.
+
+### Not tested yet
+
+- HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged.
+- An external display.
+- The desktop app (`satur8-gui`) on the Deck, and the Deck's Desktop Mode.
+- Bazzite and other systems that run a gamescope session.
+- gamescope versions other than 3.16.30.1.
+
 ## How it works
 
 Satur8 does not modify the game itself.
@@ -146,6 +224,7 @@ Satur8 chooses the best available backend for your session. Zero per-frame cost 
 | X11 with NVIDIA | NV-CONTROL Digital Vibrance | Zero | Verified |
 | Hyprland | `hyprctl` shader backend | One compositor pass | Verified |
 | DRM/KMS sessions | DRM CTM | Zero | Implemented |
+| Steam Game Mode (Steam Deck) | gamescope look table, automatic | Reuses gamescope's color pipeline | Verified on a Steam Deck OLED, SteamOS 3.9.5, gamescope 3.16.30.1 (2026-11-21) |
 | gamescope (running compositor) | gamescope-native color atoms | Reuses existing gamescope | Verified |
 | Unsupported Wayland | gamescope nested fallback | Extra nested compositor pass | Verified |
 
@@ -154,7 +233,7 @@ Status legend:
 - Verified: tested on real hardware
 - Implemented: built and behind environment detection, not yet independently verified
 
-The gamescope-native path drives an already-running gamescope compositor through its Xwayland color atoms, instead of launching a nested gamescope. It is the basis for the planned Steam Deck and Bazzite work in the [roadmap](ROADMAP.md).
+In Steam Game Mode, the focus daemon sets gamescope's look table per game, so Steam's own vibrancy and color temperature keep working on top; see [Steam Deck](#steam-deck). The gamescope-native path is a launch option that drives an already-running gamescope compositor through its Xwayland color override atoms, instead of launching a nested gamescope. While it runs, it replaces Steam's color settings.
 
 ## GUI
 
@@ -266,7 +345,7 @@ packaging/source-tarball.sh
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for what ships next: Steam Deck and Bazzite support, then a stable 1.0. Distribution status and open packaging work are tracked there and in the [open issues](https://github.com/NtrpyDev/satur8/issues).
+See [ROADMAP.md](ROADMAP.md) for what ships next: the remaining Steam Deck work and Bazzite support, then a stable 1.0. Distribution status and open packaging work are tracked there and in the [open issues](https://github.com/NtrpyDev/satur8/issues).
 
 ## Contributing
 
