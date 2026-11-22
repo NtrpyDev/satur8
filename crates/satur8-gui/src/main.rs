@@ -376,6 +376,18 @@ fn main() -> Result<(), slint::PlatformError> {
     if touch {
         app.start_game_mode(&ui, start_page);
     }
+    // Started from its own Steam library entry: give that entry its artwork,
+    // once. Steam told this process the entry's AppID.
+    if let Some(app_id) = app.own_app_id {
+        let placed = satur8_core::steam_shortcut::place_artwork_for_running_app(app_id);
+        if placed > 0 {
+            log(
+                &app.activity,
+                true,
+                "Put Satur8's artwork on its Steam library entry; Steam shows it after it restarts",
+            );
+        }
+    }
 
     // Closing hides the window while the tray is running; otherwise it quits.
     ui.window().on_close_requested({

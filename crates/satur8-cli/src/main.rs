@@ -11,6 +11,7 @@ mod outputs_cmd;
 mod outputs_report;
 mod profile_cmd;
 mod run;
+mod steam_shortcut_cmd;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -95,6 +96,13 @@ enum Command {
         #[command(subcommand)]
         cmd: profile_cmd::ProfileCmd,
     },
+    /// Satur8's own entry in the Steam library, which is how the desktop app
+    /// is opened in Steam Game Mode: say whether it is there, add it, and
+    /// put its artwork in place.
+    SteamShortcut {
+        #[command(subcommand)]
+        cmd: steam_shortcut_cmd::SteamShortcutCmd,
+    },
     /// Show the current environment, chosen backend, and state.
     Status,
     /// Diagnose the environment and backend availability.
@@ -159,6 +167,7 @@ fn main() -> Result<()> {
         }
         Command::Games { json } => games_cmd::run(json),
         Command::Profile { cmd } => profile_cmd::run(cmd),
+        Command::SteamShortcut { cmd } => steam_shortcut_cmd::run(cmd),
         Command::Status => cmd_status(),
         Command::Doctor => cmd_doctor(),
         Command::Repair => cmd_repair(),
@@ -810,6 +819,39 @@ mod tests {
         fn supports_linear_light(&self) -> bool {
             self.supports_linear
         }
+    }
+
+    #[test]
+    fn steam_shortcut_command_takes_its_three_actions() {
+        use steam_shortcut_cmd::SteamShortcutCmd;
+        let parse = |args: &[&str]| {
+            let mut all = vec!["satur8", "steam-shortcut"];
+            all.extend_from_slice(args);
+            match Cli::try_parse_from(all).map(|cli| cli.command) {
+                Ok(Command::SteamShortcut { cmd }) => Some(cmd),
+                _ => None,
+            }
+        };
+        assert_eq!(parse(&["status"]), Some(SteamShortcutCmd::Status));
+        assert_eq!(
+            parse(&["add"]),
+            Some(SteamShortcutCmd::Add {
+                desktop_file: None,
+                again: false,
+            })
+        );
+        assert_eq!(
+            parse(&["add", "--again", "--desktop-file", "/x/satur8.desktop"]),
+            Some(SteamShortcutCmd::Add {
+                desktop_file: Some("/x/satur8.desktop".into()),
+                again: true,
+            })
+        );
+        assert_eq!(
+            parse(&["artwork", "--remove"]),
+            Some(SteamShortcutCmd::Artwork { remove: true })
+        );
+        assert_eq!(parse(&[]), None);
     }
 
     #[test]

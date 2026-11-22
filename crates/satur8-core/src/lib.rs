@@ -11,6 +11,7 @@ pub mod levels;
 pub mod proc;
 pub mod profile;
 pub mod steam;
+pub mod steam_shortcut;
 
 pub use env::{Desktop, Environment, Gpu, SessionType};
 pub use levels::{Levels, Note, Picture};
