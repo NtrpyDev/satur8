@@ -22,8 +22,14 @@
 #   packaging/install.sh                 # per-user install
 #   packaging/install.sh --system        # system install (uses sudo)
 #   packaging/install.sh --enable-daemon # also turn on the background service
+#   packaging/install.sh --no-steam-entry # do not add the app to the Steam library
 #   packaging/install.sh --uninstall     # remove a per-user install
 #   packaging/install.sh --pick-effect   # print which KWin effect fits; change nothing
+#
+# On a system with a Steam gaming session (a Steam Deck), Game Mode shows only
+# programs started from the Steam library, so a per-user install asks Steam to
+# add the desktop app there (`satur8 steam-shortcut add`, which never adds it
+# twice). --no-steam-entry leaves the library alone.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -37,10 +43,12 @@ mode="user"
 action="install"
 effect_to_check=""
 enable_daemon=false
+steam_entry=true
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --system) mode="system"; shift ;;
         --enable-daemon) enable_daemon=true; shift ;;
+        --no-steam-entry) steam_entry=false; shift ;;
         --uninstall) action="uninstall"; shift ;;
         --check-effect)
             action="check-effect"
@@ -48,7 +56,7 @@ while [ "$#" -gt 0 ]; do
             shift 2
             ;;
         --pick-effect) action="pick-effect"; shift ;;
-        -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
         *) echo "unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -292,6 +300,22 @@ kwin_present() {
 # Whether this machine has a Steam Game Mode (gamescope) session to log into:
 # SteamOS's session files, or the gamescope-session-plus unit that ChimeraOS
 # and Bazzite use.
+# While v0.5.1 was being tested, one Steam Deck had a stand-in script as
+# satur8-gui that set SLINT_SCALE_FACTOR and started the real app from
+# satur8-gui.real beside it. v0.5.1 sizes itself, so the script is replaced by
+# the app (or removed) by the caller, and this removes the file it left: only
+# when satur8-gui is that script.
+remove_scale_wrapper() {
+    local gui="$bindir/satur8-gui"
+    [ -f "$gui" ] && [ -f "$gui.real" ] || return 0
+    if head -c 2 "$gui" | grep -q '#!' &&
+        grep -q 'satur8-gui\.real' "$gui" &&
+        grep -q 'SLINT_SCALE_FACTOR' "$gui"; then
+        say "Removing the test wrapper's leftover $gui.real"
+        rm -f "$bindir/satur8-gui.real"
+    fi
+}
+
 has_gamescope_session() {
     [ -f /usr/share/wayland-sessions/gamescope-wayland.desktop ] ||
     [ -f /usr/lib/systemd/user/gamescope-session.service ] ||
@@ -476,6 +500,7 @@ install_all() {
     install -m755 "$bin_src/satur8-daemon" "$bindir/satur8-daemon"
     [ -f "$bin_src/satur8-tray" ] && \
         install -m755 "$bin_src/satur8-tray" "$bindir/satur8-tray"
+    remove_scale_wrapper
     [ -f "$bin_src/satur8-gui" ] && \
         install -m755 "$bin_src/satur8-gui" "$bindir/satur8-gui"
 
@@ -621,6 +646,26 @@ EOF
         say "Turning on the background service"
         systemctl --user enable --now satur8-daemon.service
     fi
+
+    steam_library_entry
+}
+
+# Steam Game Mode shows only programs started from the Steam library, so on a
+# system that has that session the desktop app needs an entry there. The
+# command asks the running Steam through SteamOS's own tool, never adds a
+# second entry, and says plainly what it did or why it could not.
+steam_library_entry() {
+    [ "$mode" = user ] && has_gamescope_session && [ -x "$bindir/satur8-gui" ] || return 0
+    echo
+    if [ "$steam_entry" != true ]; then
+        echo "Steam library: left alone (--no-steam-entry). To open the app in Steam Game Mode,"
+        echo "  add it later with: $bindir/satur8 steam-shortcut add"
+        return 0
+    fi
+    say "Steam library: the app is opened from there in Steam Game Mode"
+    "$bindir/satur8" steam-shortcut add || {
+        echo "  Could not ask Steam. Add it later with: $bindir/satur8 steam-shortcut add"
+    }
 }
 
 uninstall_all() {
@@ -636,7 +681,17 @@ uninstall_all() {
         "$qdbus_tool" org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect satur8 \
             >/dev/null 2>&1 || true
     fi
+    # The app's entry in the Steam library belongs to Steam: only Steam's own
+    # interface removes it. Take our artwork off it and say so, while the
+    # command that knows still exists.
+    local steam_entry_left=false
+    if [ -x "$bindir/satur8" ] &&
+        "$bindir/satur8" steam-shortcut status 2>/dev/null | grep -q 'is in the Steam library'; then
+        steam_entry_left=true
+        "$bindir/satur8" steam-shortcut artwork --remove >/dev/null 2>&1 || true
+    fi
     say "Removing per-user install"
+    remove_scale_wrapper
     rm -f "$bindir/satur8" "$bindir/satur8-daemon" "$bindir/satur8-tray" "$bindir/satur8-gui"
     rm -f "$qt_plugin_user/satur8.so" "$env_dir/60-satur8.conf"
     rm -rf "$kwin_script_dir" "$gnome_ext_dir" "$effect_src_dir" "$effect_set_dir" "$state_dir"
@@ -653,6 +708,13 @@ uninstall_all() {
     fi
     if [ -e "/usr/share/$icon_rel" ]; then
         echo "    (system-installed icon at /usr/share/$icon_rel left alone; remove with sudo if needed)"
+    fi
+    if [ "$steam_entry_left" = true ]; then
+        echo
+        echo "Satur8's entry is still in your Steam library; it no longer starts anything."
+        echo "  Steam has no command to remove an entry. To remove it: select it in the"
+        echo "  Steam library, open its settings (the gear), then Manage, then"
+        echo "  \"Remove non-Steam game from your library\"."
     fi
 }
 
