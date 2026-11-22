@@ -202,8 +202,13 @@ and Bazzite is Fedora-based (the live COPR work carries over).
   - [ ] KDE Desktop Mode: keep the KWin effect working across KWin updates on
         an image with no `cmake` or KWin headers. Partly done in v0.4.1: the
         tarball bundles `fedora45-6.8.3`, built in Fedora 45's packages for
-        the KWin Bazzite stable uses, and the installer picked it in the
-        Bazzite container (not run on a Bazzite desktop). After a KWin update
+        the KWin Bazzite stable uses. Run on a real Bazzite KDE install in a
+        virtual machine on 2026-11-22 (stable 45.20261117.1, KWin 6.8.3,
+        software rendering) with v0.4.0 and v0.4.1: the installer picked the
+        effect, on, set 0 and off changed a test window in pixels, per-game
+        switching followed focus with the installed service, repair restored
+        the effect after a wrong file, and service and effect came back after
+        an untouched reboot. After a KWin update
         the effect stays off until a newer Satur8 release includes that KWin.
         Still open, and waiting on the owner's decision: whether Satur8 may
         fetch an effect for a newer KWin when the user asks for it with a
