@@ -7,19 +7,23 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.4.0 is the current release. Seven of the eight backend paths are verified on
+v0.4.1 is the current release. Seven of the eight backend paths are verified on
 real hardware: KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland,
 NVIDIA X11 NV-CONTROL, automatic per-game switching in Steam Game Mode through
 gamescope's look table (verified on a Steam Deck OLED with SteamOS 3.9.5 and
 gamescope 3.16.30.1), the gamescope-native launch option for a running
 full-screen gamescope compositor, and the nested gamescope fallback for
 unsupported Wayland sessions. The remaining implemented-but-unverified path is
-DRM/KMS. The KWin effect is
-built against KWin 6.8, and since v0.3.4 `satur8 repair` rebuilds it at login
-when a KWin update rejects the installed copy. Distribution today is a Linux
-x86_64 tarball served from [satur8.app](https://satur8.app), a tested Arch
-package in `packaging/`, and a live Fedora package on COPR built for Fedora 43
-and 44. The AUR also has two packages, `satur8` (built from the source release)
+DRM/KMS. Since v0.4.1 the release tarball needs glibc 2.35 or newer (checked
+by starting each program in containers of Ubuntu 22.04, Debian 12, Ubuntu
+24.04, openSUSE Leap 16.0 and Fedora 43) and carries prebuilt KWin effects for
+SteamOS 3.9 (KWin 6.7.3), SteamOS 3.10 (KWin 6.8.2), and Fedora 44 and 45
+(KWin 6.8.3), each built in that system's own packages. `satur8 repair` installs
+the matching effect from that set at login, and rebuilds it only where build
+tools exist. The Steam Deck's Desktop Mode is verified with the SteamOS 3.9
+effect. Distribution today is a Linux x86_64 tarball served from
+[satur8.app](https://satur8.app), a tested Arch package in `packaging/`, and a
+live Fedora package on COPR built for Fedora 43, 44 and 45. The AUR also has two packages, `satur8` (built from the source release)
 and `satur8-bin` (prebuilt binaries), published and maintained by a community
 member rather than by this project. They were at v0.3.3 when checked on
 2026-11-21, so they can trail the latest release.
@@ -185,9 +189,21 @@ and Bazzite is Fedora-based (the live COPR work carries over).
   - [ ] Game Mode on a real Bazzite device with an AMD GPU: the same background
         service checks that were run on the Steam Deck for v0.4.0.
   - [ ] KDE Desktop Mode: keep the KWin effect working across KWin updates on
-        an image with no `cmake` or KWin headers.
-  - [ ] GNOME images: add GNOME 51 to the Shell extension once it is tested on
-        GNOME 51.
+        an image with no `cmake` or KWin headers. Partly done in v0.4.1: the
+        tarball bundles `fedora45-6.8.3`, built in Fedora 45's packages for
+        the KWin Bazzite stable uses, and the installer picked it in the
+        Bazzite container (not run on a Bazzite desktop). After a KWin update
+        the effect stays off until a newer Satur8 release includes that KWin.
+        Still open, and waiting on the owner's decision: whether Satur8 may
+        fetch an effect for a newer KWin when the user asks for it with a
+        command. Nothing for that is built.
+  - [x] GNOME images: add GNOME 51 to the Shell extension. Checked on GNOME
+        Shell 51.1 headless in a Fedora 45 container with software rendering,
+        not on a Bazzite device or a GNOME 51 desktop. GNOME 51 removed the
+        shader API the extension used, so on GNOME 51 the effect uses a Cogl
+        snippet instead. Screenshots at 2.0, 0 and off matched the saturation
+        math pixel for pixel, and the same steps passed on GNOME Shell 50.6
+        and 49.10.
   - [ ] Fedora 45 COPR package: the build target was added on 2026-11-22.
         Still open: test layering it on Bazzite with `rpm-ostree` and decide
         whether to document that.
@@ -238,14 +254,24 @@ Not blocking the packaging spine; picked up as time allows.
       the game's name. Done in v0.4.0 and run on a Steam Deck.
 - [ ] Steam Deck: the same installed-games picker in the desktop app.
 - [ ] Steam Deck: the desktop app in Game Mode.
+- [ ] Steam Deck: click through the desktop app in Desktop Mode. In v0.4.1 it
+      starts there and shows the KWin backend active; nothing more was run.
 - [ ] Steam Deck: a Decky panel.
 - [ ] Steam Deck: HDR games, through gamescope's separate HDR look table. The
-      v0.4.0 look table only changes SDR content.
-- [ ] Steam Deck: make the KWin effect available on SteamOS Desktop Mode.
-      Checked 2026-11-22: it does not work. Desktop Mode runs KWin 6.7.3, the
-      effect bundled in the release tarball is built for a different KWin, and
-      SteamOS has no build tools (no `cmake`) to rebuild it, so the service
-      starts there but cannot apply anything. Game Mode is not affected.
+      v0.4.0 look table only changes SDR content. First test with a game that
+      presents HDR; so far only a game presenting SDR was run (ELDEN RING
+      through Proton, where the look applied).
+- [ ] Steam Deck: a cold boot straight into Game Mode, to confirm the service
+      starts then too.
+- [ ] Steam Deck: run the `steamos-6.8.2` effect on a Deck with SteamOS 3.10.
+- [x] Steam Deck: make the KWin effect available on SteamOS Desktop Mode.
+      Done in v0.4.1: the tarball bundles effects built against Valve's
+      packages for SteamOS 3.9 (KWin 6.7.3) and SteamOS 3.10 (KWin 6.8.2), and
+      the installer picks the one for the Deck. Verified on a Steam Deck OLED
+      with SteamOS 3.9.5 and KWin 6.7.3: after one switch to Desktop Mode
+      `satur8 on` and `off` changed the picture, per-game switching followed
+      window focus with the KWin focus script on, and `satur8 repair` replaced
+      a wrong effect file from the bundled set.
 - [ ] Re-check whether a future KWin release exposes a client CTM path that would
       make the KDE backend zero-cost (none in KWin 6.7, see PLAN.md section 10).
 - [x] `CONTRIBUTING.md`, issue and PR templates, and the dedicated
