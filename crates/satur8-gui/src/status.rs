@@ -84,6 +84,19 @@ pub fn kde_wayland(env: &Environment) -> bool {
     env.session == SessionType::Wayland && env.desktop == Desktop::Kde
 }
 
+/// Steam Game Mode: the backend Satur8 selected is gamescope. Selection only
+/// reaches gamescope when no desktop backend answered, so this is never true
+/// in a KDE Plasma, GNOME, Hyprland or NVIDIA X11 session. There the daemon
+/// follows gamescope's focus by itself: no KWin effect, no KWin script.
+pub fn game_mode(facts: &Facts) -> bool {
+    facts.backend.as_deref() == Some("gamescope")
+}
+
+/// KDE Plasma on Wayland, where the KWin effect and focus script apply.
+fn kde_desktop(facts: &Facts) -> bool {
+    kde_wayland(&facts.env) && !game_mode(facts)
+}
+
 // ------------------------------------------------------------- health rows
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,13 +131,18 @@ fn row(label: &'static str, level: Level, detail: impl Into<String>) -> HealthRo
     }
 }
 
-/// Whether the user has asked for per-game switching in any way.
+/// Whether the user has asked for per-game switching in any way. In Game Mode
+/// only the service counts: the KWin script setting belongs to Desktop Mode.
 fn switching_wanted(facts: &Facts) -> bool {
+    if game_mode(facts) {
+        return facts.unit == UnitState::Enabled;
+    }
     facts.unit == UnitState::Enabled || facts.script_enabled
 }
 
 fn backend_detail(name: &str) -> String {
     match name {
+        "gamescope" => "Working through Steam Game Mode (gamescope)".into(),
         "kwin" => "Working through KDE Plasma's compositor (kwin)".into(),
         "gnome-shell" => "Working through the GNOME Shell extension (gnome-shell)".into(),
         "hyprland" => "Working through a Hyprland screen shader (hyprland)".into(),
@@ -136,7 +154,8 @@ fn backend_detail(name: &str) -> String {
 
 /// Map the facts to the four Health rows, in display order.
 pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
-    let kde = kde_wayland(&facts.env);
+    let kde = kde_desktop(facts);
+    let game = game_mode(facts);
     let mut rows = Vec::with_capacity(4);
 
     // 1. Color backend.
@@ -236,7 +255,7 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
             "Running, but it will not start at the next login",
         ),
         (Some(true), _) => row("Background service", Level::Ok, "Running"),
-        (Some(false), _) if !kde => row(
+        (Some(false), _) if !kde && !game => row(
             "Background service",
             Level::NotApplicable,
             "Only needed for per-game switching on KDE Plasma (Wayland)",
@@ -262,8 +281,18 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
         ),
     });
 
-    // 4. Focus script.
-    rows.push(if !kde {
+    // 4. Focus script. In Game Mode the service reads gamescope's focus itself.
+    rows.push(if game {
+        row(
+            "Game detection",
+            if facts.daemon_running == Some(true) {
+                Level::Ok
+            } else {
+                Level::NotApplicable
+            },
+            "Built into the service in Game Mode",
+        )
+    } else if !kde {
         row(
             "Game detection",
             Level::NotApplicable,
@@ -314,8 +343,51 @@ pub struct SwitchState {
     pub detail: String,
 }
 
+/// The line under the toggle when switching is not fully on: what is done.
+fn partly_detail(done: &[&str]) -> String {
+    if done.is_empty() {
+        "Off. Game profiles are not applied automatically".to_string()
+    } else {
+        format!("Partly on ({}). Turn on to finish", done.join(", "))
+    }
+}
+
+/// The toggle in Steam Game Mode, where switching is only the user service.
+fn game_mode_switch_state(facts: &Facts) -> SwitchState {
+    if facts.unit == UnitState::NotInstalled {
+        return SwitchState {
+            available: false,
+            on: false,
+            detail: "The background service is not installed; reinstall Satur8".into(),
+        };
+    }
+    let running = facts.daemon_running == Some(true);
+    if running && facts.unit != UnitState::Disabled {
+        return SwitchState {
+            available: true,
+            on: true,
+            detail: "Each game's profile applies when its window is focused".into(),
+        };
+    }
+    let mut done = Vec::new();
+    if running {
+        done.push("service running");
+    }
+    if facts.unit == UnitState::Enabled {
+        done.push("service starts at login");
+    }
+    SwitchState {
+        available: true,
+        on: false,
+        detail: partly_detail(&done),
+    }
+}
+
 /// Derive the toggle from the real system state (never from a stored flag).
 pub fn switch_state(facts: &Facts) -> SwitchState {
+    if game_mode(facts) {
+        return game_mode_switch_state(facts);
+    }
     if !kde_wayland(&facts.env) {
         return SwitchState {
             available: false,
@@ -366,15 +438,10 @@ pub fn switch_state(facts: &Facts) -> SwitchState {
     if loaded {
         done.push("detection running");
     }
-    let detail = if done.is_empty() {
-        "Off. Game profiles are not applied automatically".to_string()
-    } else {
-        format!("Partly on ({}). Turn on to finish", done.join(", "))
-    };
     SwitchState {
         available: true,
         on: false,
-        detail,
+        detail: partly_detail(&done),
     }
 }
 
@@ -413,8 +480,12 @@ impl Action {
 }
 
 /// The installer's three steps, plus loading the script into the running
-/// KWin (reconfigure alone does not hot-load it).
+/// KWin (reconfigure alone does not hot-load it). In Game Mode only the
+/// service step applies.
 pub fn plan_enable(facts: &Facts) -> Vec<Action> {
+    if game_mode(facts) {
+        return vec![Action::Systemctl(vec!["enable", "--now"])];
+    }
     let mut plan = vec![
         Action::Systemctl(vec!["enable", "--now"]),
         Action::SetFocusEnabled(true),
@@ -429,7 +500,10 @@ pub fn plan_enable(facts: &Facts) -> Vec<Action> {
 }
 
 /// The reverse of [`plan_enable`].
-pub fn plan_disable(_facts: &Facts) -> Vec<Action> {
+pub fn plan_disable(facts: &Facts) -> Vec<Action> {
+    if game_mode(facts) {
+        return vec![Action::Systemctl(vec!["disable", "--now"])];
+    }
     vec![
         Action::SetFocusEnabled(false),
         Action::KwinReconfigure,
@@ -439,10 +513,11 @@ pub fn plan_disable(_facts: &Facts) -> Vec<Action> {
 }
 
 /// `satur8 repair`, plus starting the daemon and loading the focus script when
-/// those rows are failing.
+/// those rows are failing. In Game Mode there is no KWin effect or script, so
+/// only starting the service applies.
 pub fn plan_repair(facts: &Facts) -> Vec<Action> {
     let mut plan = Vec::new();
-    if kde_wayland(&facts.env) {
+    if kde_desktop(facts) {
         plan.push(Action::RepairEffect);
     }
     if facts.daemon_running == Some(false)
@@ -451,7 +526,7 @@ pub fn plan_repair(facts: &Facts) -> Vec<Action> {
     {
         plan.push(Action::Systemctl(vec!["start"]));
     }
-    if kde_wayland(&facts.env) && facts.script_enabled && facts.script_loaded == Some(false) {
+    if kde_desktop(facts) && facts.script_enabled && facts.script_loaded == Some(false) {
         if let Some(path) = &facts.script_path {
             plan.push(Action::LoadScript(path.clone()));
         }
@@ -1699,6 +1774,185 @@ mod tests {
             running.unit = UnitState::Enabled;
             assert_eq!(details(&running)[2], "Running");
             assert!(plan_repair(&running).is_empty());
+        }
+    }
+
+    // ----------------------------------------------------------- Steam Game Mode
+
+    /// Game Mode as the Deck reports it: the gamescope backend is selected, no
+    /// KWin answers, and the KWin script is still installed from Desktop Mode.
+    fn game(daemon_running: Option<bool>, unit: UnitState) -> Facts {
+        Facts {
+            env: Environment {
+                session: SessionType::X11,
+                desktop: Desktop::Other,
+                gpu: Gpu::Amd,
+            },
+            backend: Some("gamescope".into()),
+            effect: None,
+            kwin_version: None,
+            daemon_running,
+            unit,
+            script_enabled: false,
+            script_loaded: None,
+            script_path: Some(script_path()),
+        }
+    }
+
+    fn rows_of(facts: &Facts) -> Vec<(Level, String)> {
+        health_rows(facts)
+            .into_iter()
+            .map(|row| (row.level, row.detail))
+            .collect()
+    }
+
+    fn r(level: Level, detail: &str) -> (Level, String) {
+        (level, detail.to_string())
+    }
+
+    #[test]
+    fn game_mode_with_the_service_off() {
+        let facts = game(Some(false), UnitState::Disabled);
+        assert!(game_mode(&facts));
+        assert_eq!(
+            rows_of(&facts),
+            [
+                r(Level::Ok, "Working through Steam Game Mode (gamescope)"),
+                r(Level::NotApplicable, "Only used on KDE Plasma (Wayland)"),
+                r(
+                    Level::NotApplicable,
+                    "Off; only needed for automatic per-game switching"
+                ),
+                r(Level::NotApplicable, "Built into the service in Game Mode"),
+            ]
+        );
+        assert_eq!(
+            switch_state(&facts),
+            SwitchState {
+                available: true,
+                on: false,
+                detail: "Off. Game profiles are not applied automatically".into(),
+            }
+        );
+        assert!(plan_repair(&facts).is_empty());
+    }
+
+    #[test]
+    fn game_mode_with_the_service_enabled_but_not_running() {
+        let facts = game(Some(false), UnitState::Enabled);
+        let rows = rows_of(&facts);
+        assert_eq!(
+            rows[2],
+            r(
+                Level::Problem,
+                "Not running, so games are not switched automatically"
+            )
+        );
+        assert_eq!(
+            rows[3],
+            r(Level::NotApplicable, "Built into the service in Game Mode")
+        );
+        assert_eq!(
+            switch_state(&facts),
+            SwitchState {
+                available: true,
+                on: false,
+                detail: "Partly on (service starts at login). Turn on to finish".into(),
+            }
+        );
+        assert_eq!(plan_repair(&facts), vec![Action::Systemctl(vec!["start"])]);
+        assert!(plan_starts_daemon(&plan_repair(&facts)));
+    }
+
+    #[test]
+    fn game_mode_with_the_service_running() {
+        let facts = game(Some(true), UnitState::Enabled);
+        assert_eq!(
+            rows_of(&facts),
+            [
+                r(Level::Ok, "Working through Steam Game Mode (gamescope)"),
+                r(Level::NotApplicable, "Only used on KDE Plasma (Wayland)"),
+                r(Level::Ok, "Running"),
+                r(Level::Ok, "Built into the service in Game Mode"),
+            ]
+        );
+        assert_eq!(
+            switch_state(&facts),
+            SwitchState {
+                available: true,
+                on: true,
+                detail: "Each game's profile applies when its window is focused".into(),
+            }
+        );
+        assert!(plan_repair(&facts).is_empty());
+
+        // Running now, but not set to start with the session.
+        let facts = game(Some(true), UnitState::Disabled);
+        assert_eq!(
+            rows_of(&facts)[2],
+            r(
+                Level::Ok,
+                "Running, but it will not start at the next login"
+            )
+        );
+        assert_eq!(
+            switch_state(&facts).detail,
+            "Partly on (service running). Turn on to finish"
+        );
+    }
+
+    #[test]
+    fn game_mode_without_the_service_installed() {
+        let facts = game(Some(false), UnitState::NotInstalled);
+        assert_eq!(
+            rows_of(&facts)[2],
+            r(
+                Level::NotApplicable,
+                "Not installed (no satur8-daemon service found)"
+            )
+        );
+        let switch = switch_state(&facts);
+        assert!(!switch.available && !switch.on);
+        assert_eq!(
+            switch.detail,
+            "The background service is not installed; reinstall Satur8"
+        );
+    }
+
+    #[test]
+    fn game_mode_toggle_is_only_the_service() {
+        let facts = game(Some(false), UnitState::Disabled);
+        assert_eq!(
+            plan_enable(&facts),
+            vec![Action::Systemctl(vec!["enable", "--now"])]
+        );
+        assert!(plan_starts_daemon(&plan_enable(&facts)));
+        let facts = game(Some(true), UnitState::Enabled);
+        assert_eq!(
+            plan_disable(&facts),
+            vec![Action::Systemctl(vec!["disable", "--now"])]
+        );
+    }
+
+    #[test]
+    fn game_mode_repair_never_touches_the_kwin_effect_or_script() {
+        // The KWin script setting from Desktop Mode does not count as wanting
+        // switching in Game Mode, and a KDE-looking environment does not bring
+        // the KWin steps back.
+        for env_kde in [false, true] {
+            let mut facts = game(Some(false), UnitState::Disabled);
+            facts.script_enabled = true;
+            facts.script_loaded = Some(false);
+            if env_kde {
+                facts.env = kde();
+            }
+            assert!(plan_repair(&facts).is_empty(), "{facts:?}");
+            facts.unit = UnitState::Enabled;
+            assert_eq!(plan_repair(&facts), vec![Action::Systemctl(vec!["start"])]);
+            assert_eq!(
+                plan_enable(&facts),
+                vec![Action::Systemctl(vec!["enable", "--now"])]
+            );
         }
     }
 }
