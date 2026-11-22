@@ -44,10 +44,21 @@ is_steamos() {
     grep -Eq '^ID="?steamos"?$' /etc/os-release 2>/dev/null
 }
 
-# On SteamOS only the per-user install is supported: everything it writes is
-# under $HOME, which SteamOS updates leave alone.
-if [ "$action" = install ] && [ "$mode" = system ] && is_steamos; then
-    echo "--system is not supported on SteamOS." >&2
+# Booted from an ostree image (Bazzite, Fedora Atomic): /usr is a read-only
+# mount, so the system plugin dir cannot be written. ostree creates this file
+# at boot.
+is_ostree() {
+    [ -e /run/ostree-booted ]
+}
+
+# SteamOS and ostree image-based systems support only the per-user install:
+# everything it writes is under $HOME, which their OS updates leave alone.
+per_user_only() {
+    is_steamos || is_ostree
+}
+
+if [ "$action" = install ] && [ "$mode" = system ] && per_user_only; then
+    echo "--system is not supported on SteamOS or on image-based systems such as Bazzite." >&2
     echo "Run packaging/install.sh without --system for a per-user install." >&2
     exit 1
 fi
@@ -151,7 +162,8 @@ kwin_present() {
 }
 
 # Whether this machine has a Steam Game Mode (gamescope) session to log into:
-# SteamOS's session files, or ChimeraOS's gamescope-session-plus unit.
+# SteamOS's session files, or the gamescope-session-plus unit that ChimeraOS
+# and Bazzite use.
 has_gamescope_session() {
     [ -f /usr/share/wayland-sessions/gamescope-wayland.desktop ] ||
     [ -f /usr/lib/systemd/user/gamescope-session.service ] ||
@@ -251,7 +263,11 @@ install_all() {
         mkdir -p "$state_dir"
         printf '%s' "$satur8_version" > "$state_dir/kwin-effect-source-version"
         echo "    NOTE: KWin picks up the per-user effect at your next login."
-        echo "    Log out and back in once, or re-run with --system to use it now."
+        if per_user_only; then
+            echo "    Log out and back in once."
+        else
+            echo "    Log out and back in once, or re-run with --system to use it now."
+        fi
     fi
 
     # Everything `satur8 repair` needs to rebuild the effect after a KWin update.
@@ -296,6 +312,13 @@ EOF
         echo "NOTE: the KWin effect was not installed ($effect_skip_reason)."
         echo "  Everything else is installed. Steam Game Mode does not use the KWin"
         echo "  effect, so Satur8 works there without it."
+    elif [ -n "$effect_skip_reason" ] && is_ostree; then
+        echo
+        echo "NOTE: the KWin effect was not installed ($effect_skip_reason)."
+        echo "  Everything else is installed. /usr is read-only on this system, so the"
+        echo "  build tools could only be added by layering packages with rpm-ostree."
+        echo "  A Satur8 release whose bundled effect matches your KWin installs it"
+        echo "  without them."
     elif [ -n "$effect_skip_reason" ]; then
         echo
         echo "NOTE: the KWin effect was not installed ($effect_skip_reason)."
