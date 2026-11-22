@@ -39,6 +39,16 @@ The app in Steam Game Mode: its own layout for the Deck's screen, touch and butt
   `eldenring.exe`) shows under its Steam library name ("ELDEN RING") in the
   app when it carries a Steam AppID. Only what is shown changes; the profile
   keeps its name in the file and in the commands.
+- A Decky Loader plugin (`satur8-decky-plugin.zip` on the release) for Decky
+  users on a Steam Deck: its Quick Access Menu panel says whether Satur8 is
+  installed and which version, installs, updates or reinstalls it without
+  leaving Game Mode (the release tarball from GitHub, SHA-256 checked before
+  anything runs, installed as your user, never as root), and opens the app.
+  Install it in Decky under Developer, Install Plugin from URL; it is not on
+  the official Decky store. Checked on a Steam Deck OLED with Decky Loader
+  v3.3.1: the panel loads and Open Satur8 starts the app. Installing from
+  the plugin needs a published release to download, so it is checked after
+  this release is out.
 - `satur8 auto on|off|status` turns automatic per-game switching on or off
   with one command, the same way the switch on the app's Status page does:
   the background service now and at login, and on KDE Plasma also the KWin
