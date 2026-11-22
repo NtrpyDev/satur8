@@ -185,11 +185,11 @@ the compositor shader paths (B1 KWin / B4 GNOME / Hyprland's screen-shader hook)
 ### B6. gamescope backends - **Steam Game Mode, a running gamescope, and nested as the last resort**
 The gamescope crate (`crates/backends/gamescope`) has one automatic backend and
 two run strategies. The Game Mode backend is part of the automatic backend
-selector (`select_backend` in `crates/satur8-backend/src/lib.rs`), so `satur8
-on`/`set`/`off`, the daemon, and the GUI (not tested on a Deck) use it in Steam
-Game Mode. The two run
-strategies are launch-only: they wrap one game launch with `satur8 run --via
-...` and restore when it exits, and the selector never picks them.
+selector (`select_backend` in `crates/satur8-backend/src/lib.rs`), so
+`satur8 on`/`set`/`off`, the daemon, and the GUI (not tested on a Deck) use it
+in Steam Game Mode. The two run strategies are launch-only: they wrap one game
+launch with `satur8 run --via ...` and restore when it exits, and the selector
+never picks them.
 
 **Steam Game Mode (automatic, the SteamOS path; `look.rs`, `session.rs`,
 `backend.rs`).** Since v0.4.0. Verified on a Steam Deck OLED with SteamOS 3.9.5
