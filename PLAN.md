@@ -139,7 +139,7 @@ compositor. We ship our own minimal, single-purpose **saturation** effect
 - Investigate whether recent KWin (6.x) exposes a per-output color/CTM path we
   can use instead of a shader - if so, KDE moves to zero-cost too. Track this.
 
-**A different value per output (not yet released).** Implemented; checked on
+**A different value per output (since v0.5.0).** Implemented; checked on
 headless KWin with two virtual outputs (pixels on 6.7.3, the effect's
 reported state on 6.8.2); not yet run on real monitors.
 
