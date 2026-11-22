@@ -158,7 +158,26 @@ Without `--enable-daemon`, the installer prints the command that turns the servi
 
 The commands are installed to `~/.local/bin`. An SSH login on SteamOS does not have that folder on its PATH, so over SSH a plain `satur8` gives "command not found"; the installer prints a hint about this. The examples below use the full path, `~/.local/bin/satur8`, which works everywhere. (Konsole in Desktop Mode was not checked.)
 
-### Add a game
+### The app in Game Mode
+
+In Game Mode, Steam shows only programs started from its library, so the app needs an entry there. On a system with a Steam gaming session the installer asks Steam to add it (`satur8 steam-shortcut add`; `--no-steam-entry` skips this). It never adds a second entry, and it says what it did or why it could not, for example when Steam is not running. Then open **Satur8** from the Non-Steam section of the library. No Desktop Mode, terminal or typing is needed after the install.
+
+There the app has its own layout for the Deck's screen and controls, not the desktop window made smaller:
+
+- **Everything else** is the first row: Steam's own screens and every game without a row of its own. It is what the desktop app calls Desktop vibrance.
+- **Add a game** lists your installed Steam games by name. A game that is running is first and says so. Pick one and it gets a row, matched by its Steam AppID.
+- Each game has a row with its value, an on/off switch, a remove button that asks first, and a wide slider. Tap the track or drag along it; dragging up or down scrolls the page instead.
+- The Deck's buttons work: the D-pad or left stick moves a highlight, A selects (on a slider, A then left and right change it), B goes back or undoes, X turns the game on or off, Y opens the list, L1 and R1 change page, L2 and R2 change the row's slider by one. A bar along the bottom says what the buttons do at that moment.
+
+A game's setting shows while that game is on screen. While Satur8 itself is on screen you see Everything else, so switch back to the game to see its setting.
+
+The entry's artwork is put in place by `satur8 steam-shortcut artwork`, and by the app the first time it is started from the library; Steam shows new artwork after it restarts. `satur8 steam-shortcut status` says whether the entry is there and with which AppID.
+
+What was checked: this layout was run on a virtual 1280x800 screen with a Steam Deck's Game Mode environment, with pointer presses and drags standing in for touch and keys standing in for the buttons, and started inside the Steam Linux Runtime container that Steam runs it in. It has not yet been run on a Deck, and the gamepad reader has not read a real pad. On a Deck, an earlier build confirmed the cause this layout fixes: the app used to open larger than the screen, so only its top left could be touched.
+
+If the buttons do nothing, create an empty file `~/.config/satur8/input-debug`, start the app from the library, press a few buttons, and look at `~/.local/state/satur8/input-debug.log`: it lists the input devices the app could open, which one it took for a gamepad, and each press it read.
+
+### Add a game from the command line
 
 List the installed Steam games, then add a profile by the game's name:
 
@@ -246,6 +265,8 @@ packaging/install.sh --uninstall
 
 This stops the service, removes Satur8's table, and removes the commands, the service and the table folder. It was checked on the Deck with a game running and its table loaded: the picture went back to normal. Your profiles in `~/.config/satur8/profiles.toml` are kept, so they come back if you reinstall.
 
+Satur8's entry stays in your Steam library, because Steam has no command to remove one; the uninstaller says so and takes Satur8's artwork off it. To remove the entry, select it in the Steam library, open its settings (the gear), then Manage, then "Remove non-Steam game from your library". (This part of the uninstaller was not run on a Deck.)
+
 ### Known: gamescope can abort when Game Mode ends
 
 On the tested Deck, gamescope sometimes aborts while Game Mode shuts down for the switch to Desktop Mode. The switch still completes. This happens without Satur8: in repeated trials a session that never had a Satur8 table aborted the same way (1 of 8 sessions without a table, 2 of 6 with one, too few to say whether a table changes the odds). All the aborts have one signature, two threads of gamescope 3.16.30.1 using the session's D-Bus connection at the same time during shutdown, and Satur8's Game Mode code does not use that connection. No abort was seen while a game was running.
@@ -254,7 +275,8 @@ On the tested Deck, gamescope sometimes aborts while Game Mode shuts down for th
 
 - HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged. A game presenting SDR does get the look: ELDEN RING through Proton, presenting SDR on the tested Deck, turned grayscale in gamescope's own screenshot.
 - An external display.
-- The desktop app (`satur8-gui`) on the Deck beyond starting it: it starts in Desktop Mode and shows the KWin backend active, but it was not clicked through.
+- The app's Game Mode layout on a Deck, with touch and with the controller (see [The app in Game Mode](#the-app-in-game-mode)).
+- The desktop app (`satur8-gui`) in Desktop Mode beyond starting it: it starts there and shows the KWin backend active, but it was not clicked through.
 - The `steamos-6.8.2` effect on a Deck running SteamOS 3.10 (it was only run headless, see above).
 - A Bazzite device (see [Bazzite](#bazzite)) and other systems that run a gamescope session.
 - gamescope versions other than 3.16.30.1.
@@ -310,7 +332,7 @@ The screenshots below show the Satur8 GUI.
 On the Main page you can:
 
 - Set the desktop vibrance, which is also the default when no game profile is active, and restore the desktop to normal.
-- Add a currently running game.
+- Add a game from one list of your games by name: installed Steam games, with any that is running first. Launchers and other background programs are not listed.
 - Set the saturation level per game.
 - Enable or disable a profile.
 
@@ -370,6 +392,17 @@ satur8 profile path
 ```
 
 A profile needs at least one match rule: `--exe`, `--window-class`, `--steam-app-id`, or `--steam-game`. `satur8 games` lists the installed Steam games and the profile each one uses (`--json` for scripts). `--steam-game` takes a game's name, part of it, or its AppID, and stores the AppID.
+
+Satur8's own entry in the Steam library, which is how the app is opened in Steam Game Mode (see [The app in Game Mode](#the-app-in-game-mode)):
+
+```sh
+satur8 steam-shortcut status             # is the entry there, and with which AppID
+satur8 steam-shortcut add                # ask Steam to add it, unless it is there
+satur8 steam-shortcut artwork            # put its artwork in place
+satur8 steam-shortcut artwork --remove   # take that artwork away again
+```
+
+`add` uses SteamOS's `steamos-add-to-steam` and needs Steam running; on a system without that tool it says how to add the entry in Steam. These commands read Steam's shortcuts file and never write it.
 
 ### Multiple monitors
 

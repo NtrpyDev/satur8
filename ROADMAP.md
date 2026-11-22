@@ -275,8 +275,15 @@ Not blocking the packaging spine; picked up as time allows.
       typing its AppID, on the command line: `satur8 games` lists them and
       `satur8 profile add NAME SATURATION --steam-game NAME` adds a profile by
       the game's name. Done in v0.4.0 and run on a Steam Deck.
-- [ ] Steam Deck: the same installed-games picker in the desktop app.
-- [ ] Steam Deck: the desktop app in Game Mode.
+- [x] The same list of games in the app: Add game lists the installed Steam
+      games by name, with any that is running first, in the desktop layout and
+      in Game Mode. Done in v0.5.1; run headless, not on a Deck.
+- [ ] Steam Deck: the app in Game Mode. Built in v0.5.1: its own layout for
+      the Deck's screen, touch and buttons, opened from an entry in the Steam
+      library that the installer asks Steam to add. Run on a virtual 1280x800
+      screen with the Deck's Game Mode environment and inside the Steam Linux
+      Runtime container. Stays open until it has been run on a Deck, with
+      touch and with the controller.
 - [ ] Steam Deck: click through the desktop app in Desktop Mode. In v0.4.1 it
       starts there and shows the KWin backend active; nothing more was run.
 - [ ] Steam Deck: a Decky panel.

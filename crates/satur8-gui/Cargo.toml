@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Satur8 desktop app: pick a running game and set its per-game saturation, with a clean Slint UI."
+description = "Satur8 desktop app: pick one of your games and set its per-game saturation, on a desktop and in Steam Game Mode."
 build = "build.rs"
 
 [[bin]]

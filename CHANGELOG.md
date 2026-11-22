@@ -5,8 +5,57 @@ GitHub release notes for that tag.
 
 ## v0.5.1 - 2026-11-22
 
-Fixes for the Steam Deck launcher entry and the Bazzite installer, the logo as the app icon, and the last backend verified on real hardware.
+The app in Steam Game Mode: its own layout for the Deck's screen, touch and buttons, opened from the Steam library. Also fixes for the Steam Deck launcher entry and the Bazzite installer, the logo as the app icon, and the last backend verified on real hardware.
 
+- The app works in Steam Game Mode. On a Steam Deck it used to open larger
+  than the screen (2375x1458 on the 1280x800 screen), so only its top left
+  could be touched: the desktop slider stopped at +5% and the add button
+  could not be reached. In a gamescope session it now opens at exactly the
+  screen's size and shows a layout of its own, drawn 640 logical pixels wide
+  (a scale of 2 on a Deck): "Everything else" first (Steam's own screens and
+  every game without a row), then one full-width row per game with a wide
+  slider, an on/off switch and a remove button that asks first. A tap on a
+  slider's track jumps there, a sideways drag changes the value, and a drag
+  up or down scrolls the page. There is no mouse cursor and nothing depends
+  on hovering. The desktop layout is unchanged.
+- The Deck's buttons drive that layout: D-pad or left stick move a
+  highlight, A selects (on a slider, A then left and right change it, faster
+  while held), B goes back or undoes, X turns the game on or off, Y opens
+  the list, L1/R1 change page, L2/R2 change the row's slider by one. A bar
+  along the bottom says what the buttons do right now. Touching the screen
+  moves the focus and hides the highlight. Steam shows the Deck's controls to
+  such a program as a gamepad, which the app reads from the kernel's input
+  devices directly; it acts on them only while it is the app in front. A
+  keyboard works the same way (arrows, Enter, Escape).
+- "Add game" is one list of your games by name, in both layouts: the
+  installed Steam games, with any that is running first and marked. A
+  running Steam game is recognized by its Steam AppID and shown under its
+  Steam name ("ELDEN RING", not `eldenring.exe`); launchers, runtimes,
+  wrappers and shells are never listed. A pick adds a profile matched by the
+  Steam AppID. The separate "Add running game" dropdown, which listed
+  process names, is gone; a running game that is not from Steam is still
+  offered by its executable.
+- A profile that knows only a game's Steam AppID now also applies to a
+  native Steam game on a desktop (its window class is not `steam_app_<ID>`):
+  the service reads the AppID from the focused window's process.
+- `satur8 steam-shortcut status|add|artwork`: Satur8's entry in the Steam
+  library, which is how the app is opened in Game Mode. The installer runs
+  `add` on a system with a Steam gaming session (`--no-steam-entry` skips
+  it); it asks the running Steam through SteamOS's own tool, never adds a
+  second entry, and reports a broken leftover entry named `satur8.desktop`
+  from v0.5.0. The entry gets artwork (cover, wide capsule, banner, logo,
+  icon). Uninstall takes the artwork off and says that the entry itself
+  stays and how to remove it in Steam.
+- The Status page works when the app is started from the Steam library,
+  where it runs inside Steam's runtime container without `systemctl`: it
+  asks the user's systemd over the session bus instead. In Game Mode it
+  reads the applied saturation from gamescope.
+- Checked for all of the above: unit tests, and the Game Mode layout on a
+  virtual 1280x800 screen with a Steam Deck's Game Mode environment (pointer
+  presses and drags for touch, keys for the buttons), also started inside
+  the Steam Linux Runtime container. Not yet run on a Steam Deck in this
+  form: the gamepad reader has not read a real pad, and the step that asks
+  Steam to add the entry was not run.
 - Fix the app not opening from the application launcher on the Steam Deck:
   the launcher said "Could not find the program 'satur8-gui'", because
   SteamOS does not search `~/.local/bin`. The installer now writes the
