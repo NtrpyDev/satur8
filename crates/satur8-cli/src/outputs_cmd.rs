@@ -92,7 +92,9 @@ pub fn set_output_default(
     }
     match saturation {
         Some(value) => {
-            satur8_core::Saturation::try_new(value)?;
+            // Save what will be shown: a value outside the range is clamped
+            // when it is applied, so the file must not keep the raw number.
+            let value = satur8_core::Saturation::try_new(value)?.get();
             profiles
                 .outputs
                 .entry(name.to_string())
@@ -188,6 +190,18 @@ mod tests {
         assert!(set_output_default(&mut profiles, "all", Some(1.2)).is_err());
         assert!(set_output_default(&mut profiles, "DP-2", Some(f32::NAN)).is_err());
         assert!(profiles.outputs.is_empty());
+    }
+
+    #[test]
+    fn an_output_default_outside_the_range_is_saved_clamped() {
+        let mut profiles = Profiles::default();
+        assert_eq!(
+            set_output_default(&mut profiles, "DP-2", Some(9.0)).unwrap(),
+            "output 'DP-2' now shows 4.00 on the desktop"
+        );
+        assert_eq!(profiles.outputs["DP-2"].default_saturation, Some(4.0));
+        set_output_default(&mut profiles, "DP-2", Some(-1.0)).unwrap();
+        assert_eq!(profiles.outputs["DP-2"].default_saturation, Some(0.0));
     }
 
     #[test]
