@@ -742,15 +742,31 @@ impl App {
             })
             .map(|state| state.join("satur8/input-debug.log"));
         let debug = self.input_debug;
+        // The pad is one device for the whole session, and a game in front
+        // gets the same presses: act on them only while this app is the one
+        // in front. In Steam Game Mode gamescope says which app that is.
+        let watched = match (self.game_mode, self.own_app_id) {
+            (true, Some(own)) => {
+                spawn_front_watch(own);
+                true
+            }
+            _ => false,
+        };
         pad::spawn(pad::DebugLog::new(debug, log_path), move |press| {
+            if watched && !IN_FRONT.load(Ordering::Acquire) {
+                if debug {
+                    eprintln!("satur8-gui input: {press:?} ignored, another app is in front");
+                }
+                return;
+            }
             let _ = slint::invoke_from_event_loop(move || {
                 with_app(|app| {
-                    // The pad is one device for the whole session: act on it
-                    // only while this window is the one in front.
-                    let active = app
-                        .ui
-                        .upgrade()
-                        .is_some_and(|ui| ui.global::<Gm>().get_window_active());
+                    // Anywhere else the window's own keyboard focus decides.
+                    let active = watched
+                        || app
+                            .ui
+                            .upgrade()
+                            .is_some_and(|ui| ui.global::<Gm>().get_window_active());
                     if active {
                         app.gm_press(press);
                     } else if debug {
@@ -942,6 +958,41 @@ impl App {
             (gm::Page::About, 2) => open_url("https://github.com/NtrpyDev/satur8"),
             _ => {}
         }
+    }
+}
+
+/// Whether gamescope's focused app is this one. True until gamescope says
+/// otherwise: the app has just been started, so it is in front.
+static IN_FRONT: AtomicBool = AtomicBool::new(true);
+
+/// Keep [`IN_FRONT`] up to date: follow gamescope's focus properties on its
+/// first Xwayland server and compare the focused app with `own`, the AppID
+/// Steam gave this app's shortcut. Sleeps in the X event wait; reconnects if
+/// gamescope restarts.
+fn spawn_front_watch(own: u32) {
+    use satur8_gamescope::session;
+    let result = std::thread::Builder::new()
+        .name("front-watch".into())
+        .spawn(move || loop {
+            if let Some((_, root)) = session::find_session() {
+                if root.watch_properties().is_ok() {
+                    loop {
+                        let Ok(focus) = session::read_focus(&root) else {
+                            break;
+                        };
+                        IN_FRONT.store(focus.app_id == Some(own), Ordering::Release);
+                        if root.wait_for_change(&session::FOCUS_PROPERTIES).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            // No session to ask: do not lock the pad out.
+            IN_FRONT.store(true, Ordering::Release);
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        });
+    if let Err(error) = result {
+        eprintln!("satur8-gui: could not watch gamescope's focus: {error}");
     }
 }
 
