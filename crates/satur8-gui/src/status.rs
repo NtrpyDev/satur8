@@ -80,7 +80,16 @@ pub struct Facts {
     pub script_loaded: Option<bool>,
     /// The installed focus script's main.js, if found.
     pub script_path: Option<PathBuf>,
+    /// Steam Game Mode: gamescope's color management is turned off
+    /// (`GAMESCOPE_COLOR_MANAGEMENT_DISABLE`), so it ignores every color
+    /// setting, Satur8's table included.
+    pub color_management_off: bool,
 }
+
+/// What the page says wherever gamescope's color management is off: the
+/// "Right now" card's small line and the Color control row.
+pub const COLOR_MANAGEMENT_OFF: &str =
+    "gamescope's color management is off, so Satur8's setting is not shown";
 
 impl Facts {
     /// The part of the facts automatic per-game switching depends on.
@@ -170,6 +179,9 @@ pub fn health_rows(facts: &Facts) -> Vec<HealthRow> {
 
     // 1. Color backend.
     rows.push(match &facts.backend {
+        Some(_) if game && facts.color_management_off => {
+            row("Color control", Level::Problem, COLOR_MANAGEMENT_OFF)
+        }
         Some(name) => row("Color control", Level::Ok, backend_detail(name)),
         None if kde => row(
             "Color control",
@@ -515,6 +527,11 @@ pub fn probe() -> Facts {
     };
 
     let script_enabled = script_enabled();
+    // Steam Game Mode: whether gamescope is ignoring its color settings.
+    let color_management_off = backend.as_deref() == Some("gamescope")
+        && satur8_gamescope::session::find_session()
+            .and_then(|(_, root)| satur8_gamescope::session::read_color_state(&root).ok())
+            .is_some_and(|state| state.color_management_disabled);
 
     Facts {
         env,
@@ -526,6 +543,7 @@ pub fn probe() -> Facts {
         script_enabled,
         script_loaded,
         script_path: find_script(),
+        color_management_off,
     }
 }
 
@@ -597,7 +615,7 @@ pub fn applied_in_game_mode(state: &satur8_gamescope::session::ColorState) -> Op
 /// What the "applied" value's small line says.
 pub fn applied_note(saturation: f32, color_management_off: bool) -> &'static str {
     if color_management_off {
-        "gamescope's color management is off, so Satur8's setting is not shown"
+        COLOR_MANAGEMENT_OFF
     } else if (saturation - 1.0).abs() < 1e-3 {
         "normal colors, read from the compositor"
     } else {
@@ -827,6 +845,7 @@ mod tests {
             script_path: Some(PathBuf::from(
                 "/usr/share/kwin/scripts/satur8-focus/contents/code/main.js",
             )),
+            color_management_off: false,
         }
     }
 
@@ -857,6 +876,7 @@ mod tests {
             script_enabled: false,
             script_loaded: None,
             script_path: None,
+            color_management_off: false,
         };
         assert_eq!(
             levels(&facts),
@@ -1411,6 +1431,7 @@ mod tests {
             script_enabled: false,
             script_loaded: None,
             script_path: None,
+            color_management_off: false,
         }
     }
 
@@ -1553,6 +1574,38 @@ mod tests {
         assert_eq!(applied_note(1.75, false), "read from the compositor");
     }
 
+    /// With gamescope's color management off, Satur8's table changes nothing
+    /// on screen, so the first Health row must not say it is working.
+    #[test]
+    fn color_control_is_not_working_while_gamescopes_color_management_is_off() {
+        let mut facts = game(Some(true), UnitState::Enabled);
+        let color = |facts: &Facts| health_rows(facts).remove(0);
+        // On: as before.
+        let row = color(&facts);
+        assert_eq!(row.label, "Color control");
+        assert_eq!(row.level, Level::Ok);
+        assert_eq!(row.detail, "Working through Steam Game Mode (gamescope)");
+
+        facts.color_management_off = true;
+        let row = color(&facts);
+        assert_eq!(row.label, "Color control");
+        assert_eq!(row.level, Level::Problem);
+        assert!(!row.detail.contains("Working"));
+        assert_eq!(
+            row.detail,
+            "gamescope's color management is off, so Satur8's setting is not shown"
+        );
+        // The same words as the line under the "Right now" value.
+        assert_eq!(row.detail, applied_note(1.0, true));
+        // The Game Mode page lists the row.
+        assert_eq!(game_mode_rows(health_rows(&facts))[0], row);
+
+        // The flag is gamescope's; a desktop session's row does not change.
+        let mut kde = healthy();
+        kde.color_management_off = true;
+        assert_eq!(color(&kde).level, Level::Ok);
+    }
+
     #[test]
     fn the_game_mode_page_keeps_the_service_row_and_drops_kdes() {
         let labels = |facts: &Facts| -> Vec<&'static str> {
@@ -1643,6 +1696,7 @@ mod tests {
             script_enabled: false,
             script_loaded: None,
             script_path: Some(script_path()),
+            color_management_off: false,
         }
     }
 
