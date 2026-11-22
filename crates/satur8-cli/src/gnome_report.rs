@@ -597,14 +597,39 @@ fn find_install() -> Install {
     }
 }
 
-/// Read `allow-extension-installation` through GSettings, as the shell does.
-/// `gsettings` falls back to a memory backend when dconf is missing and then
-/// prints only the schema default, so that case is unknown, not `true`.
+/// The settings backend `gsettings` used, from GLib's own debug line
+/// ("Found default implementation dconf (DConfSettingsBackend) for
+/// 'gsettings-backend'"), printed when `G_MESSAGES_DEBUG` includes GLib-GIO.
+/// GLib writes debug messages to stdout, ahead of the value.
+pub fn gsettings_backend(output: &str) -> Option<&str> {
+    output
+        .lines()
+        .filter(|line| line.contains("gsettings-backend"))
+        .find_map(|line| line.split("Found default implementation ").nth(1))
+        .and_then(|rest| rest.split_whitespace().next())
+}
+
+/// Read `allow-extension-installation` from `gsettings` output. GNOME Shell
+/// reads it through dconf. Without dconf, `gsettings` silently falls back to
+/// another backend (the keyfile one, in Fedora 45's GLib 2.90) and prints only
+/// that backend's value, so anything but dconf is unknown, not a value.
 pub fn parse_gsettings_bool(stdout: &str, stderr: &str) -> Result<bool, String> {
-    if stderr.contains("memory") && stderr.contains("GSettings backend") {
-        return Err("no GSettings backend here (dconf missing), only the default".to_string());
+    match gsettings_backend(stdout).or_else(|| gsettings_backend(stderr)) {
+        Some("dconf") => {}
+        Some(other) => {
+            return Err(format!(
+                "gsettings used the {other} settings backend, not dconf, so it cannot see \
+                 GNOME Shell's settings"
+            ))
+        }
+        None => return Err("couldn't tell which settings backend gsettings used".to_string()),
     }
-    match stdout.trim() {
+    let value = stdout
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty() && !line.contains("GLib-GIO-DEBUG"))
+        .unwrap_or("");
+    match value {
         "true" => Ok(true),
         "false" => Ok(false),
         other => Err(format!("unexpected gsettings output {other:?}")),
@@ -614,6 +639,7 @@ pub fn parse_gsettings_bool(stdout: &str, stderr: &str) -> Result<bool, String> 
 fn read_allow_extension_installation() -> Result<bool, String> {
     let output = std::process::Command::new("gsettings")
         .args(["get", "org.gnome.shell", "allow-extension-installation"])
+        .env("G_MESSAGES_DEBUG", "GLib-GIO")
         .output()
         .map_err(|error| format!("couldn't run gsettings: {error}"))?;
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1157,16 +1183,34 @@ mod tests {
 
     #[test]
     fn gsettings_output_is_read_strictly() {
-        assert_eq!(parse_gsettings_bool("true\n", ""), Ok(true));
-        assert_eq!(parse_gsettings_bool("false\n", ""), Ok(false));
-        assert!(parse_gsettings_bool("", "").is_err());
-        assert!(parse_gsettings_bool("@mb nothing\n", "").is_err());
-        assert!(parse_gsettings_bool(
-            "true\n",
-            "GLib-GIO-Message: Using the \u{201c}memory\u{201d} GSettings backend.  \
-             Your settings will not be saved or shared with other applications.\n"
-        )
-        .is_err());
+        // GLib's debug lines as Fedora 45's gsettings prints them.
+        let dconf = "(process:5): GLib-GIO-DEBUG: 09:51:27.670: _g_io_module_get_default: \
+                     Found default implementation local (GLocalVfs) for \u{2018}gio-vfs\u{2019}\n\
+                     (process:5): GLib-GIO-DEBUG: 09:51:27.670: _g_io_module_get_default: \
+                     Found default implementation dconf (DConfSettingsBackend) for \
+                     \u{2018}gsettings-backend\u{2019}\n";
+        let keyfile = "(process:3): GLib-GIO-DEBUG: 09:51:27.667: _g_io_module_get_default: \
+                       Found default implementation keyfile (GKeyfileSettingsBackend) for \
+                       \u{2018}gsettings-backend\u{2019}\n";
+        assert_eq!(gsettings_backend(dconf), Some("dconf"));
+        assert_eq!(gsettings_backend(keyfile), Some("keyfile"));
+        // GLib prints its debug lines on stdout, ahead of the value.
+        let out = |value: &str| format!("{dconf}{value}");
+        assert_eq!(parse_gsettings_bool(&out("true\n"), ""), Ok(true));
+        assert_eq!(parse_gsettings_bool(&out("false\n"), ""), Ok(false));
+        // The same when the debug lines arrive on stderr instead.
+        assert_eq!(parse_gsettings_bool("false\n", dconf), Ok(false));
+        assert!(parse_gsettings_bool(&out(""), "").is_err());
+        assert!(parse_gsettings_bool(&out("@mb nothing\n"), "").is_err());
+        assert_eq!(
+            parse_gsettings_bool(&format!("{keyfile}true\n"), ""),
+            Err(
+                "gsettings used the keyfile settings backend, not dconf, so it cannot see \
+                 GNOME Shell's settings"
+                    .to_string()
+            )
+        );
+        assert!(parse_gsettings_bool("true\n", "").is_err());
     }
 
     #[test]
