@@ -545,6 +545,9 @@ pub struct Live {
     pub applied: Option<f32>,
     /// Steam Game Mode: gamescope's own session was found.
     pub game_mode: bool,
+    /// Steam Game Mode: gamescope's color management is turned off, so it
+    /// ignores every color setting, Satur8's table included.
+    pub color_management_off: bool,
 }
 
 /// Light, read-only poll for the "Right now" card.
@@ -571,11 +574,35 @@ pub fn probe_live() -> Live {
     } else if let Some((_, root)) = satur8_gamescope::session::find_session() {
         // Steam Game Mode: the table gamescope has loaded says it.
         live.game_mode = true;
-        live.applied = satur8_gamescope::session::read_color_state(&root)
-            .ok()
-            .and_then(|state| applied_from_look(&state.look));
+        let state = satur8_gamescope::session::read_color_state(&root).ok();
+        live.color_management_off = state
+            .as_ref()
+            .is_some_and(|state| state.color_management_disabled);
+        live.applied = state.as_ref().and_then(applied_in_game_mode);
     }
     live
+}
+
+/// The saturation on screen in Steam Game Mode. While gamescope's color
+/// management is turned off (`GAMESCOPE_COLOR_MANAGEMENT_DISABLE`) it ignores
+/// every color setting, so the screen shows normal colors whatever table is
+/// loaded; otherwise the loaded look says it.
+pub fn applied_in_game_mode(state: &satur8_gamescope::session::ColorState) -> Option<f32> {
+    if state.color_management_disabled {
+        return Some(1.0);
+    }
+    applied_from_look(&state.look)
+}
+
+/// What the "applied" value's small line says.
+pub fn applied_note(saturation: f32, color_management_off: bool) -> &'static str {
+    if color_management_off {
+        "gamescope's color management is off, so Satur8's setting is not shown"
+    } else if (saturation - 1.0).abs() < 1e-3 {
+        "normal colors, read from the compositor"
+    } else {
+        "read from the compositor"
+    }
 }
 
 /// The saturation gamescope shows, from the look it has loaded: Satur8's
@@ -1484,6 +1511,46 @@ mod tests {
             applied_from_look(&Look::Foreign("/x/steam.cube".into())),
             None
         );
+    }
+
+    /// With `GAMESCOPE_COLOR_MANAGEMENT_DISABLE` set, gamescope ignores the
+    /// look, so a loaded Satur8 table is not what the screen shows.
+    #[test]
+    fn a_loaded_table_is_not_applied_while_color_management_is_off() {
+        use satur8_gamescope::session::{ColorState, Look};
+        let state = |disabled: bool, look: Look| ColorState {
+            pid: Some(6366),
+            color_management_disabled: disabled,
+            look,
+            sdr_gamut_wideness: None,
+            virtual_white: None,
+            night_mode: None,
+        };
+        let table = || Look::Satur8(satur8_core::Saturation::new(1.75));
+        // Color management on: the table's value, as before.
+        assert_eq!(applied_in_game_mode(&state(false, table())), Some(1.75));
+        assert_eq!(applied_in_game_mode(&state(false, Look::None)), Some(1.0));
+        assert_eq!(
+            applied_in_game_mode(&state(false, Look::Foreign("/x/steam.cube".into()))),
+            None
+        );
+        // Off: normal colors, whatever is loaded.
+        assert_eq!(applied_in_game_mode(&state(true, table())), Some(1.0));
+        assert_eq!(applied_in_game_mode(&state(true, Look::None)), Some(1.0));
+        assert_eq!(
+            applied_in_game_mode(&state(true, Look::Foreign("/x/steam.cube".into()))),
+            Some(1.0)
+        );
+        // And the line under the value says why.
+        assert_eq!(
+            applied_note(1.0, true),
+            "gamescope's color management is off, so Satur8's setting is not shown"
+        );
+        assert_eq!(
+            applied_note(1.0, false),
+            "normal colors, read from the compositor"
+        );
+        assert_eq!(applied_note(1.75, false), "read from the compositor");
     }
 
     #[test]

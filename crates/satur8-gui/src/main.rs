@@ -1342,11 +1342,7 @@ fn spawn_live_poll(w: slint::Weak<AppWindow>) {
             let (saturation, note) = match live.applied {
                 Some(sat) => (
                     percent_text(sat),
-                    if (sat - 1.0).abs() < 1e-3 {
-                        "normal colors, read from the compositor".to_string()
-                    } else {
-                        "read from the compositor".to_string()
-                    },
+                    status::applied_note(sat, live.color_management_off).to_string(),
                 ),
                 None => {
                     // Not readable here: show what should be applied.
@@ -1386,6 +1382,7 @@ fn spawn_live_poll(w: slint::Weak<AppWindow>) {
                     ui.set_live_profile(active.into());
                     ui.set_live_saturation(saturation.into());
                     ui.set_live_saturation_note(note.into());
+                    ui.set_live_color_off(live.color_management_off);
                     ui.set_live_has_focused(focused.is_some());
                     ui.set_live_focused(focused.unwrap_or_default().into());
                 }
