@@ -13,7 +13,8 @@ ExecStartPre=-%h/.local/bin/satur8 repair
 ExecStart=%h/.local/bin/satur8-daemon
 Restart=on-failure
 RestartSec=2
-# Event-driven: it sleeps until the KWin script forwards a focus change.
+# Event-driven: it sleeps until the KWin script forwards a focus change, or, in
+# Steam Game Mode, until gamescope's focused-app property changes.
 
 [Install]
 WantedBy=graphical-session.target
