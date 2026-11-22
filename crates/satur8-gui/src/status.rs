@@ -387,7 +387,7 @@ pub enum Action {
 impl Action {
     pub fn describe(&self) -> String {
         match self {
-            Action::RepairEffect => "Check and rebuild the saturation effect".into(),
+            Action::RepairEffect => "Check and repair the saturation effect".into(),
             Action::Systemctl(args) => format!("systemctl --user {} {DAEMON_UNIT}", args.join(" ")),
             Action::SetFocusEnabled(on) => {
                 format!("kwriteconfig6 --file kwinrc --group Plugins --key {FOCUS_KEY} {on}")

@@ -80,9 +80,26 @@ pub enum RepairOutcome {
     },
 }
 
+/// How to get KWin to load an effect it has not picked up yet. On SteamOS,
+/// leaving Desktop Mode and coming back is a new login, so the wording matches
+/// what packaging/install.sh prints there.
+fn relogin_hint(family: &Family) -> &'static str {
+    if *family == Family::SteamOs {
+        "switch to Game Mode and back to Desktop Mode, or log out and back in, once, so KWin picks it up"
+    } else {
+        "log out and back in once so KWin picks it up"
+    }
+}
+
 impl RepairOutcome {
     /// One plain sentence for the CLI, the daemon log, and the GUI.
     pub fn describe(&self) -> String {
+        self.describe_for(&system_family())
+    }
+
+    /// [`RepairOutcome::describe`] for a system of the given family.
+    pub fn describe_for(&self, family: &Family) -> String {
+        let relogin = relogin_hint(family);
         match self {
             RepairOutcome::NotKde => {
                 "not a KDE Plasma Wayland session; there is no KWin effect to repair".into()
@@ -94,15 +111,11 @@ impl RepairOutcome {
             RepairOutcome::PendingLogin {
                 kwin,
                 rebuilt: true,
-            } => format!(
-                "rebuilt the KWin effect for KWin {kwin}; log out and back in once so KWin picks it up"
-            ),
+            } => format!("rebuilt the KWin effect for KWin {kwin}; {relogin}"),
             RepairOutcome::PendingLogin {
                 kwin,
                 rebuilt: false,
-            } => format!(
-                "the KWin effect is already built for KWin {kwin}; log out and back in once so KWin picks it up"
-            ),
+            } => format!("the KWin effect is already built for KWin {kwin}; {relogin}"),
             RepairOutcome::InstalledFromSet {
                 kwin,
                 key,
@@ -120,7 +133,7 @@ impl RepairOutcome {
                 let next = if *ready {
                     "it is ready to use"
                 } else {
-                    "log out and back in once so KWin picks it up"
+                    relogin
                 };
                 format!(
                     "installed the KWin effect for KWin {kwin} from the set that came with Satur8{built_for}; {next}"
@@ -128,6 +141,35 @@ impl RepairOutcome {
             }
         }
     }
+}
+
+/// What `satur8 repair` will do about an effect the running KWin rejects, as
+/// a clause for `satur8 doctor` and error messages. It names the step
+/// [`decide`] chose, so nothing promises a rebuild that cannot happen.
+pub fn repair_advice(step: Step, family: &Family) -> String {
+    match step {
+        Step::InstallFromSet => "run `satur8 repair` to install the matching effect from the set \
+                                 that came with Satur8"
+            .into(),
+        Step::Build => "run `satur8 repair` to rebuild it for the installed KWin".into(),
+        Step::CannotRepair => "this Satur8 has no effect for the installed KWin and this system \
+                               cannot build one; run `satur8 repair` to see what to do"
+            .into(),
+        Step::WaitForLogin => format!(
+            "an effect for the installed KWin is already in place; {}",
+            relogin_hint(family)
+        ),
+        Step::DropUserCopy => {
+            "run `satur8 repair` to remove the stale per-user copy that hides the system one".into()
+        }
+        Step::Healthy => "run `satur8 repair`".into(),
+    }
+}
+
+/// [`repair_advice`] for this machine as it is now, for a KWin that rejects
+/// the effect.
+pub fn advice_here() -> String {
+    repair_advice(decide(&inspect(false)), &system_family())
 }
 
 /// The kind of system, as far as prebuilt effects go. Effects are built per
@@ -1367,7 +1409,7 @@ mod tests {
             ready: true,
         };
         assert_eq!(
-            ready.describe(),
+            ready.describe_for(&Family::SteamOs),
             "installed the KWin effect for KWin 6.8.2 from the set that came with Satur8; it is ready to use"
         );
         let later = RepairOutcome::InstalledFromSet {
@@ -1377,10 +1419,62 @@ mod tests {
             ready: false,
         };
         assert_eq!(
-            later.describe(),
+            later.describe_for(&Family::Other),
             "installed the KWin effect for KWin 6.8.3 from the set that came with Satur8 \
              (built for fedora45, another system with the same KWin); log out and back in \
              once so KWin picks it up"
         );
+    }
+
+    #[test]
+    fn steamos_is_told_to_switch_modes_to_pick_up_an_effect() {
+        let pending = RepairOutcome::PendingLogin {
+            kwin: "6.7.3".into(),
+            rebuilt: false,
+        };
+        assert_eq!(
+            pending.describe_for(&Family::SteamOs),
+            "the KWin effect is already built for KWin 6.7.3; switch to Game Mode and back to \
+             Desktop Mode, or log out and back in, once, so KWin picks it up"
+        );
+        assert_eq!(
+            pending.describe_for(&Family::Fedora(45)),
+            "the KWin effect is already built for KWin 6.7.3; log out and back in once so KWin \
+             picks it up"
+        );
+        let from_set = RepairOutcome::InstalledFromSet {
+            kwin: "6.8.2".into(),
+            key: "steamos-6.8.2".into(),
+            other_system: false,
+            ready: false,
+        };
+        assert!(from_set
+            .describe_for(&Family::SteamOs)
+            .ends_with("; switch to Game Mode and back to Desktop Mode, or log out and back in, once, so KWin picks it up"));
+    }
+
+    #[test]
+    fn repair_advice_names_what_repair_will_actually_do() {
+        let other = Family::Other;
+        assert!(repair_advice(Step::Build, &other).contains("rebuild it"));
+        let from_set = repair_advice(Step::InstallFromSet, &Family::SteamOs);
+        assert!(from_set.contains("from the set that came with Satur8"));
+        assert!(!from_set.contains("build"));
+        let cannot = repair_advice(Step::CannotRepair, &Family::SteamOs);
+        assert!(cannot.contains("cannot build one") && !cannot.contains("rebuild"));
+        assert!(repair_advice(Step::WaitForLogin, &Family::SteamOs).contains("Game Mode"));
+        assert!(repair_advice(Step::WaitForLogin, &other).contains("log out and back in once"));
+        for step in [
+            Step::Healthy,
+            Step::DropUserCopy,
+            Step::InstallFromSet,
+            Step::Build,
+            Step::CannotRepair,
+        ] {
+            assert!(
+                repair_advice(step, &other).contains("satur8 repair"),
+                "{step:?}"
+            );
+        }
     }
 }

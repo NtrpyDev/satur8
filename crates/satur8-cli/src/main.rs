@@ -338,7 +338,7 @@ fn cmd_doctor() -> Result<()> {
                             .as_deref()
                             .unwrap_or("unknown (no KWin headers)")
                     );
-                    println!("       Run `satur8 repair` to rebuild it for this KWin version.");
+                    println!("       Next step: {}.", satur8_kwin::repair::advice_here());
                     return Ok(());
                 }
                 Err(error) => {

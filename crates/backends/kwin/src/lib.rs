@@ -89,9 +89,10 @@ impl KwinBackend {
             return Ok(());
         }
         if !self.is_supported()? {
-            return Err(BackendError::Unavailable(
-                "the Satur8 KWin effect is missing or was built for a different KWin version; run `satur8 repair` to rebuild it for the running compositor".into(),
-            ));
+            return Err(BackendError::Unavailable(format!(
+                "the Satur8 KWin effect is missing or was built for a different KWin version; {}",
+                repair::advice_here()
+            )));
         }
         let reply = self
             .conn
