@@ -513,7 +513,8 @@ EOF
         if [ "$enable_daemon" != true ]; then
             echo "      systemctl --user enable --now satur8-daemon"
         fi
-        echo "      satur8 profile add NAME 1.5 --steam-app-id APPID"
+        echo "      satur8 games"
+        echo "      satur8 profile add NAME 1.5 --steam-game NAME"
     fi
     if kwin_present || ! has_gamescope_session; then
         cat <<EOF
