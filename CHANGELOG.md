@@ -5,6 +5,23 @@ GitHub release notes for that tag.
 
 ## Unreleased
 
+- KDE Plasma can show a different saturation on each output. Each output can
+  have its own desktop value (`satur8 outputs default NAME VALUE`, `--unset`
+  to clear it), a profile can list the outputs it changes
+  (`satur8 profile add ... --output NAME`, repeatable), and
+  `satur8 outputs follow focused` makes profiles that list none change only
+  the output the game is on, following the window when it moves. Checked on
+  headless KWin with two virtual outputs (pixels on KWin 6.7.3, state only on
+  KWin 6.8.2); not yet run on real monitors. Log out and back in once after
+  upgrading so KWin loads the new effect and focus script.
+- On every other desktop one saturation still applies to every output, and
+  `satur8 outputs`, `satur8 doctor` and `satur8 status` now say so when the
+  profiles file asks for a single output. `doctor` and `status` print nothing
+  new for a file that does not use the per-output settings.
+- The background service now handles focus reports in the order they arrive.
+  Before, two quick focus changes could be applied in the wrong order.
+- A profiles file with the new settings still loads in an older Satur8, but
+  an older Satur8 drops them if it saves the file.
 - `satur8 doctor` on GNOME Wayland now checks the GNOME Shell extension instead
   of printing only "KWin backend unavailable": the GNOME Shell version, where
   the extension is installed and which GNOME versions it lists, the state GNOME

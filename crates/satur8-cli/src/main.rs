@@ -7,6 +7,7 @@
 mod config;
 mod games_cmd;
 mod gnome_report;
+mod outputs_cmd;
 mod outputs_report;
 mod profile_cmd;
 mod run;
@@ -51,8 +52,12 @@ enum Command {
         #[arg(long)]
         linear: bool,
     },
-    /// List the outputs the active backend can target.
-    Outputs,
+    /// List the outputs the active backend can target, or change the
+    /// per-output settings.
+    Outputs {
+        #[command(subcommand)]
+        cmd: Option<outputs_cmd::OutputsCmd>,
+    },
     /// Turn satur8 off and release any per-frame cost.
     Off,
     /// Apply satur8, launch a game, and restore on exit. The Steam launch
@@ -112,7 +117,7 @@ fn main() -> Result<()> {
     // default so they always reach their restore path.
     if matches!(
         cli.command,
-        Command::Status | Command::Doctor | Command::Outputs | Command::Games { .. }
+        Command::Status | Command::Doctor | Command::Outputs { cmd: None } | Command::Games { .. }
     ) {
         // SAFETY: called once at startup, before any other thread exists.
         unsafe {
@@ -126,7 +131,8 @@ fn main() -> Result<()> {
             output,
         } => cmd_set(saturation, linear, output),
         Command::On { saturation, linear } => cmd_set(saturation, linear, None),
-        Command::Outputs => cmd_outputs(),
+        Command::Outputs { cmd: None } => cmd_outputs(),
+        Command::Outputs { cmd: Some(cmd) } => outputs_cmd::run(cmd),
         Command::Off => cmd_off(),
         Command::Run {
             profile,
@@ -758,6 +764,77 @@ mod tests {
                     ..
                 }
             }) if query == "sushi"
+        ));
+    }
+
+    #[test]
+    fn outputs_takes_default_and_follow() {
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "outputs"]).map(|cli| cli.command),
+            Ok(Command::Outputs { cmd: None })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "outputs", "default", "DP-2", "0.85"])
+                .map(|cli| cli.command),
+            Ok(Command::Outputs {
+                cmd: Some(outputs_cmd::OutputsCmd::Default {
+                    ref name,
+                    saturation: Some(value),
+                    unset: false,
+                })
+            }) if name == "DP-2" && value == 0.85
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "outputs", "default", "DP-2", "--unset"])
+                .map(|cli| cli.command),
+            Ok(Command::Outputs {
+                cmd: Some(outputs_cmd::OutputsCmd::Default {
+                    saturation: None,
+                    unset: true,
+                    ..
+                })
+            })
+        ));
+        for (word, mode) in [
+            ("all", outputs_cmd::FollowMode::All),
+            ("off", outputs_cmd::FollowMode::All),
+            ("focused", outputs_cmd::FollowMode::Focused),
+            ("on", outputs_cmd::FollowMode::Focused),
+        ] {
+            assert!(
+                matches!(
+                    Cli::try_parse_from(["satur8", "outputs", "follow", word])
+                        .map(|cli| cli.command),
+                    Ok(Command::Outputs {
+                        cmd: Some(outputs_cmd::OutputsCmd::Follow { mode: parsed })
+                    }) if parsed == mode
+                ),
+                "{word}"
+            );
+        }
+    }
+
+    #[test]
+    fn outputs_default_needs_a_value_or_unset_but_not_both() {
+        for args in [
+            &["satur8", "outputs", "default", "DP-2"][..],
+            &["satur8", "outputs", "default", "DP-2", "0.85", "--unset"][..],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn profile_add_takes_repeated_outputs() {
+        let cli = Cli::try_parse_from([
+            "satur8", "profile", "add", "couch", "1.3", "--exe", "hades", "--output", "HDMI-A-1",
+            "--output", "DP-2",
+        ]);
+        assert!(matches!(
+            cli.map(|cli| cli.command),
+            Ok(Command::Profile {
+                cmd: profile_cmd::ProfileCmd::Add { ref outputs, .. }
+            }) if outputs == &["HDMI-A-1", "DP-2"]
         ));
     }
 

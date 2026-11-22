@@ -277,6 +277,7 @@ Satur8 chooses the best available backend for your session. Zero per-frame cost 
 | Environment | Backend | Per-frame cost | Status |
 |---|---|---:|---|
 | KDE Plasma Wayland | KWin saturation effect | One compositor pass | Verified |
+| KDE Plasma Wayland, a different value per output | KWin saturation effect | One compositor pass | Implemented |
 | GNOME Wayland | GNOME Shell shader extension | One compositor pass | Verified |
 | X11 with NVIDIA | NV-CONTROL Digital Vibrance | Zero | Verified |
 | Hyprland | `hyprctl` shader backend | One compositor pass | Verified |
@@ -290,6 +291,8 @@ Status legend:
 
 - Verified: tested on real hardware
 - Implemented: built and behind environment detection, not yet independently verified
+
+KDE Plasma is Verified for one value on every output. A different value per output is new and is not yet in a release: it was checked on headless KWin with two virtual outputs (in pixels on KWin 6.7.3, and as the effect's reported state on KWin 6.8.2), and it has not been run on real monitors. See [Multiple monitors](#multiple-monitors).
 
 In Steam Game Mode, the focus daemon sets gamescope's look table per game, so Steam's own vibrancy and color temperature keep working on top; see [Steam Deck](#steam-deck). The gamescope-native path is a launch option that drives an already-running gamescope compositor through its Xwayland color override atoms, instead of launching a nested gamescope. While it runs, it replaces Steam's color settings.
 
@@ -338,7 +341,7 @@ Inspect the environment and backend:
 ```sh
 satur8 status       # environment, chosen backend, and current state
 satur8 doctor       # diagnose backend availability
-satur8 outputs      # list the outputs the active backend can target
+satur8 outputs      # list the outputs the active backend can target, and what it can do with them
 satur8 repair       # put back a KWin effect that fits the running KWin
 ```
 
@@ -362,6 +365,42 @@ satur8 profile path
 ```
 
 A profile needs at least one match rule: `--exe`, `--window-class`, `--steam-app-id`, or `--steam-game`. `satur8 games` lists the installed Steam games and the profile each one uses (`--json` for scripts). `--steam-game` takes a game's name, part of it, or its AppID, and stores the AppID.
+
+### Multiple monitors
+
+By default every setting applies to every output, as it always has. On KDE Plasma, Satur8 can also give each output its own value. This is implemented and checked on headless KWin with two virtual outputs (pixels on KWin 6.7.3, the effect's reported state on KWin 6.8.2); it has not been run on real monitors yet. Every other desktop applies one saturation to every output, and `satur8 outputs`, `satur8 doctor` and `satur8 status` say so when the file asks for more.
+
+Outputs are named by port, as `satur8 outputs` lists them (for example `DP-2` or `HDMI-A-1`), so a setting follows the port, not the monitor.
+
+```sh
+satur8 outputs                          # each output, its value now, and what game profiles change
+satur8 outputs default HDMI-A-1 0.85    # this output's value when no game profile is changing it
+satur8 outputs default HDMI-A-1 --unset # back to default_saturation
+satur8 outputs follow focused           # game profiles change only the output the game is on
+satur8 outputs follow all               # game profiles change every output (the default)
+satur8 profile add couch 1.3 --exe hades --output HDMI-A-1   # repeatable; `all` means every output
+```
+
+The same settings in `~/.config/satur8/profiles.toml`:
+
+```toml
+default_saturation = 1.0
+profile_outputs = "focused"      # absent means "all"
+
+[output."HDMI-A-1"]
+default_saturation = 0.85
+
+[[profile]]
+name = "couch"
+saturation = 1.3
+exe = "hades"
+outputs = ["HDMI-A-1"]
+```
+
+- With `profile_outputs = "focused"`, a profile that lists no outputs changes only the output the game window is on, and moves with the window. A window across two outputs takes one value, from the output KWin assigns it to. When the output is unknown, for example after an upgrade until the next login, the profile changes every output and the daemon logs why.
+- On KDE Plasma, an output that is not connected keeps its setting, and it applies as soon as the output is plugged in.
+- After upgrading, log out and back in once: KWin keeps the effect and the focus script it loaded at login, and until it loads the new ones Satur8 applies one value to every output.
+- A Satur8 older than this one loads a file with these settings and ignores them, but if it saves the file (any `satur8 profile` change or the desktop app) it writes it back without them.
 
 ## Development
 

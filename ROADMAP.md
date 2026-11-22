@@ -247,7 +247,12 @@ Not blocking the packaging spine; picked up as time allows.
       (AMD RX 9070, Hyprland 0.55.4): at saturation 0.0, gamma output sampled
       red as `(54,54,54)` while linear-light output sampled red as
       `(127,127,127)`, matching the expected sRGB transfer-function path.
-- [ ] Multi-monitor and per-output profiles.
+- [ ] Multi-monitor and per-output profiles. Implemented on KDE Plasma, not
+      yet released: a value per output, game profiles limited to named
+      outputs or to the output the game is on, and reports on every other
+      desktop that one value applies to every output. Checked on headless KWin
+      with two virtual outputs, in pixels on KWin 6.7.3 and as the effect's
+      reported state on KWin 6.8.2. Not yet run on real monitors.
 - [x] Steam Deck: pick a game from a list of installed Steam games instead of
       typing its AppID, on the command line: `satur8 games` lists them and
       `satur8 profile add NAME SATURATION --steam-game NAME` adds a profile by
