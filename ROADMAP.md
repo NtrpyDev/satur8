@@ -183,7 +183,9 @@ and Bazzite is Fedora-based (the live COPR work carries over).
   - [ ] NVIDIA and Intel Game Mode: check on hardware whether the look applies
         when gamescope scans a game out directly.
 - [ ] Document clearly what works and what does not on each. SteamOS is done in
-      the README's Steam Deck section (v0.4.0); Bazzite is open.
+      the README's Steam Deck section (v0.4.0). The README's Bazzite section
+      states what was checked and the known gaps; it stays open until a
+      Bazzite device test.
 
 ## v1.0: Stable on the north star
 
