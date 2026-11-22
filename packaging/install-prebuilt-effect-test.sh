@@ -114,7 +114,8 @@ fi
 [ -d "$set_dst" ] || fail "the effect set was not copied to $set_dst"
 [ "$(cd "$set_src" && ls)" = "$(cd "$set_dst" && ls)" ] || fail "the copied effect set differs from the bundled one"
 [ -f "$conf" ] || fail "60-satur8.conf was not installed"
-cmp -s "$icon" assets/icons/hicolor/256x256/apps/satur8.png || fail "the app icon was not installed at $icon"
+[ -f "$icon" ] && [ "$(sha256sum < "$icon")" = "$(sha256sum < assets/icons/hicolor/256x256/apps/satur8.png)" ] ||
+    fail "the app icon was not installed at $icon"
 
 packaging/install.sh --uninstall > /root/uninstall.log 2>&1 || fail "uninstall exited non-zero"
 for path in "$effect" "$set_dst" "$conf" "$icon" "$HOME/.local/bin/satur8"; do
