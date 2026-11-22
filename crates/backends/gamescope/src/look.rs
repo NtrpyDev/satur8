@@ -68,7 +68,7 @@ pub fn saturation_from_path(path: &str) -> Option<Saturation> {
         return None;
     }
     let milli = digits.parse::<u32>().ok()?;
-    if milli as f32 > Saturation::MAX * 1000.0 {
+    if milli > (Saturation::MAX * 1000.0) as u32 {
         return None;
     }
     Some(Saturation::new(milli as f32 / 1000.0))
