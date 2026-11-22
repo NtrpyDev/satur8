@@ -5,6 +5,10 @@
 //! session can switch modes at any time, and a backend, once selected, is
 //! never re-detected, so each apply or reset opens a short connection and
 //! re-probes when the remembered display is no longer gamescope's.
+//!
+//! A look something else had set before Satur8 took over is saved in a small
+//! file beside the tables, not in memory, because `satur8 on` and a later
+//! `satur8 off` are separate processes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,15 +16,15 @@ use std::path::{Path, PathBuf};
 use satur8_core::{Backend, BackendError, CostNote, Output, Saturation};
 
 use crate::look;
-use crate::session::{self, X11Root};
+use crate::session::{self, RootProps, X11Root, LOOK};
+
+/// The saved foreign look, in the table folder.
+const FOREIGN_FILE: &str = "foreign-look";
 
 /// The gamescope Game Mode backend.
 pub struct GamescopeBackend {
     display: String,
     dir: PathBuf,
-    /// A look something else had set before Satur8 replaced it, put back on
-    /// reset. Kept in memory only.
-    foreign: Option<String>,
 }
 
 impl GamescopeBackend {
@@ -30,7 +34,6 @@ impl GamescopeBackend {
         Some(GamescopeBackend {
             display,
             dir: look_dir()?,
-            foreign: None,
         })
     }
 
@@ -96,22 +99,59 @@ impl Backend for GamescopeBackend {
             .ok_or_else(|| apply_err(format!("{} is not valid UTF-8", path.display())))?
             .to_string();
         let mut root = self.root()?;
-        let replaced =
-            session::apply_look(&mut root, &value).map_err(|e| apply_err(format!("{e:#}")))?;
-        if replaced.is_some() {
-            self.foreign = replaced;
-        }
+        take_over(&mut root, &self.dir, &value).map_err(|e| apply_err(format!("{e:#}")))?;
         prune_tables(&self.dir, &path);
         Ok(())
     }
 
     fn reset(&mut self, _output: &Output) -> Result<(), BackendError> {
         let mut root = self.root()?;
-        session::clear_look(&mut root, self.foreign.as_deref())
-            .map_err(|e| apply_err(format!("{e:#}")))?;
-        self.foreign = None;
-        Ok(())
+        give_back(&mut root, &self.dir).map_err(|e| apply_err(format!("{e:#}")))
     }
+}
+
+/// Point the look at Satur8's table `path`. A look something else set is
+/// saved to `dir` first, so a later process can put it back. While Satur8's
+/// own table is loaded nothing is saved, so the saved value stays the look
+/// that was there before Satur8.
+fn take_over(root: &mut dyn RootProps, dir: &Path, path: &str) -> anyhow::Result<()> {
+    if let Some(foreign) = session::foreign_look(root)? {
+        save_foreign(dir, &foreign)?;
+    }
+    root.set_string(LOOK, path)
+}
+
+/// Take Satur8's table off: put the saved foreign look back, or remove the
+/// property when none was saved. A look something else set since, or a
+/// property something else removed, is left as it is. The saved value is
+/// used up either way.
+fn give_back(root: &mut dyn RootProps, dir: &Path) -> anyhow::Result<()> {
+    let saved = load_foreign(dir);
+    session::clear_look(root, saved.as_deref())?;
+    let _ = fs::remove_file(dir.join(FOREIGN_FILE));
+    Ok(())
+}
+
+fn load_foreign(dir: &Path) -> Option<String> {
+    fs::read_to_string(dir.join(FOREIGN_FILE))
+        .ok()
+        .filter(|value| !value.is_empty())
+}
+
+/// Write the saved foreign look under a temporary name and rename it, so a
+/// crash never leaves half a path behind.
+fn save_foreign(dir: &Path, value: &str) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+
+    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    let path = dir.join(FOREIGN_FILE);
+    let temporary = dir.join(format!(".{FOREIGN_FILE}.{}.tmp", std::process::id()));
+    fs::write(&temporary, value).with_context(|| format!("writing {}", temporary.display()))?;
+    if let Err(error) = fs::rename(&temporary, &path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error).with_context(|| format!("replacing {}", path.display()));
+    }
+    Ok(())
 }
 
 fn apply_err(message: String) -> BackendError {
@@ -148,5 +188,117 @@ fn prune_tables(dir: &Path, keep: &Path) {
         if ours && path != keep {
             let _ = fs::remove_file(&path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::FakeRoot;
+
+    const OURS: &str = "/home/deck/.local/state/satur8/gamescope/look-g22-s2000.cube";
+    const OURS_TOO: &str = "/home/deck/.local/state/satur8/gamescope/look-g22-s1500.cube";
+    const STEAMS: &str = "/home/deck/looks/steam.cube";
+    const OTHER: &str = "/home/deck/looks/other.cube";
+
+    /// A state folder of its own under the system temp dir, removed on drop.
+    struct StateDir(PathBuf);
+
+    impl StateDir {
+        fn new(name: &str) -> StateDir {
+            let dir = std::env::temp_dir().join(format!(
+                "satur8-gamescope-test-{}-{name}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            StateDir(dir)
+        }
+
+        fn saved(&self) -> Option<String> {
+            fs::read_to_string(self.0.join(FOREIGN_FILE)).ok()
+        }
+    }
+
+    impl Drop for StateDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn root_with(look: Option<&str>) -> FakeRoot {
+        let mut root = FakeRoot::default();
+        if let Some(look) = look {
+            root.strings.insert(LOOK.into(), look.into());
+        }
+        root
+    }
+
+    fn look_of(root: &FakeRoot) -> Option<&str> {
+        root.strings.get(LOOK).map(String::as_str)
+    }
+
+    /// `satur8 on` in one process, `satur8 off` in another: only the folder
+    /// carries anything between them.
+    #[test]
+    fn a_foreign_look_comes_back_when_a_later_process_clears() {
+        let state = StateDir::new("restore");
+        let mut root = root_with(Some(STEAMS));
+
+        take_over(&mut root, &state.0, OURS).unwrap();
+        assert_eq!(look_of(&root), Some(OURS));
+        assert_eq!(state.saved().as_deref(), Some(STEAMS));
+
+        give_back(&mut root, &state.0).unwrap();
+        assert_eq!(look_of(&root), Some(STEAMS));
+        assert_eq!(state.saved(), None);
+    }
+
+    #[test]
+    fn a_second_take_over_keeps_the_original_foreign_look() {
+        let state = StateDir::new("twice");
+        let mut root = root_with(Some(STEAMS));
+
+        take_over(&mut root, &state.0, OURS).unwrap();
+        take_over(&mut root, &state.0, OURS_TOO).unwrap();
+        assert_eq!(look_of(&root), Some(OURS_TOO));
+        assert_eq!(state.saved().as_deref(), Some(STEAMS));
+
+        give_back(&mut root, &state.0).unwrap();
+        assert_eq!(look_of(&root), Some(STEAMS));
+    }
+
+    #[test]
+    fn clearing_with_nothing_saved_removes_the_property() {
+        let state = StateDir::new("nothing-saved");
+        let mut root = root_with(None);
+
+        take_over(&mut root, &state.0, OURS).unwrap();
+        assert_eq!(state.saved(), None);
+
+        give_back(&mut root, &state.0).unwrap();
+        assert_eq!(look_of(&root), None);
+    }
+
+    #[test]
+    fn a_look_changed_by_something_else_meanwhile_is_left_and_the_file_dropped() {
+        let state = StateDir::new("changed");
+        let mut root = root_with(Some(STEAMS));
+
+        take_over(&mut root, &state.0, OURS).unwrap();
+        root.strings.insert(LOOK.into(), OTHER.into());
+
+        give_back(&mut root, &state.0).unwrap();
+        assert_eq!(look_of(&root), Some(OTHER));
+        assert_eq!(state.saved(), None);
+    }
+
+    #[test]
+    fn a_satur8_table_is_never_saved_as_foreign() {
+        let state = StateDir::new("ours");
+        let mut root = root_with(Some(OURS_TOO));
+
+        take_over(&mut root, &state.0, OURS).unwrap();
+        assert_eq!(state.saved(), None);
+        assert!(!state.0.join(FOREIGN_FILE).exists());
     }
 }

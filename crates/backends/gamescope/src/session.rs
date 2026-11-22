@@ -138,6 +138,14 @@ fn classify_look(value: Option<String>) -> Look {
     }
 }
 
+/// The current look when something other than Satur8 set it.
+pub fn foreign_look(props: &dyn RootProps) -> Result<Option<String>> {
+    Ok(match classify_look(props.string(LOOK)?) {
+        Look::Foreign(value) => Some(value),
+        Look::None | Look::Satur8(_) => None,
+    })
+}
+
 /// Point the look at `path`. Returns the value it replaced when that was
 /// someone else's, so the caller can put it back later.
 pub fn apply_look(props: &mut dyn RootProps, path: &str) -> Result<Option<String>> {
