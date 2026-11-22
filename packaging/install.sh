@@ -369,6 +369,9 @@ uninstall_all() {
     rm -f "$bindir/satur8" "$bindir/satur8-daemon" "$bindir/satur8-tray" "$bindir/satur8-gui"
     rm -f "$qt_plugin_user/satur8.so" "$env_dir/60-satur8.conf"
     rm -rf "$kwin_script_dir" "$gnome_ext_dir" "$effect_src_dir" "$state_dir"
+    # The effect source was the only thing in this folder; rmdir keeps it if
+    # anything else is there.
+    rmdir "$data/satur8" 2>/dev/null || true
     rm -f "$unit_dir/satur8-daemon.service" "$data/applications/satur8.desktop"
     if [ -e "$qt_plugin_sys/satur8.so" ]; then
         echo "    (system-installed effect at $qt_plugin_sys left alone; remove with sudo if needed)"
