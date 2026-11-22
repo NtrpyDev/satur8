@@ -130,19 +130,32 @@ pub fn profile_for(profiles: &Profiles, app_id: u32) -> Option<usize> {
 }
 
 /// The profile a program already has: the one the background service applies
-/// to this executable, else one with the name a new profile for it would
-/// get. The match by executable is `Profiles::match_exe` itself, the rule the
-/// service uses (the `.exe` and `.x86_64` endings and letter case do not
-/// matter, and a profile that is on is found ahead of one that is off), so
-/// the list never names or opens a profile other than the one applied.
-pub fn profile_for_program(profiles: &Profiles, exe: &str) -> Option<usize> {
+/// to it, else one with the name a new profile for it would get.
+///
+/// The service matches a window by its executable (`Profiles::match_exe`:
+/// the `.exe` and `.x86_64` endings and letter case do not matter) and by
+/// the Steam AppID its process carries, and a profile that is on wins over
+/// one that is off, whichever way found it. The same here, so the list never
+/// names or opens a profile other than the one applied, and never offers to
+/// create a second profile for an AppID that already has one. `app_id` is
+/// the AppID of a program Steam started that is not an installed Steam game:
+/// a non-Steam shortcut.
+pub fn profile_for_program(profiles: &Profiles, exe: &str, app_id: Option<u32>) -> Option<usize> {
     let wanted = program_name(exe).to_lowercase();
-    let applied = profiles.match_exe(exe).and_then(|found| {
+    let by_exe = profiles.match_exe(exe).and_then(|found| {
         profiles
             .profiles
             .iter()
             .position(|profile| std::ptr::eq(profile, found))
     });
+    let by_app_id = app_id.and_then(|app_id| profile_for(profiles, app_id));
+    let is_on = |index: &usize| profiles.profiles[*index].enabled;
+    let applied = [by_exe, by_app_id]
+        .into_iter()
+        .flatten()
+        .find(is_on)
+        .or(by_exe)
+        .or(by_app_id);
     applied.or_else(|| {
         profiles
             .profiles
@@ -334,7 +347,8 @@ pub fn rows(
         .collect();
     for proc in running_programs(running, games, query) {
         let name = program_name(&proc.exe).to_string();
-        let profile = profile_for_program(profiles, &proc.exe).map(|i| &profiles.profiles[i]);
+        let profile =
+            profile_for_program(profiles, &proc.exe, proc.app_id).map(|i| &profiles.profiles[i]);
         rows.push(Row {
             detail: detail(&name, true, profile),
             has_profile: profile.is_some(),
@@ -456,7 +470,7 @@ pub fn pick(profiles: &Profiles, row: &Row, saturation: f32) -> Pick {
             ))
         }
         Target::Program { exe, app_id } => {
-            if let Some(index) = profile_for_program(profiles, exe) {
+            if let Some(index) = profile_for_program(profiles, exe, *app_id) {
                 return Pick::Open(index);
             }
             Pick::Create(new_profile(
@@ -1155,7 +1169,10 @@ mod tests {
         // Picking it again opens it; its saturation is left alone.
         profiles.profiles[0].saturation = 1.9;
         assert_eq!(pick(&profiles, &row, 0.5), Pick::Open(0));
-        assert_eq!(profile_for_program(&profiles, "escapefromtarkov"), Some(0));
+        assert_eq!(
+            profile_for_program(&profiles, "escapefromtarkov", None),
+            Some(0)
+        );
     }
 
     /// Two profiles for one program, the earlier one off: the background
@@ -1188,7 +1205,7 @@ mod tests {
             .clone();
         assert_eq!(applied, "tarkov");
         assert_eq!(
-            profile_for_program(&profiles, "EscapeFromTarkov.exe"),
+            profile_for_program(&profiles, "EscapeFromTarkov.exe", None),
             Some(1)
         );
 
@@ -1206,10 +1223,90 @@ mod tests {
 
         // With both off, the first is the one the service uses, and so here.
         profiles.profiles[1].enabled = false;
-        assert_eq!(profile_for_program(&profiles, "escapefromtarkov"), Some(0));
+        assert_eq!(
+            profile_for_program(&profiles, "escapefromtarkov", None),
+            Some(0)
+        );
         // With only the earlier one on, it is that one.
         profiles.profiles[0].enabled = true;
-        assert_eq!(profile_for_program(&profiles, "escapefromtarkov"), Some(0));
+        assert_eq!(
+            profile_for_program(&profiles, "escapefromtarkov", None),
+            Some(0)
+        );
+    }
+
+    /// A non-Steam shortcut running on a desktop: Steam started it, so its
+    /// process carries an AppID, but no installed-game manifest has that
+    /// AppID, so the list shows it as a program. A profile that already has
+    /// that AppID is its profile; picking the row must open it, not make a
+    /// second profile with the same AppID.
+    #[test]
+    fn a_running_shortcut_with_a_profile_by_app_id_is_not_added_twice() {
+        const SHORTCUT: u32 = 3_367_991_943;
+        let mut profiles = Profiles {
+            profiles: vec![profile("Hades (GOG)", 1.6, true, Some(SHORTCUT))],
+            ..Profiles::default()
+        };
+        let running = Running::Procs(vec![Proc {
+            exe: "Hades.exe".into(),
+            app_id: Some(SHORTCUT),
+            is_game: true,
+        }]);
+        let listed = rows(&Library::Games(library()), &profiles, &running, None, "");
+        let row = listed
+            .iter()
+            .find(|row| row.name == "Hades")
+            .expect("the shortcut is listed as a program");
+        assert_eq!(
+            row.target,
+            Target::Program {
+                exe: "Hades.exe".into(),
+                app_id: Some(SHORTCUT)
+            }
+        );
+        assert!(row.has_profile);
+        assert!(row.detail.contains("Hades (GOG)"), "{}", row.detail);
+
+        let choice = pick(&profiles, row, 1.4);
+        assert_eq!(choice, Pick::Open(0));
+        assert_eq!(apply(&mut profiles, choice), (0, false));
+        assert_eq!(profiles.profiles.len(), 1);
+        assert_eq!(
+            profiles
+                .profiles
+                .iter()
+                .filter(|p| p.match_rule.steam_app_id == Some(SHORTCUT))
+                .count(),
+            1
+        );
+    }
+
+    /// Found by executable and found by AppID: the one that is on is the one
+    /// the service applies, whichever way finds it.
+    #[test]
+    fn a_shortcuts_profile_that_is_on_wins_over_one_that_is_off() {
+        const SHORTCUT: u32 = 3_367_991_943;
+        let mut by_exe = profile("hades", 1.2, false, None);
+        by_exe.match_rule.exe = Some("Hades.exe".into());
+        let profiles = Profiles {
+            profiles: vec![by_exe, profile("Hades (GOG)", 1.6, true, Some(SHORTCUT))],
+            ..Profiles::default()
+        };
+        assert_eq!(
+            profile_for_program(&profiles, "Hades.exe", Some(SHORTCUT)),
+            Some(1)
+        );
+        // Without the AppID only the executable can find one.
+        assert_eq!(profile_for_program(&profiles, "Hades.exe", None), Some(0));
+        // Both on: the executable's, which the service tries first.
+        let mut both_on = profiles.clone();
+        both_on.profiles[0].enabled = true;
+        assert_eq!(
+            profile_for_program(&both_on, "Hades.exe", Some(SHORTCUT)),
+            Some(0)
+        );
+        // An AppID no profile has changes nothing.
+        assert_eq!(profile_for_program(&profiles, "Other.exe", Some(42)), None);
     }
 
     #[test]
