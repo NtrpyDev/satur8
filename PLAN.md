@@ -140,8 +140,10 @@ compositor. We ship our own minimal, single-purpose **saturation** effect
   can use instead of a shader - if so, KDE moves to zero-cost too. Track this.
 
 **A different value per output (since v0.5.0).** Implemented; checked on
-headless KWin with two virtual outputs (pixels on 6.7.3, the effect's
-reported state on 6.8.2); not yet run on real monitors.
+headless KWin with two virtual outputs and software rendering (pixels on
+6.7.3, 6.8.2 and 6.8.3), and on a real KWin 6.8.3 session with three monitors
+the focus script reported the window's monitor as it moved. A different value
+on each of several real monitors has not been seen yet.
 
 - *File.* `profile_outputs` (`"all"`, the default, or `"focused"`) and
   `[output."NAME"]` tables with their own `default_saturation`, written only
