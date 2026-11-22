@@ -175,6 +175,10 @@ install -m644 "$repo/packaging/60-satur8.conf" "$stage/packaging/60-satur8.conf"
 cp -R "$repo/assets/kwin-script" "$stage/assets/kwin-script"
 cp -R "$repo/assets/gnome-extension" "$stage/assets/gnome-extension"
 cp -R "$repo/assets/gamescope" "$stage/assets/gamescope"
+# The app icon (256x256), in the freedesktop hicolor layout the installer
+# copies from; the archive carries no crates folder.
+install -Dm644 "$repo/crates/satur8-gui/ui/icon.png" \
+    "$stage/assets/icons/hicolor/256x256/apps/satur8.png"
 install -m644 "$repo/assets/kwin-effect/CMakeLists.txt" "$stage/assets/kwin-effect/CMakeLists.txt"
 install -m644 "$repo/assets/kwin-effect/metadata.json" "$stage/assets/kwin-effect/metadata.json"
 install -m644 "$repo/assets/kwin-effect/satur8_effect.cpp" "$stage/assets/kwin-effect/satur8_effect.cpp"
