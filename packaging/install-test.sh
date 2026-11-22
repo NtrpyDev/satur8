@@ -7,7 +7,10 @@
 #    SATUR8_QT_LIB_DIR). Set SATUR8_REAL_EFFECT_DIR to a folder of
 #    <key>/satur8.so to use real built effects in place of the fakes with the
 #    same key.
-# 2. --check-effect against the real kwin_wayland on this machine: accepts an
+# 2. The effect set's runtime floors: build-kwin-effect.sh --merge against fake
+#    effects whose build-info.txt records needs within, above, or missing
+#    against the floors in abi-floors.sh.
+# 3. --check-effect against the real kwin_wayland on this machine: accepts an
 #    effect for the running KWin and rejects one for another version.
 #
 # Scratch files go under $TMPDIR (default /tmp).
@@ -126,6 +129,50 @@ pick_case "SteamOS, KWin 6.8.4: folder steamos-6.8.4 embeds 6.8.5, never picked"
 pick_case "Arch, KWin 6.8.4: the mislabeled entry is not used across systems either" \
     "$arch" 6.8.4 libQt6Core.so.6.12.0 "skip:*KWin 6.8.4*" ""
 
+# ------------------------------------------- effect set: runtime floors
+
+# build-kwin-effect.sh --merge is how an effect enters a release set. It must
+# refuse one whose build-info.txt does not record its C and C++ runtime needs
+# (ABI_GLIBC=, ABI_GLIBCXX=, ABI_CXXABI=) or records one above the floors in
+# abi-floors.sh, so an old or hand-made effect cannot slip into a release.
+merge_case() { # merge_case <name> <build-info lines> <keep|refuse> <glob the refusal must match>
+    local name="$1" info="$2" want="$3" why="$4"
+    row_number=$((row_number + 1))
+    local row="$ROOT/merge$row_number" out rc=0
+    fake_effect "$row/in/steamos-6.7.3/satur8.so" 6.7.3 11
+    printf 'Satur8 KWin effect steamos-6.7.3\n%s\n' "$info" >"$row/in/steamos-6.7.3/build-info.txt"
+    out="$(bash "$HERE/build-kwin-effect.sh" --merge "$row/out" "$row/in" 2>&1)" || rc=$?
+    local ok=no
+    if [ "$want" = keep ]; then
+        [ "$rc" -eq 0 ] && [ -f "$row/out/steamos-6.7.3/satur8.so" ] && ok=yes
+    else
+        # shellcheck disable=SC2053 # the expectation is a glob on purpose
+        [ "$rc" -ne 0 ] && [ ! -e "$row/out/steamos-6.7.3" ] && [[ "$out" == $why ]] && ok=yes
+    fi
+    if [ "$ok" = yes ]; then
+        echo "  ok   $name"
+    else
+        echo "  FAIL $name"
+        echo "       wanted: $want${why:+ / $why}"
+        fails=$((fails + 1))
+    fi
+    printf '%s\n' "$out" | sed 's/^/       > /'
+}
+
+echo "== build-kwin-effect.sh --merge: runtime floors"
+merge_case "needs within the floors (the SteamOS effects' real values): kept" \
+    $'ABI_GLIBC=2.4\nABI_GLIBCXX=3.4\nABI_CXXABI=1.3.9' keep ""
+merge_case "no C++ runtime needed at all: kept" \
+    $'ABI_GLIBC=2.2.5\nABI_GLIBCXX=none\nABI_CXXABI=none' keep ""
+merge_case "no ABI lines (an effect built before the gate): refused" \
+    "Plugin ID:  org.kde.kwin.EffectPluginFactory6.7.3" refuse "*no ABI_GLIBC line*"
+merge_case "GLIBC above the floor: refused, naming effect, version and floor" \
+    $'ABI_GLIBC=2.36\nABI_GLIBCXX=3.4\nABI_CXXABI=1.3.9' refuse "*steamos-6.7.3 needs GLIBC_2.36, above the floor GLIBC_2.35*"
+merge_case "GLIBCXX above the floor: refused" \
+    $'ABI_GLIBC=2.4\nABI_GLIBCXX=3.4.31\nABI_CXXABI=1.3.9' refuse "*needs GLIBCXX_3.4.31, above the floor GLIBCXX_3.4.30*"
+merge_case "CXXABI above the floor: refused" \
+    $'ABI_GLIBC=2.4\nABI_GLIBCXX=3.4\nABI_CXXABI=1.3.14' refuse "*needs CXXABI_1.3.14, above the floor CXXABI_1.3.13*"
+
 # ------------------------------------------- --check-effect against real KWin
 
 echo "== install.sh --check-effect"
@@ -142,7 +189,7 @@ fi
 echo "PASS: installer accepts only the current KWin effect ABI"
 
 if [ "$fails" -ne 0 ]; then
-    echo "FAILED: $fails effect picker case(s); files in $ROOT" >&2
+    echo "FAILED: $fails case(s); files in $ROOT" >&2
     exit 1
 fi
 echo "PASS: the effect picker chose as expected for every fake system"
