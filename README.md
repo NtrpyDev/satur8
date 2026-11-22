@@ -156,6 +156,8 @@ packaging/install.sh --enable-daemon
 
 Without `--enable-daemon`, the installer prints the command that turns the service on. Everything is installed in your home folder, so it survives SteamOS updates. `--system` is refused on SteamOS. On SteamOS 3.9 the installer prints `Using bundled KWin effect for ABI 6.7.3 (steamos-6.7.3)`; that effect is what Desktop Mode uses. If the installer says the KWin effect was not installed, Game Mode still works without it.
 
+Coming: a [Decky Loader](https://decky.xyz) plugin that installs, updates and opens Satur8 from the Quick Access Menu, without leaving Game Mode. Its source is in [decky-plugin/](decky-plugin/); it is not published yet and has not been run on a Deck.
+
 The commands are installed to `~/.local/bin`. An SSH login on SteamOS does not have that folder on its PATH, so over SSH a plain `satur8` gives "command not found"; the installer prints a hint about this. The examples below use the full path, `~/.local/bin/satur8`, which works everywhere. (Konsole in Desktop Mode was not checked.)
 
 ### The app in Game Mode
