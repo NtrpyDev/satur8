@@ -3,6 +3,52 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## v0.4.0 - 2026-11-22
+
+Automatic per-game saturation in Steam Game Mode, tested on a Steam Deck.
+
+- Per-game profiles now switch automatically in Steam Game Mode. With the
+  background service running, a game's profile loads when the game takes focus
+  and is removed when you leave or close the game. Opening Steam's overlay menu
+  over a game keeps the game's profile.
+- The Steam home screen and games without a profile get `default_saturation`
+  from `profiles.toml`. At 1.0, the default, Satur8 loads nothing there.
+- Profiles match a game by Steam AppID (`satur8 profile add NAME SATURATION
+  --steam-app-id N`) or by executable, including the Windows executable name of
+  a Proton game such as `Sushiamo.exe`.
+- Satur8 applies the color through gamescope's look table, so Steam's own Color
+  Vibrancy and Color Temperature keep working on top of it. Satur8 never
+  changes them.
+- If the background service is killed, systemd restarts it within 5 seconds and
+  the game's profile stays loaded. Stopping the service puts
+  `default_saturation` back; `satur8 off` removes Satur8's table at any value.
+- `satur8 on`, `satur8 set` and `satur8 off` work in Game Mode, including over
+  SSH.
+- `satur8 doctor` and `satur8 status` recognize Steam Game Mode. Doctor reports
+  "Steam Game Mode (gamescope on :0)", the loaded table and its saturation, the
+  focused app, whether the background service is running, and Steam's own color
+  settings, instead of KWin and DRM CTM sections that do not apply there. On
+  desktops their output is unchanged.
+- Installer: `packaging/install.sh --enable-daemon` turns on the background
+  service; without it the installer prints the command. `--system` is refused
+  on SteamOS. Everything is installed in your home folder, so it survives
+  SteamOS updates. On a machine with a Game Mode session where the KWin effect
+  cannot be installed, the installer now says Game Mode works without it, and
+  uninstall runs `satur8 off` before it removes the commands.
+- Unchanged: the `satur8 run --via gamescope-native` launch option works as
+  before. It still replaces Steam's color settings while the game runs, and it
+  wins over a profile's table until the game ends. Use the background service
+  or the launch option for a game, not both.
+- Tested on a Steam Deck OLED with SteamOS 3.9.5 and gamescope 3.16.30.1 in Game
+  Mode, with a camera pointed at the screen. Saturation from grayscale to 2x
+  responds in order.
+- Not tested yet: HDR games (by gamescope's source the look table does not
+  change HDR content), an external display, the desktop app on the Deck, the
+  Deck's Desktop Mode, Bazzite and other systems that run a gamescope session,
+  and gamescope versions other than 3.16.30.1.
+- The README has a new Steam Deck section, and ROADMAP.md and PLAN.md describe
+  the Game Mode support and the Deck work that remains.
+
 ## v0.3.6 - 2026-11-22
 
 Redesigned desktop app with a new Status tab, plus documentation fixes.
