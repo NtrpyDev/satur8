@@ -8,9 +8,9 @@ Status: v0.4.1 is the current release. KDE Plasma Wayland (including the
 Steam Deck's Desktop Mode on SteamOS 3.9.5 with KWin 6.7.3), GNOME Wayland,
 Hyprland, NVIDIA X11 NV-CONTROL, automatic per-game switching in Steam Game Mode
 (verified on a Steam Deck OLED with SteamOS 3.9.5 and gamescope 3.16.30.1),
-gamescope-native, and the nested gamescope fallback are verified. DRM CTM
-remains implemented with a passing read-only probe, while runtime apply/off
-verification is deferred. The release tarball's programs need glibc 2.35 or
+gamescope-native, and the nested gamescope fallback are verified. DRM CTM is
+verified too: on a Steam Deck OLED's AMD GPU with no display server running,
+apply, per-CRTC apply and off changed the picture as expected. The release tarball's programs need glibc 2.35 or
 newer, and it carries prebuilt KWin effects built in each target system's own
 packages (B1); `satur8 repair` installs the matching one at login, and rebuilds
 the effect only where build tools exist. Distribution is a Linux x86_64
