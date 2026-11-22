@@ -33,13 +33,15 @@ cmd_install() {
     if [ -r "$pass" ]; then
         sudo -S -v < "$pass" 2>/dev/null
     fi
-    sudo sh -c "mkdir -p '$sys_dir' && cp '$so' '$sys_dir/satur8.so' && chmod 0755 '$sys_dir/satur8.so'"
+    # install writes a new file: overwriting a loaded effect in place crashed KWin.
+    sudo sh -c "mkdir -p '$sys_dir' && install -m755 '$so' '$sys_dir/satur8.so'"
     echo "installed -> $sys_dir"
 }
 
 cmd_install_user() {
     mkdir -p "$user_dir"
-    cp "$so" "$user_dir/satur8.so"
+    # install writes a new file: overwriting a loaded effect in place crashed KWin.
+    install -m755 "$so" "$user_dir/satur8.so"
     echo "installed -> $user_dir (add this dir's root to QT_PLUGIN_PATH and re-login)"
 }
 
