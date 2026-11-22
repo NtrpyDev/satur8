@@ -4,7 +4,12 @@ name: release
 # the GitHub release for that tag. The source archive is the trust anchor: it is
 # deterministic and is what the Arch (PKGBUILD) and Fedora (spec) packaging fetch
 # and checksum. The Linux binary tarball is the convenience download the website
-# serves.
+# serves, built from portable parts by build-tarball.yml.
+#
+# A run started by hand with dry_run set builds and tests everything and
+# publishes nothing: every step that attaches files to a release, and the
+# COPR build, is skipped by an `if:` on that input. That is how the pipeline
+# is tested from a branch. For a dry run, `tag` may name a branch.
 
 on:
   push:
@@ -15,9 +20,14 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and publish, for example v0.3.6"
+        description: "Existing tag to build and publish, for example v0.3.6 (a branch is fine for a dry run)"
         required: true
         type: string
+      dry_run:
+        description: "Build and test only: attach nothing to any release and queue no COPR build"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -46,6 +56,7 @@ jobs:
           cat target/dist/release-notes.md
 
       - name: Attach to release
+        if: ${{ !inputs.dry_run }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
@@ -57,29 +68,30 @@ jobs:
 
   linux-x86_64:
     name: linux-x86_64 tarball
-    # Runs after source-archive so the release already has its title and notes
+    # Builds and tests the tarball; publishes nothing.
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-tarball.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+
+  linux-x86_64-attach:
+    name: linux-x86_64 tarball attach
+    # After source-archive, so the release already has its title and notes
     # set; this job only attaches the binary tarball and leaves the body intact.
-    needs: source-archive
+    needs: [source-archive, linux-x86_64]
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v8
         with:
-          ref: ${{ env.TAG }}
+          name: ${{ needs.linux-x86_64.outputs.artifact }}
+          path: target/dist
 
-      - name: Build release tarball and checksum
+      - name: Check the tarball against its checksum
         run: |
-          docker run --rm \
-            -e HOST_UID="$(id -u)" \
-            -e HOST_GID="$(id -g)" \
-            -v "$PWD:/work" \
-            -w /work \
-            fedora:latest \
-            bash -lc '
-              dnf -y install dnf-plugins-core rpm-build git tar gzip >/tmp/dnf-base.log &&
-              dnf -y builddep packaging/satur8.spec >/tmp/dnf-builddep.log &&
-              bash packaging/release-tarball.sh &&
-              chown -R "$HOST_UID:$HOST_GID" target
-            '
+          cd target/dist
+          sha256sum -c satur8-v*-linux-x86_64.tar.gz.sha256
 
       # A copy under a name with no version in it, so the website's download
       # button can point at "the latest release" and never needs redeploying.
@@ -103,6 +115,7 @@ jobs:
     name: Fedora COPR build
     # After the source archive exists on the release, since the spec downloads it.
     needs: source-archive
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     env:
       COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
