@@ -17,6 +17,11 @@
 //! this correct in the hours between a KWin package update and the next login:
 //! the old compositor is still running and still accepts the old effect, so
 //! nothing is touched until the new compositor actually starts.
+//!
+//! Before building, it looks in the set of prebuilt effects that came with
+//! Satur8 (the installer copies it to `~/.local/share/satur8/kwin-effects`),
+//! so a system without build tools, such as SteamOS, is repaired too. Nothing
+//! here touches the network.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -40,6 +45,17 @@ const OSTREE_BOOTED: &str = "/run/ostree-booted";
 /// Version of the Satur8 effect source this binary ships with. A per-user
 /// build made from an older source is treated as stale.
 const SOURCE_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Below the user data dir: the installed set of prebuilt effects, one
+/// `<family>-<kwin>/satur8.so` per entry (packaging/install.sh).
+const STORE_SUBDIR: &str = "satur8/kwin-effects";
+const OS_RELEASE_PATHS: [&str; 2] = ["/etc/os-release", "/usr/lib/os-release"];
+/// Where `libQt6Core.so.6.x.y` is looked for, in order: Fedora, then Arch and
+/// SteamOS, then Debian and Ubuntu. The first folder that has one decides.
+const QT_LIB_DIRS: [&str; 3] = ["/usr/lib64", "/usr/lib", "/usr/lib/x86_64-linux-gnu"];
+const QT_CORE_PREFIX: &str = "libQt6Core.so.6.";
+/// Qt 6 defines one symbol version per minor release, such as `Qt_6.11`. A
+/// plugin that requires one cannot be loaded by an older Qt.
+const QT_MINOR_MARKER: &[u8] = b"Qt_6.";
 
 /// What a repair run found or did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +69,15 @@ pub enum RepairOutcome {
     /// An effect matching the installed KWin is in place, but the running
     /// compositor will only pick it up at the next login.
     PendingLogin { kwin: String, rebuilt: bool },
+    /// The effect `key` from the installed set was put in place. `ready` is
+    /// whether the running KWin accepts it now, else it needs a new login;
+    /// `other_system` is whether it was built for another system family.
+    InstalledFromSet {
+        kwin: String,
+        key: String,
+        other_system: bool,
+        ready: bool,
+    },
 }
 
 impl RepairOutcome {
@@ -78,8 +103,161 @@ impl RepairOutcome {
             } => format!(
                 "the KWin effect is already built for KWin {kwin}; log out and back in once so KWin picks it up"
             ),
+            RepairOutcome::InstalledFromSet {
+                kwin,
+                key,
+                other_system,
+                ready,
+            } => {
+                let built_for = if *other_system {
+                    format!(
+                        " (built for {}, another system with the same KWin)",
+                        key_family(key)
+                    )
+                } else {
+                    String::new()
+                };
+                let next = if *ready {
+                    "it is ready to use"
+                } else {
+                    "log out and back in once so KWin picks it up"
+                };
+                format!(
+                    "installed the KWin effect for KWin {kwin} from the set that came with Satur8{built_for}; {next}"
+                )
+            }
         }
     }
+}
+
+/// The kind of system, as far as prebuilt effects go. Effects are built per
+/// family, and the family is the first half of a set key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Family {
+    /// SteamOS (`ID=steamos`).
+    SteamOs,
+    /// Fedora or a system built from it, such as Bazzite, with its release.
+    Fedora(u32),
+    /// Anything else. No effects are built for it, so only another family's
+    /// effect can be used, through the guarded fallback.
+    Other,
+}
+
+impl Family {
+    /// The family half of a set key, `steamos` or `fedora45`; `None` for
+    /// [`Family::Other`].
+    pub fn key_prefix(&self) -> Option<String> {
+        match self {
+            Family::SteamOs => Some("steamos".into()),
+            Family::Fedora(release) => Some(format!("fedora{release}")),
+            Family::Other => None,
+        }
+    }
+}
+
+/// Read the family from os-release text: `ID=steamos` is SteamOS; `ID=fedora`,
+/// or an `ID_LIKE` that lists fedora, with a numeric `VERSION_ID` is Fedora.
+pub fn family_from_os_release(text: &str) -> Family {
+    let field = |key: &str| -> Option<String> {
+        text.lines().find_map(|line| {
+            let value = line.trim().strip_prefix(key)?.strip_prefix('=')?;
+            Some(
+                value
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string(),
+            )
+        })
+    };
+    let id = field("ID").unwrap_or_default();
+    if id == "steamos" {
+        return Family::SteamOs;
+    }
+    let like_fedora =
+        field("ID_LIKE").is_some_and(|like| like.split_whitespace().any(|entry| entry == "fedora"));
+    if id == "fedora" || like_fedora {
+        if let Some(release) = field("VERSION_ID").and_then(|v| v.parse::<u32>().ok()) {
+            return Family::Fedora(release);
+        }
+    }
+    Family::Other
+}
+
+/// Split a set key into family and KWin version: `fedora45-6.8.3` gives
+/// `("fedora45", "6.8.3")`. `None` when the key is not of that form.
+pub fn split_key(key: &str) -> Option<(&str, &str)> {
+    let (family, kwin) = key.rsplit_once('-')?;
+    let family_ok = family.starts_with(|c: char| c.is_ascii_lowercase())
+        && family
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    let kwin_ok = kwin.contains('.')
+        && kwin
+            .split('.')
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()));
+    (family_ok && kwin_ok).then_some((family, kwin))
+}
+
+fn key_family(key: &str) -> &str {
+    split_key(key).map_or(key, |(family, _)| family)
+}
+
+/// One effect in the installed set, as read from `<key>/satur8.so`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetEntry {
+    /// The folder name, `<family>-<kwin>`, such as `steamos-6.7.3`.
+    pub key: String,
+    /// The KWin version in the plugin's embedded ID.
+    pub abi: Option<String>,
+    /// The highest Qt 6 minor version the plugin requires.
+    pub qt_minor: Option<u32>,
+}
+
+/// The set entry chosen for this system.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetPick {
+    /// The entry's folder name.
+    pub key: String,
+    /// It was built for another family with the same KWin, and is used only
+    /// because the installed Qt is at least as new as the one it needs.
+    pub other_system: bool,
+}
+
+/// Choose the set entry for this system and KWin version: the one built for
+/// this family; else another family's one whose Qt requirement is not above
+/// `installed_qt`. Entries whose embedded ID disagrees with their folder name
+/// are never chosen. Ties go to the first key in sorted order.
+pub fn pick_from_set(
+    entries: &[SetEntry],
+    family: &Family,
+    kwin: &str,
+    installed_qt: Option<u32>,
+) -> Option<SetPick> {
+    let mut usable: Vec<&SetEntry> = entries
+        .iter()
+        .filter(|entry| {
+            split_key(&entry.key).is_some_and(|(_, key_kwin)| key_kwin == kwin)
+                && entry.abi.as_deref() == Some(kwin)
+        })
+        .collect();
+    usable.sort_by(|a, b| a.key.cmp(&b.key));
+    if let Some(own) = family.key_prefix() {
+        if let Some(entry) = usable.iter().find(|entry| key_family(&entry.key) == own) {
+            return Some(SetPick {
+                key: entry.key.clone(),
+                other_system: false,
+            });
+        }
+    }
+    let qt = installed_qt?;
+    usable
+        .iter()
+        .find(|entry| entry.qt_minor.is_some_and(|needed| needed <= qt))
+        .map(|entry| SetPick {
+            key: entry.key.clone(),
+            other_system: true,
+        })
 }
 
 /// The facts a repair decision is made from.
@@ -97,10 +275,18 @@ pub struct EffectState {
     pub user_source_current: bool,
     /// Whether the running KWin says it can load the effect.
     pub supported: bool,
+    /// The installed set's effect for the installed KWin, if it has one.
+    pub set_match: Option<SetPick>,
+    /// The installed set entry the per-user effect is an exact copy of.
+    pub user_from_set: Option<String>,
+    /// Whether the effect source, cmake, a C++ compiler and the KWin
+    /// development headers are all present, so a local build can run.
+    pub can_build: bool,
 }
 
+/// What a repair does next, as decided by [`decide`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Step {
+pub enum Step {
     /// Nothing to do.
     Healthy,
     /// The per-user copy is redundant or stale next to a good system copy;
@@ -108,12 +294,20 @@ enum Step {
     DropUserCopy,
     /// A matching effect is installed; only a new login will load it.
     WaitForLogin,
+    /// Copy the matching effect from the installed set into the per-user
+    /// directory.
+    InstallFromSet,
     /// Build the effect for the installed KWin into the per-user directory.
     Build,
+    /// The set has no effect for this KWin and nothing here can build one.
+    CannotRepair,
 }
 
 /// Pure decision: given what is installed and what KWin says, what to do next.
-fn decide(state: &EffectState) -> Step {
+/// When a new effect is needed: the set's effect built for this system, then
+/// a local build, then the set's effect built for another system, else
+/// nothing can be done here.
+pub fn decide(state: &EffectState) -> Step {
     let matches_headers =
         |abi: &Option<String>| abi.is_some() && state.headers.is_some() && *abi == state.headers;
     let system_ok = matches_headers(&state.system);
@@ -144,7 +338,42 @@ fn decide(state: &EffectState) -> Step {
     if user_ok {
         return Step::WaitForLogin;
     }
-    Step::Build
+    match &state.set_match {
+        Some(pick) if !pick.other_system => Step::InstallFromSet,
+        _ if state.can_build => Step::Build,
+        Some(_) => Step::InstallFromSet,
+        None => Step::CannotRepair,
+    }
+}
+
+/// The highest `Qt_6.x` symbol version a plugin requires, as the minor `x`.
+/// A plain `Qt_6` names no minor version and is ignored.
+pub fn qt_minor_in_plugin(bytes: &[u8]) -> Option<u32> {
+    let mut highest: Option<u32> = None;
+    let mut from = 0;
+    while let Some(found) = find(&bytes[from..], QT_MINOR_MARKER) {
+        let start = from + found + QT_MINOR_MARKER.len();
+        let digits: String = bytes[start..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .map(|b| *b as char)
+            .collect();
+        if let Ok(minor) = digits.parse::<u32>() {
+            highest = highest.max(Some(minor));
+        }
+        from = start;
+    }
+    highest
+}
+
+/// The Qt minor version in a Qt core library file name:
+/// `libQt6Core.so.6.11.1` gives 11.
+pub fn qt_minor_in_lib_name(name: &str) -> Option<u32> {
+    name.strip_prefix(QT_CORE_PREFIX)?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
 }
 
 /// Extract the KWin version a built plugin targets from its bytes.
@@ -219,8 +448,114 @@ fn install_advice_for(ostree: bool) -> &'static str {
     }
 }
 
+/// The error when the set has no effect for `kwin` and nothing here can build
+/// one (`blocker` says what is missing). An image-based system (SteamOS, or
+/// `ostree`) is never told to install build tools.
+fn cannot_repair_message(kwin: &str, family: &Family, ostree: bool, blocker: &str) -> String {
+    let base = format!(
+        "this Satur8 has no KWin effect for KWin {kwin}, and this system cannot build one ({blocker})."
+    );
+    let image_based = ostree || *family == Family::SteamOs;
+    let published = family.key_prefix().is_some();
+    match (published, image_based) {
+        (true, true) => {
+            format!("{base} Install a newer Satur8 release that includes an effect for KWin {kwin}")
+        }
+        (true, false) => format!(
+            "{base} Install a newer Satur8 release that includes an effect for KWin {kwin}, or \
+             install cmake, a C++ compiler, and the Qt 6 and KWin development files and run \
+             `satur8 repair`"
+        ),
+        (false, true) => format!(
+            "{base} No prebuilt effect is published for this system, and /usr is read-only \
+             here, so the build tools could only be added by layering packages with rpm-ostree"
+        ),
+        (false, false) => format!(
+            "{base} No prebuilt effect is published for this system. Install cmake, a C++ \
+             compiler, and the Qt 6 and KWin development files, then run `satur8 repair`"
+        ),
+    }
+}
+
 fn plugin_abi(path: &Path) -> Option<String> {
     abi_in_plugin(&fs::read(path).ok()?)
+}
+
+/// This system's family, from os-release. `SATUR8_OS_RELEASE` names another
+/// file, for tests.
+fn system_family() -> Family {
+    let text = match std::env::var_os("SATUR8_OS_RELEASE").filter(|v| !v.is_empty()) {
+        Some(path) => fs::read_to_string(path).ok(),
+        None => OS_RELEASE_PATHS
+            .iter()
+            .find_map(|path| fs::read_to_string(path).ok()),
+    };
+    text.map_or(Family::Other, |text| family_from_os_release(&text))
+}
+
+/// The installed Qt 6 minor version, from the name of the Qt core library
+/// file. `SATUR8_QT_LIB_DIR` replaces the folders searched, for tests.
+fn installed_qt_minor() -> Option<u32> {
+    let dirs: Vec<PathBuf> = match std::env::var_os("SATUR8_QT_LIB_DIR").filter(|v| !v.is_empty()) {
+        Some(dir) => vec![PathBuf::from(dir)],
+        None => QT_LIB_DIRS.iter().map(|dir| PathBuf::from(*dir)).collect(),
+    };
+    dirs.iter().find_map(|dir| {
+        fs::read_dir(dir)
+            .ok()?
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| qt_minor_in_lib_name(&entry.file_name().to_string_lossy()))
+            .max()
+    })
+}
+
+/// Where the installer put the set of prebuilt effects.
+/// `SATUR8_EFFECT_STORE` names another folder, for tests.
+pub fn store_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("SATUR8_EFFECT_STORE").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(dir));
+    }
+    xdg_dir("XDG_DATA_HOME", ".local/share").map(|data| data.join(STORE_SUBDIR))
+}
+
+/// The entries of the set in `dir`. Folders that are not named like a key,
+/// or whose plugin cannot be read, are skipped.
+fn read_store(dir: &Path) -> Vec<SetEntry> {
+    let Ok(listing) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    listing
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let key = entry.file_name().to_str()?.to_string();
+            split_key(&key)?;
+            let bytes = fs::read(entry.path().join(PLUGIN_FILE)).ok()?;
+            Some(SetEntry {
+                abi: abi_in_plugin(&bytes),
+                qt_minor: qt_minor_in_plugin(&bytes),
+                key,
+            })
+        })
+        .collect()
+}
+
+/// Why the effect cannot be built here, or `None` when everything a build
+/// needs is present.
+fn build_blocker() -> Option<String> {
+    if source_dir().is_none() {
+        return Some("the effect source is not installed".into());
+    }
+    for tool in ["cmake", "c++"] {
+        if !on_path(tool) {
+            return Some(format!("`{tool}` is not installed"));
+        }
+    }
+    if !Path::new(KWIN_CONFIG_HEADER).is_file() {
+        return Some(format!(
+            "the KWin development headers ({KWIN_CONFIG_HEADER}) are not installed"
+        ));
+    }
+    None
 }
 
 fn home() -> Option<PathBuf> {
@@ -299,18 +634,41 @@ fn source_dir() -> Option<PathBuf> {
 /// Read everything a repair decision depends on. `supported` is filled in by
 /// the caller, since it needs the live KWin connection.
 pub fn inspect(supported: bool) -> EffectState {
-    let user = user_plugin_path().and_then(|p| plugin_abi(&p));
+    let user_bytes = user_plugin_path().and_then(|p| fs::read(p).ok());
+    let user = user_bytes.as_deref().and_then(abi_in_plugin);
     let stamp = user_stamp_path().and_then(|p| fs::read_to_string(p).ok());
+    let headers = fs::read_to_string(KWIN_CONFIG_HEADER)
+        .ok()
+        .and_then(|text| abi_in_header(&text))
+        .or_else(installed_kwin_version);
+    let store = store_dir();
+    let entries = store.as_deref().map(read_store).unwrap_or_default();
+    let set_match = headers
+        .as_deref()
+        .and_then(|kwin| pick_from_set(&entries, &system_family(), kwin, installed_qt_minor()));
+    // Same bytes as a set entry: the installer or a repair put it there.
+    let user_from_set = match (&user_bytes, &store) {
+        (Some(bytes), Some(dir)) => entries
+            .iter()
+            .find(|entry| {
+                fs::read(dir.join(&entry.key).join(PLUGIN_FILE))
+                    .ok()
+                    .as_deref()
+                    == Some(bytes.as_slice())
+            })
+            .map(|entry| entry.key.clone()),
+        _ => None,
+    };
     EffectState {
-        headers: fs::read_to_string(KWIN_CONFIG_HEADER)
-            .ok()
-            .and_then(|text| abi_in_header(&text))
-            .or_else(installed_kwin_version),
+        headers,
         system: system_plugin_path().and_then(|p| plugin_abi(&p)),
         user_source_current: user.is_some()
             && stamp.as_deref().map(str::trim) == Some(SOURCE_VERSION),
         user,
         supported,
+        set_match,
+        user_from_set,
+        can_build: build_blocker().is_none(),
     }
 }
 
@@ -329,8 +687,10 @@ fn connect_with_grace(wait: Duration) -> Option<KwinBackend> {
     }
 }
 
-/// Check the effect against the running KWin and rebuild it when KWin rejects
-/// it. Safe to call on every session start: it does nothing when all is well.
+/// Check the effect against the running KWin and, when KWin rejects it, put a
+/// matching one in place: from the installed set, or by building it. Safe to
+/// call on every session start: it does nothing when all is well. It never
+/// touches the network.
 pub fn repair() -> Result<RepairOutcome, String> {
     let environment = Environment::detect();
     if environment.session != SessionType::Wayland || environment.desktop != Desktop::Kde {
@@ -375,6 +735,20 @@ pub fn repair() -> Result<RepairOutcome, String> {
             kwin: headers()?,
             rebuilt: false,
         }),
+        Step::InstallFromSet => {
+            let target = headers()?;
+            let pick = state
+                .set_match
+                .clone()
+                .ok_or("the effect set changed during the repair; run `satur8 repair` again")?;
+            install_from_store(&pick.key, &target)?;
+            Ok(RepairOutcome::InstalledFromSet {
+                kwin: target,
+                key: pick.key,
+                other_system: pick.other_system,
+                ready: supported(&kwin),
+            })
+        }
         Step::Build => {
             let target = headers()?;
             build_into_user_dir(&target)?;
@@ -387,7 +761,54 @@ pub fn repair() -> Result<RepairOutcome, String> {
                 })
             }
         }
+        Step::CannotRepair => {
+            let target = headers()?;
+            let blocker = build_blocker().unwrap_or_else(|| "the build tools are missing".into());
+            Err(cannot_repair_message(
+                &target,
+                &system_family(),
+                Path::new(OSTREE_BOOTED).exists(),
+                &blocker,
+            ))
+        }
     }
+}
+
+/// Put the set entry `key` in the per-user plugin directory, after checking
+/// once more that it embeds KWin `target`: it is about to run inside the
+/// compositor.
+fn install_from_store(key: &str, target: &str) -> Result<(), String> {
+    let store = store_dir().ok_or("HOME is not set")?;
+    let source = store.join(key).join(PLUGIN_FILE);
+    let abi = plugin_abi(&source);
+    if abi.as_deref() != Some(target) {
+        return Err(format!(
+            "the KWin effect {} targets {} but KWin {target} is installed",
+            source.display(),
+            abi.as_deref().unwrap_or("an unknown version")
+        ));
+    }
+    place_user_plugin(&source)
+}
+
+/// Copy `plugin` over the per-user effect without KWin ever seeing a
+/// half-written file, and record that it matches this Satur8's source.
+fn place_user_plugin(plugin: &Path) -> Result<(), String> {
+    let dest = user_plugin_path().ok_or("HOME is not set")?;
+    let dir = dest.parent().ok_or("bad plugin path")?;
+    fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    // Copy next to the destination, then rename over it.
+    let staged = dir.join(format!(".{PLUGIN_FILE}.new"));
+    fs::copy(plugin, &staged).map_err(|e| format!("could not write {}: {e}", staged.display()))?;
+    fs::rename(&staged, &dest).map_err(|e| format!("could not install {}: {e}", dest.display()))?;
+
+    if let Some(stamp) = user_stamp_path() {
+        if let Some(parent) = stamp.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(stamp, SOURCE_VERSION);
+    }
+    Ok(())
 }
 
 fn build_into_user_dir(target: &str) -> Result<(), String> {
@@ -411,7 +832,6 @@ fn build_into_user_dir(target: &str) -> Result<(), String> {
             install_advice()
         ));
     }
-    let dest = user_plugin_path().ok_or("HOME is not set")?;
     let build = xdg_dir("XDG_CACHE_HOME", ".cache")
         .ok_or("HOME is not set")?
         .join("satur8/kwin-effect-build");
@@ -438,20 +858,7 @@ fn build_into_user_dir(target: &str) -> Result<(), String> {
         ));
     }
 
-    let dir = dest.parent().ok_or("bad plugin path")?;
-    fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
-    // Copy next to the destination, then rename over it, so KWin never sees a
-    // half-written plugin.
-    let staged = dir.join(format!(".{PLUGIN_FILE}.new"));
-    fs::copy(&built, &staged).map_err(|e| format!("could not write {}: {e}", staged.display()))?;
-    fs::rename(&staged, &dest).map_err(|e| format!("could not install {}: {e}", dest.display()))?;
-
-    if let Some(stamp) = user_stamp_path() {
-        if let Some(parent) = stamp.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        let _ = fs::write(stamp, SOURCE_VERSION);
-    }
+    place_user_plugin(&built)?;
     let _ = fs::remove_dir_all(&build);
     Ok(())
 }
@@ -559,6 +966,7 @@ mod tests {
     #[test]
     fn builds_after_a_kwin_update_strands_the_system_effect() {
         let state = EffectState {
+            can_build: true,
             headers: v("6.8.3"),
             system: v("6.8.2"),
             supported: false,
@@ -570,11 +978,13 @@ mod tests {
     #[test]
     fn rebuilds_a_per_user_effect_left_over_from_the_previous_kwin() {
         let state = EffectState {
+            can_build: true,
             headers: v("6.8.3"),
             system: v("6.8.1"),
             user: v("6.8.2"),
             user_source_current: true,
             supported: false,
+            ..Default::default()
         };
         assert_eq!(decide(&state), Step::Build);
     }
@@ -582,6 +992,7 @@ mod tests {
     #[test]
     fn builds_when_no_effect_is_installed_at_all() {
         let state = EffectState {
+            can_build: true,
             headers: v("6.8.3"),
             ..Default::default()
         };
@@ -596,6 +1007,7 @@ mod tests {
             user: v("6.8.3"),
             user_source_current: true,
             supported: false,
+            ..Default::default()
         };
         assert_eq!(decide(&state), Step::WaitForLogin);
     }
@@ -603,11 +1015,13 @@ mod tests {
     #[test]
     fn a_per_user_effect_from_an_older_satur8_is_rebuilt() {
         let state = EffectState {
+            can_build: true,
             headers: v("6.8.3"),
             system: v("6.8.2"),
             user: v("6.8.3"),
             user_source_current: false,
             supported: false,
+            ..Default::default()
         };
         assert_eq!(decide(&state), Step::Build);
     }
@@ -620,6 +1034,7 @@ mod tests {
             user: v("6.8.2"),
             user_source_current: true,
             supported: false,
+            ..Default::default()
         };
         assert_eq!(decide(&state), Step::DropUserCopy);
     }
@@ -632,6 +1047,7 @@ mod tests {
             user: v("6.8.3"),
             user_source_current: false,
             supported: true,
+            ..Default::default()
         };
         assert_eq!(decide(&state), Step::DropUserCopy);
     }
@@ -647,6 +1063,7 @@ mod tests {
             user: v("6.8.2"),
             user_source_current: false,
             supported: true,
+            ..Default::default()
         };
         assert_eq!(decide(&state), Step::Healthy);
     }
@@ -665,11 +1082,305 @@ mod tests {
     #[test]
     fn without_headers_nothing_counts_as_matching() {
         let state = EffectState {
+            can_build: true,
             headers: None,
             system: v("6.8.2"),
             supported: false,
             ..Default::default()
         };
         assert_eq!(decide(&state), Step::Build);
+    }
+
+    // ------------------------------------------------ the set of prebuilt effects
+
+    #[test]
+    fn reads_the_family_out_of_os_release() {
+        let steamos =
+            "NAME=\"SteamOS\"\nID=steamos\nID_LIKE=arch\nVERSION_ID=3.9.5\nVARIANT_ID=steamdeck\n";
+        assert_eq!(family_from_os_release(steamos), Family::SteamOs);
+        let bazzite = "NAME=\"Bazzite\"\nID=bazzite\nID_LIKE=\"fedora\"\nVERSION_ID=45\n";
+        assert_eq!(family_from_os_release(bazzite), Family::Fedora(45));
+        let fedora = "NAME=\"Fedora Linux\"\nID=fedora\nVERSION_ID=44\n";
+        assert_eq!(family_from_os_release(fedora), Family::Fedora(44));
+        let like_many = "ID=nobara\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID='43'\n";
+        assert_eq!(family_from_os_release(like_many), Family::Fedora(43));
+        assert_eq!(
+            family_from_os_release("ID=arch\nBUILD_ID=rolling\n"),
+            Family::Other
+        );
+        assert_eq!(
+            family_from_os_release("ID=fedora\nVERSION_ID=rawhide\n"),
+            Family::Other
+        );
+        assert_eq!(family_from_os_release(""), Family::Other);
+        assert_eq!(Family::SteamOs.key_prefix().as_deref(), Some("steamos"));
+        assert_eq!(Family::Fedora(45).key_prefix().as_deref(), Some("fedora45"));
+        assert_eq!(Family::Other.key_prefix(), None);
+    }
+
+    #[test]
+    fn reads_the_highest_qt_minor_out_of_plugin_bytes() {
+        let bytes = b"\0Qt_6\0libQt6Core.so.6\0Qt_6.11\0Qt_6\0Qt_6.9\0";
+        assert_eq!(qt_minor_in_plugin(bytes), Some(11));
+        assert_eq!(qt_minor_in_plugin(b"\0Qt_6.12\0Qt_6.12\0"), Some(12));
+        assert_eq!(qt_minor_in_plugin(b"\0Qt_6\0Qt_6\0"), None);
+        assert_eq!(qt_minor_in_plugin(b"\0Qt_6.\0"), None);
+        assert_eq!(qt_minor_in_plugin(b""), None);
+    }
+
+    #[test]
+    fn reads_the_installed_qt_minor_out_of_the_library_file_name() {
+        assert_eq!(qt_minor_in_lib_name("libQt6Core.so.6.11.1"), Some(11));
+        assert_eq!(qt_minor_in_lib_name("libQt6Core.so.6.12.0"), Some(12));
+        assert_eq!(qt_minor_in_lib_name("libQt6Core.so.6"), None);
+        assert_eq!(qt_minor_in_lib_name("libQt6Core.so.6.x"), None);
+        assert_eq!(qt_minor_in_lib_name("libQt6Gui.so.6.11.1"), None);
+    }
+
+    #[test]
+    fn splits_set_keys() {
+        assert_eq!(split_key("steamos-6.7.3"), Some(("steamos", "6.7.3")));
+        assert_eq!(split_key("fedora45-6.8.3"), Some(("fedora45", "6.8.3")));
+        assert_eq!(split_key("steamos-6"), None);
+        assert_eq!(split_key("Steamos-6.7.3"), None);
+        assert_eq!(split_key("45-6.7.3"), None);
+        assert_eq!(split_key("steamos-6.7."), None);
+        assert_eq!(split_key("steamos"), None);
+    }
+
+    fn entry(key: &str, abi: &str, qt: u32) -> SetEntry {
+        SetEntry {
+            key: key.into(),
+            abi: v(abi),
+            qt_minor: Some(qt),
+        }
+    }
+
+    /// The set the v0.4.1 tarball is planned to carry, plus one entry whose
+    /// folder name and embedded ID disagree.
+    fn set() -> Vec<SetEntry> {
+        vec![
+            entry("steamos-6.7.3", "6.7.3", 11),
+            entry("steamos-6.8.2", "6.8.2", 12),
+            entry("fedora45-6.8.3", "6.8.3", 11),
+            entry("steamos-6.8.4", "6.8.5", 12),
+        ]
+    }
+
+    fn own(key: &str) -> Option<SetPick> {
+        Some(SetPick {
+            key: key.into(),
+            other_system: false,
+        })
+    }
+
+    fn other(key: &str) -> Option<SetPick> {
+        Some(SetPick {
+            key: key.into(),
+            other_system: true,
+        })
+    }
+
+    #[test]
+    fn picks_the_effect_built_for_this_system() {
+        let set = set();
+        assert_eq!(
+            pick_from_set(&set, &Family::SteamOs, "6.7.3", Some(11)),
+            own("steamos-6.7.3")
+        );
+        // Bazzite reads as Fedora 45.
+        assert_eq!(
+            pick_from_set(&set, &Family::Fedora(45), "6.8.3", Some(11)),
+            own("fedora45-6.8.3")
+        );
+        // The family's own effect needs no Qt check, even with Qt unknown.
+        assert_eq!(
+            pick_from_set(&set, &Family::SteamOs, "6.8.2", None),
+            own("steamos-6.8.2")
+        );
+        assert_eq!(
+            pick_from_set(&set, &Family::SteamOs, "6.9.0", Some(12)),
+            None
+        );
+    }
+
+    #[test]
+    fn uses_another_systems_effect_only_with_a_new_enough_qt() {
+        let set = set();
+        assert_eq!(
+            pick_from_set(&set, &Family::Other, "6.8.3", Some(12)),
+            other("fedora45-6.8.3")
+        );
+        assert_eq!(
+            pick_from_set(&set, &Family::Other, "6.8.3", Some(11)),
+            other("fedora45-6.8.3")
+        );
+        assert_eq!(pick_from_set(&set, &Family::Other, "6.8.3", Some(10)), None);
+        assert_eq!(pick_from_set(&set, &Family::Other, "6.8.3", None), None);
+        // Fedora 44 with the same KWin is another family too.
+        assert_eq!(
+            pick_from_set(&set, &Family::Fedora(44), "6.8.3", Some(11)),
+            other("fedora45-6.8.3")
+        );
+        let unknown_qt = vec![SetEntry {
+            key: "fedora45-6.8.3".into(),
+            abi: v("6.8.3"),
+            qt_minor: None,
+        }];
+        assert_eq!(
+            pick_from_set(&unknown_qt, &Family::Other, "6.8.3", Some(12)),
+            None
+        );
+    }
+
+    #[test]
+    fn never_picks_an_entry_whose_id_disagrees_with_its_folder() {
+        let set = set();
+        assert_eq!(
+            pick_from_set(&set, &Family::SteamOs, "6.8.4", Some(12)),
+            None
+        );
+        assert_eq!(pick_from_set(&set, &Family::Other, "6.8.4", Some(12)), None);
+        assert_eq!(
+            pick_from_set(&set, &Family::SteamOs, "6.8.5", Some(12)),
+            None
+        );
+        assert_eq!(pick_from_set(&set, &Family::Other, "6.8.5", Some(12)), None);
+    }
+
+    #[test]
+    fn the_set_wins_over_a_build() {
+        let state = EffectState {
+            headers: v("6.7.3"),
+            set_match: own("steamos-6.7.3"),
+            can_build: true,
+            ..Default::default()
+        };
+        assert_eq!(decide(&state), Step::InstallFromSet);
+    }
+
+    #[test]
+    fn a_build_wins_over_another_systems_effect() {
+        let state = EffectState {
+            headers: v("6.8.3"),
+            set_match: other("fedora45-6.8.3"),
+            can_build: true,
+            ..Default::default()
+        };
+        assert_eq!(decide(&state), Step::Build);
+        let state = EffectState {
+            can_build: false,
+            ..state
+        };
+        assert_eq!(decide(&state), Step::InstallFromSet);
+    }
+
+    #[test]
+    fn no_tools_and_no_match_cannot_be_repaired_here() {
+        let state = EffectState {
+            headers: v("6.9.0"),
+            user: v("6.7.3"),
+            user_source_current: true,
+            ..Default::default()
+        };
+        assert_eq!(decide(&state), Step::CannotRepair);
+    }
+
+    #[test]
+    fn a_stale_per_user_copy_is_replaced_from_the_set() {
+        // The Deck after an OS update: per-user 6.7.3 from the set, KWin now 6.8.2.
+        let state = EffectState {
+            headers: v("6.8.2"),
+            user: v("6.7.3"),
+            user_source_current: true,
+            user_from_set: Some("steamos-6.7.3".into()),
+            set_match: own("steamos-6.8.2"),
+            ..Default::default()
+        };
+        assert_eq!(decide(&state), Step::InstallFromSet);
+    }
+
+    #[test]
+    fn the_set_does_not_change_the_pending_update_cases() {
+        // As pending_kwin_update_leaves_a_working_effect_alone and
+        // working_per_user_effect_is_kept_while_a_kwin_update_is_pending, with
+        // a matching set entry and build tools present.
+        let state = EffectState {
+            headers: v("6.8.3"),
+            system: v("6.8.2"),
+            supported: true,
+            set_match: own("fedora45-6.8.3"),
+            can_build: true,
+            ..Default::default()
+        };
+        assert_eq!(decide(&state), Step::Healthy);
+        let state = EffectState {
+            headers: v("6.8.3"),
+            system: v("6.8.3"),
+            user: v("6.8.2"),
+            user_source_current: false,
+            supported: true,
+            set_match: own("fedora45-6.8.3"),
+            can_build: true,
+            ..Default::default()
+        };
+        assert_eq!(decide(&state), Step::Healthy);
+    }
+
+    #[test]
+    fn the_cannot_repair_message_never_tells_an_image_based_system_to_install_cmake() {
+        let blocker = "`cmake` is not installed";
+        for (family, ostree) in [
+            (Family::SteamOs, false),
+            (Family::Fedora(45), true),
+            (Family::Other, true),
+        ] {
+            let message = cannot_repair_message("6.9.0", &family, ostree, blocker);
+            assert!(
+                !message.to_lowercase().contains("install cmake"),
+                "{family:?}: {message}"
+            );
+            assert!(message.contains("KWin 6.9.0"), "{message}");
+        }
+        let deck = cannot_repair_message("6.9.0", &Family::SteamOs, false, blocker);
+        assert!(deck.contains("Install a newer Satur8 release"), "{deck}");
+        let bazzite = cannot_repair_message("6.8.4", &Family::Fedora(45), true, blocker);
+        assert!(
+            bazzite.contains("Install a newer Satur8 release"),
+            "{bazzite}"
+        );
+        let fedora = cannot_repair_message("6.8.4", &Family::Fedora(45), false, blocker);
+        assert!(fedora.contains("newer Satur8 release") && fedora.contains("install cmake"));
+        let arch = cannot_repair_message("6.8.4", &Family::Other, false, blocker);
+        assert!(arch.contains("No prebuilt effect is published for this system"));
+        assert!(arch.contains("Install cmake") && arch.contains("satur8 repair"));
+        let kalpa = cannot_repair_message("6.8.4", &Family::Other, true, blocker);
+        assert!(kalpa.contains("No prebuilt effect is published") && kalpa.contains("rpm-ostree"));
+    }
+
+    #[test]
+    fn describes_an_effect_installed_from_the_set() {
+        let ready = RepairOutcome::InstalledFromSet {
+            kwin: "6.8.2".into(),
+            key: "steamos-6.8.2".into(),
+            other_system: false,
+            ready: true,
+        };
+        assert_eq!(
+            ready.describe(),
+            "installed the KWin effect for KWin 6.8.2 from the set that came with Satur8; it is ready to use"
+        );
+        let later = RepairOutcome::InstalledFromSet {
+            kwin: "6.8.3".into(),
+            key: "fedora45-6.8.3".into(),
+            other_system: true,
+            ready: false,
+        };
+        assert_eq!(
+            later.describe(),
+            "installed the KWin effect for KWin 6.8.3 from the set that came with Satur8 \
+             (built for fedora45, another system with the same KWin); log out and back in \
+             once so KWin picks it up"
+        );
     }
 }
