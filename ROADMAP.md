@@ -163,7 +163,7 @@ and Bazzite is Fedora-based (the live COPR work carries over).
       home folder, which survives SteamOS updates, `--enable-daemon` turns on
       the background service, and `--system` is refused on SteamOS. The
       service starts with the Game Mode session; this was checked by switching
-      the Deck to Desktop Mode and back, and a cold boot was not tested.
+      the Deck to Desktop Mode and back, and by restarting the Deck with v0.4.1.
       Uninstall was checked on the Deck and keeps `profiles.toml`.
 - [ ] Bazzite (atomic Fedora). Checked 2026-11-21 against Bazzite stable
       45.20261117.1, from source and in a container, not on a Bazzite device:
@@ -266,9 +266,18 @@ Not blocking the packaging spine; picked up as time allows.
       v0.4.0 look table only changes SDR content. First test with a game that
       presents HDR; so far only a game presenting SDR was run (ELDEN RING
       through Proton, where the look applied).
-- [ ] Steam Deck: a cold boot straight into Game Mode, to confirm the service
-      starts then too.
+- [x] Steam Deck: a cold boot straight into Game Mode, to confirm the service
+      starts then too. Done with v0.4.1 on 2026-11-22: after a restart, with
+      nobody touching the Deck, the service was running in Game Mode about ten
+      seconds after boot, Steam's color settings were unchanged, and a game
+      then got its table.
+- [ ] Steam Deck: find out why gamescope sometimes aborts while Game Mode
+      shuts down for the switch to Desktop Mode (2 of 14 session ends during
+      testing, both after a Satur8 table had been used; cause not established).
 - [ ] Steam Deck: run the `steamos-6.8.2` effect on a Deck with SteamOS 3.10.
+      So far it was run headless only: in a KWin 6.8.2 session built from
+      Valve's SteamOS 3.10 packages it changed window colors by the same
+      values as the 6.7.3 effect.
 - [x] Steam Deck: make the KWin effect available on SteamOS Desktop Mode.
       Done in v0.4.1: the tarball bundles effects built against Valve's
       packages for SteamOS 3.9 (KWin 6.7.3) and SteamOS 3.10 (KWin 6.8.2), and

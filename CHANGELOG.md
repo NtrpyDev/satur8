@@ -45,6 +45,16 @@ GitHub release notes for that tag.
   Before, two quick focus changes could be applied in the wrong order.
 - A profiles file with the new settings still loads in an older Satur8, but
   an older Satur8 drops them if it saves the file.
+- Checked since v0.4.1, with no code change: a Steam Deck restarted with
+  Satur8 installed comes up in Game Mode with the background service running
+  and Steam's color settings unchanged. The bundled `steamos-6.8.2` and
+  `fedora45-6.8.3` effects were seen changing window colors correctly in
+  headless KWin 6.8.2 and 6.8.3 sessions with software rendering; before, they
+  had only been built and loaded.
+- Known and not explained: on the Deck, gamescope aborted while Game Mode shut
+  down for the switch to Desktop Mode in 2 of 14 session ends during testing,
+  both after a Satur8 table had been used. The switch still completed. Whether
+  Satur8's table has any part in it is not established.
 
 ## v0.4.1 - 2026-11-22
 

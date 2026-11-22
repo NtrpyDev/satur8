@@ -187,7 +187,7 @@ The background service does the switching. If you installed without `--enable-da
 systemctl --user enable --now satur8-daemon
 ```
 
-The service starts with the Game Mode session. This was checked by switching the Deck to Desktop Mode and back; a cold boot was not tested.
+The service starts with the Game Mode session. This was checked by switching the Deck to Desktop Mode and back, and by restarting the Deck with v0.4.1 installed: with nobody touching it, the service was running in Game Mode about ten seconds after boot and Steam's color settings were unchanged.
 
 In Game Mode, a game's profile loads when the game takes focus and is removed when you leave or close the game. Opening Steam's overlay menu over the game keeps its profile. If the service is killed, systemd restarts it within 5 seconds. Stopping the service puts `default_saturation` back; `~/.local/bin/satur8 off` removes Satur8's table at any value.
 
@@ -232,7 +232,7 @@ Desktop Mode is Verified on a Steam Deck OLED with SteamOS 3.9.5 and KWin 6.7.3,
 - With the right effect loaded, the effect file was replaced by one built for another KWin. `satur8 doctor` reported it, and `satur8 repair` installed the 6.7.3 effect from the set while KWin kept running.
 - Switching between Game Mode and Desktop Mode several times left Steam's color settings unchanged.
 
-The `steamos-6.8.2` effect for SteamOS 3.10 is included but has not been run on a device.
+The `steamos-6.8.2` effect for SteamOS 3.10 is included. It has not been run on a Deck; in a headless KWin 6.8.2 session built from Valve's SteamOS 3.10 packages, with software rendering, it changed window colors by the same values as the `steamos-6.7.3` effect does on KWin 6.7.3.
 
 ### Uninstall from the Deck
 
@@ -246,11 +246,11 @@ This stops the service, removes Satur8's table, and removes the commands, the se
 
 ### Not tested yet
 
-- A cold boot of the Deck straight into Game Mode.
 - HDR games. By gamescope's source, the look table only changes SDR content, so HDR games are expected to look unchanged. A game presenting SDR does get the look: ELDEN RING through Proton, presenting SDR on the tested Deck, turned grayscale in gamescope's own screenshot.
 - An external display.
 - The desktop app (`satur8-gui`) on the Deck beyond starting it: it starts in Desktop Mode and shows the KWin backend active, but it was not clicked through.
-- The `steamos-6.8.2` effect on a Deck running SteamOS 3.10.
+- The `steamos-6.8.2` effect on a Deck running SteamOS 3.10 (it was only run headless, see above).
+- Why gamescope sometimes aborts while Game Mode shuts down for the switch to Desktop Mode. It was seen in 2 of 14 session ends during testing, both after a Satur8 table had been used; the switch still completed. Whether Satur8's table has any part in it is not established.
 - A Bazzite device (see [Bazzite](#bazzite)) and other systems that run a gamescope session.
 - gamescope versions other than 3.16.30.1.
 
