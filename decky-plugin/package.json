@@ -1,0 +1,35 @@
+{
+  "name": "satur8-decky",
+  "version": "0.5.1",
+  "description": "Install, update and open Satur8 from the Steam Deck's Quick Access Menu",
+  "type": "module",
+  "private": true,
+  "packageManager": "pnpm@12.22.0",
+  "scripts": {
+    "build": "rollup -c",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NtrpyDev/satur8.git",
+    "directory": "decky-plugin"
+  },
+  "author": "NtrpyDev",
+  "license": "GPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/NtrpyDev/satur8/issues"
+  },
+  "homepage": "https://github.com/NtrpyDev/satur8/tree/main/decky-plugin#readme",
+  "devDependencies": {
+    "@decky/rollup": "^1.0.2",
+    "@decky/ui": "^4.11.0",
+    "@types/react": "19.1.1",
+    "@types/react-dom": "19.1.1",
+    "rollup": "^4.53.3",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "@decky/api": "^1.1.3",
+    "tslib": "^2.7.0"
+  }
+}
