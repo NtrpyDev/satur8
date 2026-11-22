@@ -4139,7 +4139,6 @@ dependencies = [
 name = "satur8-gnome"
 version = "0.5.1"
 dependencies = [
- "anyhow",
  "satur8-core",
  "zbus",
 ]
@@ -4165,7 +4164,6 @@ dependencies = [
 name = "satur8-hyprland"
 version = "0.5.1"
 dependencies = [
- "anyhow",
  "satur8-core",
 ]
 
@@ -4173,7 +4171,6 @@ dependencies = [
 name = "satur8-kwin"
 version = "0.5.1"
 dependencies = [
- "anyhow",
  "satur8-core",
  "zbus",
 ]
@@ -4182,7 +4179,6 @@ dependencies = [
 name = "satur8-nv-control"
 version = "0.5.1"
 dependencies = [
- "anyhow",
  "satur8-core",
 ]
 

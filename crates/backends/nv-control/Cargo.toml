@@ -8,4 +8,3 @@ description = "NVIDIA X11 backend (B5) for Satur8: drives the proprietary driver
 
 [dependencies]
 satur8-core = { workspace = true }
-anyhow = { workspace = true }

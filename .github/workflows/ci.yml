@@ -43,8 +43,16 @@ jobs:
               echo "::group::format check"
               cargo fmt --all --check
               echo "::endgroup::"
+              # Warnings fail the build. The Rust here is whatever Fedora
+              # ships (printed below), not a pinned one: a Fedora update can
+              # bring new lints and fail this step on a change that did not
+              # touch the code they name. The fix is then to the code, in its
+              # own commit. The release binaries are built with the Rust
+              # pinned in packaging/build-portable.sh.
               echo "::group::lint"
-              cargo clippy --workspace --all-targets --locked
+              rustc --version
+              cargo clippy --version
+              cargo clippy --workspace --all-targets --locked -- -D warnings
               echo "::endgroup::"
               echo "::group::tests"
               cargo test --workspace --locked
