@@ -32,6 +32,9 @@
 #               3.9 -> steamdeck (Stable), 3.10 -> steamdeck-preview,
 #               main -> steamdeck-main. "none" skips the comparison.
 #   KEEP_IMAGE  SteamOS only: 1 keeps the imported build-root image
+#   GLIBC_FLOOR, GLIBCXX_FLOOR, CXXABI_FLOOR
+#               the runtime floors the effect must stay within (defaults in
+#               packaging/abi-floors.sh: 2.35, 3.4.30, 1.3.13)
 #
 # Why per target: KWin loads an effect only when its embedded ID names KWin's
 # exact x.y.z version, and Qt refuses a plugin built against a newer Qt minor.
@@ -53,18 +56,26 @@
 # Checks on every effect, run inside its build system: the embedded ID equals
 # the installed KWin's version, read both here and by the installer's own
 # packaging/install.sh --check-effect; ldd -r finds every library, symbol and
-# symbol version; build-info.txt records the package versions, the highest Qt_6.x,
-# GLIBC, GLIBCXX and CXXABI versions the effect needs, the SHA-256 of each
-# KWin header the build included, the Satur8 source version and the file's
-# SHA-256.
+# symbol version; the highest GLIBC_, GLIBCXX_ and CXXABI_ versions the effect
+# needs are at or below the floors in packaging/abi-floors.sh (Ubuntu 22.04's:
+# 2.35, 3.4.30, 1.3.13), so it never needs a newer C or C++ runtime than the
+# tarball's own binaries; build-info.txt records the package versions, those
+# three versions as ABI_GLIBC=, ABI_GLIBCXX= and ABI_CXXABI= lines, the highest
+# Qt_6.x, the SHA-256 of each KWin header the build included, the Satur8
+# source version and the file's SHA-256. --merge refuses an effect whose
+# build-info.txt lacks those lines or exceeds a floor.
 set -euo pipefail
 
-usage() { sed -n '2,59p' "$0"; exit 2; }
+usage() { sed -n '2,66p' "$0"; exit 2; }
 say() { printf '==> %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
+# The C and C++ runtime floors every bundled effect must stay within, and the
+# check on a build-info.txt; shared with check-portability.sh.
+# shellcheck source=packaging/abi-floors.sh
+. "$here/abi-floors.sh"
 
 # ------------------------------------------------------------ several targets
 key_re='^[a-z][a-z0-9]*-[0-9]+(\.[0-9]+)+$'
@@ -96,6 +107,9 @@ merge_keys() {
         [ -f "$dir/satur8.so" ] && [ -f "$dir/build-info.txt" ] || fail "$dir lacks satur8.so or build-info.txt"
         id="$(grep -aoE 'org\.kde\.kwin\.EffectPluginFactory[0-9]+(\.[0-9]+)+' "$dir/satur8.so" | head -n1)"
         [ "${id#org.kde.kwin.EffectPluginFactory}" = "${key##*-}" ] || fail "$dir/satur8.so embeds '${id:-no ID}', not KWin ${key##*-}"
+        # An old or hand-made effect without the recorded runtime needs, or one
+        # above the floors, never enters a set.
+        problems="$(effect_abi_problems "$dir/build-info.txt" "$key")" || fail "$problems"
         if [ -e "$out/$key" ]; then
             say "Key $key from $label was already built by an earlier target; keeping the earlier one"
             summary+=("duplicate  $label -> $key (earlier target kept)")
@@ -519,6 +533,25 @@ ids="$(grep -aoE 'org\.kde\.kwin\.EffectPluginFactory[0-9]+(\.[0-9]+)+' "$so" | 
 qt_tag="$(awk '$1 == "Qt_6" { print $3 }' "$work/out/verify.txt" | head -n1)"
 case "$qt_tag" in Qt_6.[0-9]*) ;; *) fail "the effect records no Qt_6.x version (got '$qt_tag')" ;; esac
 
+# The runtime floor gate. The highest GLIBC_, GLIBCXX_ and CXXABI_ versions the
+# effect needs were read with objdump -T inside its build system; none may be
+# above the floors of the oldest system the tarball supports, so an effect used
+# on another system never needs a newer C or C++ runtime than the tarball's own
+# binaries do.
+abi_value() { # abi_value <family label in verify.txt> <prefix to strip>
+    local top
+    top="$(awk -v f="$1" '$1 == f { print $3 }' "$work/out/verify.txt" | head -n1)"
+    [ -n "$top" ] && [ "$top" != none ] || { echo none; return; }
+    echo "${top#"$2"}"
+}
+abi_glibc="$(abi_value GLIBC_ GLIBC_)"
+abi_glibcxx="$(abi_value GLIBCXX_ GLIBCXX_)"
+abi_cxxabi="$(abi_value CXXABI_ CXXABI_)"
+printf 'ABI_GLIBC=%s\nABI_GLIBCXX=%s\nABI_CXXABI=%s\n' "$abi_glibc" "$abi_glibcxx" "$abi_cxxabi" > "$work/out/abi.txt"
+say "Runtime needs: GLIBC_$abi_glibc (floor $GLIBC_FLOOR), GLIBCXX_$abi_glibcxx (floor $GLIBCXX_FLOOR), CXXABI_$abi_cxxabi (floor $CXXABI_FLOOR)"
+abi_name="$family $release${extra:+ $extra}"
+problems="$(effect_abi_problems "$work/out/abi.txt" "for $abi_name")" || fail "$problems"
+
 case "$family" in
     steamos) key="steamos-$kwin_ver" ;;
     fedora) key="fedora$release-$kwin_ver" ;;
@@ -545,6 +578,9 @@ t1=$(date +%s)
     echo "Target:     $target"
     echo "KWin:       $kwin_pkg $kwin_pkgver"
     echo "Needs:      $(awk '$1 ~ /^(Qt_6|GLIBC_|GLIBCXX_|CXXABI_)$/ { printf "%s%s", sep, $3; sep = ", " }' "$work/out/verify.txt")"
+    echo "Floors:     GLIBC_$GLIBC_FLOOR, GLIBCXX_$GLIBCXX_FLOOR, CXXABI_$CXXABI_FLOOR (packaging/abi-floors.sh); none is exceeded"
+    echo "Runtime needs, for scripts (the highest version of each; none means no need):"
+    cat "$work/out/abi.txt"
     echo "Satur8:     source version $satur8_version, commit $satur8_commit"
     echo "Built:      $(date -u +%Y-%m-%dT%H:%M:%SZ) in $((t1 - t0)) s; downloads this run: $downloads"
     echo "Builder:    $(uname -n), $("$engine" --version)"
