@@ -94,7 +94,8 @@ fn run_probe(probe: Probe) -> ProbeResult {
             if KwinBackend::connect().is_some() {
                 ProbeResult::Refused(anyhow!(
                     "the Satur8 KWin effect is missing or was built for a different KWin \
-                     version than the one running. Run `satur8 repair` to rebuild it."
+                     version than the one running; {}.",
+                    satur8_kwin::repair::advice_here()
                 ))
             } else {
                 ProbeResult::Absent
