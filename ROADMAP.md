@@ -49,8 +49,11 @@ including CachyOS, skew heavily toward enthusiast Linux gamers).
       `optdepends`.
 - [x] Generate `.SRCINFO`.
 - [x] Clean-chroot build test (`extra-x86_64-build` / `makechroot`).
-- [ ] Publish to the AUR as the tagged `satur8` package once new AUR account
-      registration reopens or an existing AUR maintainer can push it.
+- [x] Publish to the AUR. Done by an existing AUR maintainer from the
+      community: `satur8` builds from the tagged source release and
+      `satur8-bin` installs prebuilt binaries. This project does not maintain
+      them, so they can trail the latest release (v0.3.3 when checked on
+      2026-11-21).
 - [ ] Consider a `satur8-git` variant for bleeding-edge users.
 - [x] Add an "Install on Arch" section to the README.
 - [x] Release tarball + checksum, R2 download worker, and website (done in v0.1).

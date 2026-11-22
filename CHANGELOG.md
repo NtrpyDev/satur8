@@ -7,6 +7,9 @@ GitHub release notes for that tag.
 
 - ROADMAP.md and PLAN.md now name v0.3.5 as the current release and describe
   the backends and distribution channels as they are today (#22).
+- The roadmap and packager guide no longer say AUR publication is blocked.
+  They now match the README: `satur8` and `satur8-bin` are on the AUR,
+  published and maintained by a community member.
 
 ## v0.3.5 - 2026-11-21
 
