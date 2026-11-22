@@ -95,15 +95,26 @@ fn list() -> Result<()> {
         return Ok(());
     }
     for p in &profiles.profiles {
-        println!(
-            "  {:<16} {:<8} sat {:.2}  {}",
-            p.name,
-            if p.enabled { "enabled" } else { "disabled" },
-            p.saturation,
-            describe_match(&p.match_rule)
-        );
+        println!("{}", list_row(p));
     }
     Ok(())
+}
+
+/// One `satur8 profile list` row. The outputs a profile names come last, and
+/// only when it names any, so other rows are as they always were.
+fn list_row(p: &Profile) -> String {
+    let row = format!(
+        "  {:<16} {:<8} sat {:.2}  {}",
+        p.name,
+        if p.enabled { "enabled" } else { "disabled" },
+        p.saturation,
+        describe_match(&p.match_rule)
+    );
+    if p.outputs.is_empty() {
+        row
+    } else {
+        format!("{row} outputs={}", p.outputs.join(","))
+    }
 }
 
 fn show(name: &str) -> Result<()> {
@@ -430,5 +441,30 @@ mod tests {
         let cleared = profiles.to_toml().unwrap();
         assert!(!cleared.contains("profile_outputs"), "{cleared}");
         assert!(!cleared.contains("[output"), "{cleared}");
+    }
+
+    #[test]
+    fn list_rows_show_outputs_only_when_a_profile_names_any() {
+        let mut cs2 =
+            build_profile("cs2".into(), 1.6, Some("cs2".into()), None, Some(730)).unwrap();
+        assert_eq!(
+            list_row(&cs2),
+            "  cs2              enabled  sat 1.60  exe=cs2 appid=730"
+        );
+        cs2.outputs = vec!["HDMI-A-1".into(), "DP-2".into()];
+        cs2.enabled = false;
+        assert_eq!(
+            list_row(&cs2),
+            "  cs2              disabled sat 1.60  exe=cs2 appid=730 outputs=HDMI-A-1,DP-2"
+        );
+    }
+
+    #[test]
+    fn profile_add_rejects_an_empty_output_name() {
+        let err = profile_outputs(vec!["".into()]).unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "--output needs an output name, as `satur8 outputs` lists it, or `all`"
+        );
     }
 }

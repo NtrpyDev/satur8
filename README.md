@@ -379,6 +379,9 @@ satur8 outputs default HDMI-A-1 --unset # back to default_saturation
 satur8 outputs follow focused           # game profiles change only the output the game is on
 satur8 outputs follow all               # game profiles change every output (the default)
 satur8 profile add couch 1.3 --exe hades --output HDMI-A-1   # repeatable; `all` means every output
+satur8 on 1.3 --output DP-2             # this output only, now; the same as `satur8 set 1.3 --output DP-2`
+satur8 profile list                     # a profile that names outputs lists them as outputs=HDMI-A-1
+satur8 status                           # names the output when the active profile is limited to one
 ```
 
 The same settings in `~/.config/satur8/profiles.toml`:

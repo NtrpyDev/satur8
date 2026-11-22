@@ -51,6 +51,9 @@ enum Command {
         /// Blend in linear light (more correct) instead of gamma sRGB.
         #[arg(long)]
         linear: bool,
+        /// Target a specific output id (see `satur8 outputs`); default all.
+        #[arg(long)]
+        output: Option<String>,
     },
     /// List the outputs the active backend can target, or change the
     /// per-output settings.
@@ -130,7 +133,11 @@ fn main() -> Result<()> {
             linear,
             output,
         } => cmd_set(saturation, linear, output),
-        Command::On { saturation, linear } => cmd_set(saturation, linear, None),
+        Command::On {
+            saturation,
+            linear,
+            output,
+        } => cmd_set(saturation, linear, output),
         Command::Outputs { cmd: None } => cmd_outputs(),
         Command::Outputs { cmd: Some(cmd) } => outputs_cmd::run(cmd),
         Command::Off => cmd_off(),
@@ -303,6 +310,7 @@ fn cmd_status() -> Result<()> {
         for line in gamescope_lines(display, root) {
             println!("{line}");
         }
+        print_active_output();
         print_per_output_settings();
         return Ok(());
     }
@@ -344,8 +352,38 @@ fn cmd_status() -> Result<()> {
             println!("backend kwin: not available in this session")
         }
     }
+    print_active_output();
     print_per_output_settings();
     Ok(())
+}
+
+/// The `satur8 status` line for a profile limited to one output, from the
+/// daemon's `ActiveProfile` and `ActiveOutput` properties. None when no profile
+/// is applied or it changes every output.
+fn active_output_line(profile: &str, output: &str) -> Option<String> {
+    let output = output.trim();
+    (!profile.is_empty() && !output.is_empty())
+        .then(|| format!("active profile: {profile}, on output {output} only"))
+}
+
+/// Print [`active_output_line`] when the daemon is running and reports one.
+fn print_active_output() {
+    let Ok(conn) = zbus::blocking::Connection::session() else {
+        return;
+    };
+    let Ok(proxy) = zbus::blocking::Proxy::new(
+        &conn,
+        "org.satur8.Daemon",
+        "/org/satur8/Daemon",
+        "org.satur8.Daemon",
+    ) else {
+        return;
+    };
+    let profile: String = proxy.get_property("ActiveProfile").unwrap_or_default();
+    let output: String = proxy.get_property("ActiveOutput").unwrap_or_default();
+    if let Some(line) = active_output_line(&profile, &output) {
+        println!("{line}");
+    }
 }
 
 fn cmd_repair() -> Result<()> {
@@ -774,6 +812,39 @@ mod tests {
                 }
             }) if query == "sushi"
         ));
+    }
+
+    #[test]
+    fn status_names_the_output_only_for_a_profile_limited_to_one() {
+        assert_eq!(
+            active_output_line("couch", "HDMI-A-1").as_deref(),
+            Some("active profile: couch, on output HDMI-A-1 only")
+        );
+        assert_eq!(active_output_line("couch", ""), None);
+        assert_eq!(active_output_line("", "HDMI-A-1"), None);
+        assert_eq!(active_output_line("", ""), None);
+    }
+
+    #[test]
+    fn on_takes_an_output_like_set() {
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "on", "1.3", "--output", "DP-2"]).map(|cli| cli.command),
+            Ok(Command::On {
+                saturation,
+                output: Some(ref name),
+                ..
+            }) if saturation == 1.3 && name == "DP-2"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["satur8", "on"]).map(|cli| cli.command),
+            Ok(Command::On {
+                saturation,
+                output: None,
+                ..
+            }) if saturation == 1.5
+        ));
+        // `off` takes no output: every output goes back to normal.
+        assert!(Cli::try_parse_from(["satur8", "off", "--output", "DP-2"]).is_err());
     }
 
     #[test]
