@@ -18,9 +18,9 @@ which claims are honest today.
   `packaging/install.sh`. Since v0.4.0 this is also the install path on SteamOS
   (tested on a Steam Deck in Game Mode).
 - Debian/Ubuntu, SteamOS, and Bazzite packages are not shipped yet. On
-  Bazzite the release tarball's per-user installer is the intended path; the
-  v0.4.0 installer and background service were run in a Bazzite container, not
-  on a Bazzite device.
+  Bazzite the release tarball's per-user installer is the intended path. It was
+  run on a real Bazzite install with an NVIDIA GPU (RTX 3070 Ti, 2026-11-22),
+  and in virtual machines for AMD Game Mode and the KDE desktop.
 
 Use `vX.Y.Z` for public Satur8 releases. Only use Arch-style `X.Y.Z-1` when
 talking about the Arch package build number.
@@ -244,23 +244,38 @@ any target-specific limitations in plain language.
 For immutable or gaming-focused distros, do not promise support before hardware
 testing, because they depend on gamescope behavior on real systems, not just on
 the package format. SteamOS is supported since v0.4.0 through the release
-tarball's per-user installer, tested on a Steam Deck in Game Mode. Bazzite has
-not been tested on real hardware.
+tarball's per-user installer, tested on a Steam Deck in Game Mode. Bazzite was
+run on real hardware only with an NVIDIA GPU (an RTX 3070 Ti); AMD only in a
+virtual machine, Intel not at all.
 
-Bazzite specifics (stable 45.20261117.1, checked 2026-11-21 from source and in a
-container, not on a Bazzite device):
+Bazzite specifics (stable 45.20261117.1 unless noted, checked 2026-11-21 and
+2026-11-22):
 
-- It is Fedora 45 based. The COPR project builds Fedora 45 too. Layering that
-  package on Bazzite has not been tested, and Bazzite's documentation calls
-  `rpm-ostree` layering a last resort.
+- It is Fedora 45 based. The COPR project builds Fedora 45 too. Bazzite's
+  documentation calls `rpm-ostree` layering a last resort; its documented way
+  is `sudo dnf5 copr enable ntrpydev/satur8`, `rpm-ostree install satur8`,
+  reboot. Done in the KDE virtual machine on 2026-11-22: satur8 0.5.0 layered
+  with 31 more packages from the spec's `Recommends` (cmake, gcc-c++,
+  kwin-devel, the Qt 6 development files, and Qt's ODBC, PostgreSQL and
+  Firebird SQL drivers). Effect, `on`/`off` in pixels
+  and the service worked, also after an untouched reboot and after a rebase to
+  testing 45.20261122.4 (same KWin). The weak dependencies make the layer much
+  larger than the package; `rpm-ostree install --no-weak-deps` was not tried.
 - `/usr` is read-only, so `install.sh --system` cannot work there and the
   installer refuses it; the per-user install writes only under `$HOME`, which
   persists.
 - The images ship no `cmake` and no KWin development headers, so the KWin
   effect cannot be rebuilt on the machine after a KWin update. Since v0.4.1 the
   tarball carries `fedora45-6.8.3`, built in Fedora 45's packages, and the
-  installer picked it in the Bazzite container. After a KWin update the effect
-  stays off until a newer Satur8 release includes that KWin version.
+  installer picked it on the NVIDIA install and in the virtual machines.
+  Stable and testing (45.20261122.4) both ship KWin 6.8.3 on 2026-11-22. After
+  a KWin update the effect stays off until a newer Satur8 release includes
+  that KWin version, and `satur8 repair` says so.
+- In Steam Game Mode on a GPU that is not AMD, gamescope colors a game it
+  shows directly only after a composite pass, so Satur8 sets
+  `GAMESCOPE_COMPOSITE_FORCE` while its look is on. gamescope there has
+  `cap_sys_nice=eip`, so its environment is readable by root only.
+- Bazzite ships `qdbus-qt6`, not `qdbus6`; the installer uses whichever exists.
 - The GNOME images run GNOME 51. From v0.4.1, the GNOME Shell
   extension lists GNOME 51; it was checked on GNOME Shell 51.1 headless in a
   Fedora 45 container, not on a Bazzite device.

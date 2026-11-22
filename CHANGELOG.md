@@ -3,6 +3,38 @@
 All notable changes to Satur8, newest first. Each entry is also published as the
 GitHub release notes for that tag.
 
+## Unreleased
+
+Bazzite: the look now reaches the screen in Steam Game Mode on NVIDIA, Satur8 says when it cannot, and fixes found on Bazzite's KDE desktop.
+
+- Steam Game Mode on NVIDIA and every other non-AMD GPU: the look now
+  reaches the screen. gamescope colors a game it shows directly (without a
+  composite pass) only through AMD's display color hardware, so on an RTX
+  3070 Ti under Bazzite a fullscreen game kept its own colors while Satur8
+  said its table was loaded. While a Satur8 look is on, and only on a GPU
+  that is not AMD, Satur8 now tells gamescope to composite every frame
+  (`GAMESCOPE_COMPOSITE_FORCE`), and takes that back with the look. That
+  costs one GPU pass per frame while the look is on, and nothing otherwise.
+  A value another program set is never changed or removed, and a gamescope
+  that composites by its own settings (`-c`, `--force-composition`,
+  `ENABLE_VKBASALT=1`) is left alone. Read from the buffers the display
+  scans out on that NVIDIA desktop: the look on the game, the game's own
+  colors when Steam is in front or the service stops. The Steam Deck (AMD)
+  works exactly as before.
+- `satur8 doctor` and `satur8 status` in Game Mode say whether the look is
+  on screen. On a non-AMD GPU they name the extra GPU pass, and when nothing
+  makes gamescope composite they say the look is set but not on screen in a
+  fullscreen game and what to do. The app's "Right now" card says the same.
+- `install.sh --uninstall` turns the KDE focus script off and stops it at
+  once. It used to leave `satur8-focusEnabled=true` in kwinrc and the script
+  running until the next login.
+- After a KWin update that no bundled effect covers, on a system that cannot
+  build one (Bazzite, SteamOS), `satur8 repair` now says how to check whether
+  a newer Satur8 release has an effect for it (`packaging/install.sh
+  --pick-effect` in the unpacked release, which changes nothing) and that
+  Steam Game Mode does not use the effect. `satur8 doctor` and the app name
+  the newer release directly.
+
 ## v0.5.1 - 2026-11-22
 
 The app in Steam Game Mode: its own layout for the Deck's screen, touch and buttons, opened from the Steam library. Also fixes for the Steam Deck launcher entry and the Bazzite installer, the logo as the app icon, and the last backend verified on real hardware.

@@ -89,12 +89,24 @@ On a Steam Deck, see [Steam Deck](#steam-deck).
 
 ### Bazzite
 
-Satur8 has been run on a real Bazzite install in a virtual machine (the KDE desktop edition, Bazzite stable 45.20261117.1, KWin 6.8.3, software rendering), not on a Bazzite device with its own GPU. Use the release tarball above without `--system`: the installer writes only to your home folder, which Bazzite keeps across updates, and it needs no root. `--system` is refused on Bazzite and other image-based systems.
+Use the release tarball above without `--system`: the installer writes only to your home folder, which Bazzite keeps across updates, and it needs no root. `--system` is refused on Bazzite and other image-based systems. Setup in Steam Game Mode is the same as on the [Steam Deck](#steam-deck).
 
-- Steam Game Mode (the `bazzite-deck` images) uses the same gamescope color and focus features as the Steam Deck. The installer and background service, in v0.4.0 and again in v0.4.1, were run against Bazzite's own gamescope build (3.17.0-ogc1, in Bazzite stable 45.20261117.1) in a container, not on a Bazzite device: the service found gamescope, loaded a profile's table when that app took focus, and removed it at the home window and when stopped. Setup is the same as on the [Steam Deck](#steam-deck).
-- KDE Plasma Desktop Mode gets the bundled effect built in Fedora 45's own packages for KWin 6.8.3 (`fedora45-6.8.3`), which Bazzite stable uses. On the real install, with v0.4.0 and v0.4.1: the installer picked that effect, `satur8 on 2.0`, `satur8 set 0` and `satur8 off` changed a test window as the saturation math predicts, per-game switching followed window focus with the background service running as the installed service, `satur8 repair` put the right effect back after a wrong file was placed there, and after a reboot with nobody touching it the service and effect came back. Bazzite has no build tools, so after a KWin update the effect stays off until a Satur8 release bundles an effect for that KWin; no system update was on offer during the test, so that case was not seen.
+What has been checked, and on what:
+
+- **Steam Game Mode with NVIDIA, on real hardware.** A desktop with an RTX 3070 Ti (NVIDIA driver 620.70.06, open kernel module) running `bazzite-deck-nvidia` stable 45.20261117.1 with gamescope 3.17.0. The installer, the background service, per-game switching and a reboot with nobody touching it worked. Read from the image the display actually shows: a fullscreen test game with a profile shows the look while it is in front, and its own colors again when Steam is in front or the service stops.
+- **Why NVIDIA needed a change.** gamescope colors a game it shows directly, without a composite pass, only through AMD's display color hardware. On any other GPU, Satur8 now tells gamescope to composite every frame while a Satur8 look is on. That costs one extra GPU pass per frame while the look is on, and nothing otherwise. Before v0.5.2 a fullscreen game on NVIDIA kept its own colors even though `satur8 status` said the look was loaded. `satur8 doctor` says whether the look is on screen.
+- **Steam Game Mode with AMD: only in a virtual machine.** `bazzite-deck` stable 45.20261117.1 in a virtual machine on an AMD Radeon RX 9070, not a Bazzite device. Install, service, per-game switching, and the app's Game Mode layout (the Games and Status pages and the Add a game list, driven by keys standing in for the buttons) were seen on the virtual machine's screen. No Steam account was used, so the games list was empty and Satur8 could not add its Steam library entry; it said there is no Steam user. The controller was not tested.
+- **Intel: not tested.** No Intel Bazzite hardware was available. By gamescope's source the NVIDIA change covers Intel the same way.
+- **KDE Plasma Desktop Mode.** The tarball's bundled effect is built in Fedora 45's own packages for KWin 6.8.3 (`fedora45-6.8.3`), which Bazzite stable and testing use. On the NVIDIA desktop, `satur8 on 2.0`, `satur8 set 0` and `satur8 off` changed the image the display shows, and the focus script loaded. In a KDE virtual machine with software rendering, from v0.4.0: per-game switching followed window focus, `satur8 repair` put the right effect back after a wrong file was placed there, and the service and effect came back after a reboot with nobody touching it.
+- **After a KWin update.** Bazzite has no build tools, so after a KWin update the effect stays off until a Satur8 release bundles an effect for that KWin. `satur8 repair` then says so and how to check a newer release: `packaging/install.sh --pick-effect` in the unpacked release says whether it has one, without changing anything. Steam Game Mode does not use the effect. No KWin update was on offer to test (stable and testing both had KWin 6.8.3 on 2026-11-22); the message was checked by putting an effect for another KWin in place.
+- **The COPR package, layered.** Bazzite's documentation calls `rpm-ostree` layering a last resort, and the tarball's per-user install above is the way to use Satur8 on Bazzite. What was seen in the KDE virtual machine (2026-11-22): `sudo dnf5 copr enable ntrpydev/satur8`, then `rpm-ostree install satur8` and a reboot, installed satur8 0.5.0 from COPR plus 31 packages its recommendations pull in (among them cmake, gcc-c++, and the KWin and Qt development files). The system-wide effect loaded, `satur8 on 2.0` and `satur8 off` changed a test window, and the service, once turned on with `systemctl --user enable --now satur8-daemon`, came back after a reboot with nobody touching it. After switching that install to the testing image (45.20261122.4, still KWin 6.8.3) the package stayed layered and the same checks passed. Whether `satur8 repair` can build an effect with the layered tools after a KWin update was not checked.
 - The GNOME images run GNOME 51. From v0.4.1, the Satur8 GNOME Shell extension lists GNOME 51. It was checked on GNOME Shell 51.1 headless in a Fedora 45 container, not on a Bazzite device or a GNOME 51 desktop.
-- The COPR package is built for Fedora 45, which current Bazzite is based on. Installing it on Bazzite by layering it with `rpm-ostree` has not been tested, and Bazzite's documentation treats layering as a last resort.
+
+Known limits on Bazzite:
+
+- On a GPU that is not AMD, a Satur8 look in Steam Game Mode costs one extra GPU pass per frame while it is on.
+- If you start gamescope with `ENABLE_VKBASALT=1`, Satur8 cannot see that on Bazzite, because only root can read gamescope's environment there, so taking a Satur8 look off can also end the composite pass vkBasalt relies on until gamescope restarts.
+- Satur8 assumes every AMD GPU lets gamescope color a game it shows directly; an AMD GPU on a kernel without AMD's extra display color controls would need the same composite pass, and that case was not checked.
 
 ## Quick start
 
@@ -277,7 +289,7 @@ On the tested Deck, gamescope sometimes aborts while Game Mode shuts down for th
 - The app's Game Mode layout on a Deck, with touch and with the controller (see [The app in Game Mode](#the-app-in-game-mode)).
 - The desktop app (`satur8-gui`) in Desktop Mode beyond starting it: it starts there and shows the KWin backend active, but it was not clicked through.
 - The `steamos-6.8.2` effect on a Deck running SteamOS 3.10 (it was only run headless, see above).
-- A Bazzite device (see [Bazzite](#bazzite)) and other systems that run a gamescope session.
+- Bazzite on an AMD or Intel device (see [Bazzite](#bazzite)), and other systems that run a gamescope session.
 - gamescope versions other than 3.16.30.1.
 
 ## How it works
@@ -309,7 +321,7 @@ Satur8 chooses the best available backend for your session. Zero per-frame cost 
 | Hyprland | `hyprctl` shader backend | One compositor pass | Verified |
 | DRM/KMS sessions (a console with no display server) | DRM CTM | Zero | Verified on a Steam Deck OLED's AMD GPU (2026-11-22) |
 | Steam Game Mode (Steam Deck) | gamescope look table, automatic | Reuses gamescope's color pipeline | Verified on a Steam Deck OLED, SteamOS 3.9.5, gamescope 3.16.30.1 (2026-11-21) |
-| Steam Game Mode (Bazzite) | gamescope look table, automatic | Reuses gamescope's color pipeline | Implemented |
+| Steam Game Mode (Bazzite) | gamescope look table, automatic | Reuses gamescope's color pipeline on AMD; one composite pass per frame while a look is on with other GPUs | Verified on an RTX 3070 Ti, Bazzite 45.20261117.1 (2026-11-22); AMD only in a virtual machine |
 | gamescope (running compositor) | gamescope-native color atoms | Reuses existing gamescope | Verified |
 | Unsupported Wayland | gamescope nested fallback | Extra nested compositor pass | Verified |
 

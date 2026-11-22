@@ -180,8 +180,9 @@ and Bazzite is Fedora-based (the live COPR work carries over).
       45.20261117.1, from source and in a container, not on a Bazzite device:
       Game Mode runs the OpenGamingCollective gamescope fork 3.17.0-ogc1 with
       the same look table, focus and server-id properties as the Deck's
-      3.16.30.1, and the per-user tarball installer works unchanged. Bazzite
-      Game Mode is Implemented, not Verified.
+      3.16.30.1, and the per-user tarball installer works unchanged. On
+      2026-11-22 Game Mode was run on real hardware with an NVIDIA RTX 3070 Ti
+      (Verified there for v0.5.2), and with AMD only in a virtual machine.
   - [x] Container check: the v0.3.5 per-user installer installs and uninstalls
         cleanly on the `bazzite-deck` image and uses the bundled KWin 6.8.3
         effect.
@@ -198,7 +199,15 @@ and Bazzite is Fedora-based (the live COPR work carries over).
   - [x] Installer refuses `--system` on image-based systems (read-only `/usr`).
         Done in v0.4.0.
   - [ ] Game Mode on a real Bazzite device with an AMD GPU: the same background
-        service checks that were run on the Steam Deck for v0.4.0.
+        service checks that were run on the Steam Deck for v0.4.0. Run on
+        2026-11-22 only in a virtual machine on an AMD Radeon RX 9070
+        (`bazzite-deck` stable 45.20261117.1, virtual GPU through Venus), not
+        on a Bazzite device: install, service, per-game switching on and off
+        focus, and the app's Game Mode layout (Games, Status, the Add a game
+        list) driven by keys, seen in the VM's screen. No Steam account was
+        used, so the games list was empty and no Steam library entry could be
+        added; the controller was not tested. That virtual GPU cannot show a
+        game directly, so gamescope composites every frame there anyway.
   - [ ] KDE Desktop Mode: keep the KWin effect working across KWin updates on
         an image with no `cmake` or KWin headers. Partly done in v0.4.1: the
         tarball bundles `fedora45-6.8.3`, built in Fedora 45's packages for
@@ -212,7 +221,12 @@ and Bazzite is Fedora-based (the live COPR work carries over).
         the effect stays off until a newer Satur8 release includes that KWin.
         Still open, and waiting on the owner's decision: whether Satur8 may
         fetch an effect for a newer KWin when the user asks for it with a
-        command. Nothing for that is built.
+        command. Nothing for that is built. Checked 2026-11-22: stable
+        45.20261117.1 and testing 45.20261122.4 both ship KWin 6.8.3, so no
+        newer KWin could be run. The case was produced on the KDE VM by putting
+        an effect for another KWin in place with none for 6.8.3 in the set;
+        for v0.5.2 doctor, repair and the app now say to install a newer
+        release that includes the running KWin and how to check a release.
   - [x] GNOME images: add GNOME 51 to the Shell extension. Checked on GNOME
         Shell 51.1 headless in a Fedora 45 container with software rendering,
         not on a Bazzite device or a GNOME 51 desktop. GNOME 51 removed the
@@ -220,11 +234,25 @@ and Bazzite is Fedora-based (the live COPR work carries over).
         snippet instead. Screenshots at 2.0, 0 and off matched the saturation
         math pixel for pixel, and the same steps passed on GNOME Shell 50.6
         and 49.10.
-  - [ ] Fedora 45 COPR package: the build target was added on 2026-11-22.
-        Still open: test layering it on Bazzite with `rpm-ostree` and decide
-        whether to document that.
-  - [ ] NVIDIA and Intel Game Mode: check on hardware whether the look applies
-        when gamescope scans a game out directly.
+  - [x] Fedora 45 COPR package: the build target was added on 2026-11-22.
+        Layering it on Bazzite was tested on 2026-11-22 in the KDE virtual
+        machine, the way Bazzite's docs describe (`dnf5 copr enable`, then
+        `rpm-ostree install`, reboot): satur8 0.5.0 plus 31 recommended
+        packages; effect, on/off in pixels and the service worked, after an
+        untouched reboot too, and after a rebase to testing with the package
+        kept. The README documents what was seen and keeps the per-user
+        tarball as the way to install on Bazzite.
+  - [x] NVIDIA Game Mode: checked 2026-11-22 on an RTX 3070 Ti (driver
+        620.70.06, open kernel module) under `bazzite-deck-nvidia` stable
+        45.20261117.1, gamescope 3.17.0, reading the buffers the display scans
+        out. A game gamescope showed directly kept its own colors with the
+        look loaded: gamescope colors such a game only through AMD's plane
+        color properties. Fixed for v0.5.2: on a non-AMD GPU Satur8 makes
+        gamescope composite while its look is on (one GPU pass per frame),
+        and the look then showed on the game and went on focus loss and when
+        the service stopped.
+  - [ ] Intel Game Mode: not tested; no Intel Bazzite hardware is available.
+        By gamescope's source the NVIDIA fix covers it.
 - [ ] Document clearly what works and what does not on each. SteamOS is done in
       the README's Steam Deck section (v0.4.0). The README's Bazzite section
       states what was checked and the known gaps; it stays open until a
