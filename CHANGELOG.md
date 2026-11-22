@@ -14,6 +14,10 @@ GitHub release notes for that tag.
   Mode item no longer claims per-game saturation is unique to Satur8
   (vibrantDeck already does per-app saturation), and the immutable targets are
   labeled v0.4 like everywhere else.
+- PLAN.md now describes the gamescope-native path (`satur8 run --via
+  gamescope-native`) alongside the nested gamescope fallback, instead of
+  calling gamescope only a last resort, and lists both in the backend
+  selection order as opt-in launch strategies.
 
 ## v0.3.5 - 2026-11-21
 

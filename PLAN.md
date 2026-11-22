@@ -181,17 +181,38 @@ unreliable on the proprietary driver). NVIDIA on Wayland is covered natively by
 the compositor shader paths (B1 KWin / B4 GNOME / Hyprland's screen-shader hook),
 *not* gamescope.
 
-### B6. gamescope backend - **true last resort only**
-gamescope is a nested compositor that runs under *any* session and supports
-`--reshade-effect <path>` applied to its **own** composited output (not injected
-into the game). So `satur8 run -- %command%` launches the game inside gamescope
-with a satur8 effect. It needs no cooperation from the host compositor, which
-is exactly why it is the floor nobody falls through - and why it costs an extra
-composite pass + latency. It is the answer ONLY for Wayland compositors with no
-native hook at all (Sway / minimal wlroots / niche), where `wlr-gamma-control`
-is the only color API and cannot do saturation (per-channel gamma LUTs can't mix
-channels; saturation is a 3x3 matrix that must). The proper long-term fix for
-those is upstreaming a CTM protocol to wlroots.
+### B6. gamescope backends - **native on a running gamescope, nested as the last resort**
+The gamescope crate (`crates/backends/gamescope`) has two run strategies. Both
+are launch-only: they wrap one game launch with `satur8 run --via ...` and
+restore when it exits, and neither is part of the automatic backend selector
+(`select_backend` in `crates/satur8-backend/src/lib.rs`), so `satur8 on`/`set`,
+the GUI, and the daemon never pick them.
+
+**gamescope-native (running compositor, the SteamOS/Bazzite path).**
+`satur8 run --via gamescope-native -- %command%` is for a session that already
+runs inside gamescope, such as Steam Game Mode, where Steam launch options run
+with `DISPLAY` pointed at gamescope's embedded Xwayland. It connects to that X
+server, refuses to continue unless the root window carries `GAMESCOPE_PID`,
+writes a shaper LUT and a 3D LUT generated from the shared saturation matrix,
+and points the running gamescope at them through the
+`GAMESCOPE_COLOR_SHAPERLUT_OVERRIDE` and `GAMESCOPE_COLOR_3DLUT_OVERRIDE`
+root-window atoms, holding `GAMESCOPE_COLOR_MANAGEMENT_DISABLE` at 0 while they
+are set. It saves the previous values of all three atoms first and restores them
+when the game exits (or rolls them back if applying fails). No second
+compositor is launched; the saturation goes through gamescope's own color
+pipeline.
+
+**Nested gamescope (the last resort).** gamescope is a nested compositor that
+runs under *any* session and supports `--reshade-effect <path>` applied to its
+**own** composited output (not injected into the game). So
+`satur8 run --via gamescope -- %command%` launches the game inside a new
+gamescope with a satur8 effect. It needs no cooperation from the host
+compositor, which is exactly why it is the floor nobody falls through - and why
+it costs an extra composite pass + latency. It is the answer ONLY for Wayland
+compositors with no native hook at all (Sway / minimal wlroots / niche), where
+`wlr-gamma-control` is the only color API and cannot do saturation (per-channel
+gamma LUTs can't mix channels; saturation is a 3x3 matrix that must). The
+proper long-term fix for those is upstreaming a CTM protocol to wlroots.
 
 ### Backend selection order at runtime
 ```
@@ -201,8 +222,13 @@ GNOME Wayland       -> B4 (Shell extension shader, any GPU incl. NVIDIA)
 X11 + AMD/Intel/nv  -> B2 (DRM CTM)
 X11 + NVIDIA prop   -> B5 (NV-CONTROL Digital Vibrance)
 Bare KMS            -> B2 (DRM CTM, we own DRM master)
-Sway / other wlr    -> B6 (gamescope)   [no native hook; upstream CTM = TODO]
+Inside gamescope    -> B6 native (`satur8 run --via gamescope-native`, opt-in)
+Sway / other wlr    -> B6 nested (`satur8 run --via gamescope`, opt-in)
+                       [no native hook; upstream CTM = TODO]
 ```
+The first six rows are picked automatically. The two gamescope rows are not:
+the user chooses them per launch with `--via`, because both wrap a single game
+launch instead of applying and resetting on demand.
 
 ### Who can actually run this (the "all Linux users" answer)
 Three independent axes; only the compositor one is hard:
