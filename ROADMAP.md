@@ -7,7 +7,7 @@ and backend architecture); for *how to install and use it* see
 
 ## Where the project stands
 
-v0.4.1 is the current release. Seven of the eight backend paths are verified on
+v0.5.0 is the current release. Seven of the eight backend paths are verified on
 real hardware: KDE Plasma Wayland/KWin, GNOME Wayland Shell extension, Hyprland,
 NVIDIA X11 NV-CONTROL, automatic per-game switching in Steam Game Mode through
 gamescope's look table (verified on a Steam Deck OLED with SteamOS 3.9.5 and
@@ -163,7 +163,7 @@ and Bazzite is Fedora-based (the live COPR work carries over).
       home folder, which survives SteamOS updates, `--enable-daemon` turns on
       the background service, and `--system` is refused on SteamOS. The
       service starts with the Game Mode session; this was checked by switching
-      the Deck to Desktop Mode and back, and a cold boot was not tested.
+      the Deck to Desktop Mode and back, and by restarting the Deck with v0.4.1.
       Uninstall was checked on the Deck and keeps `profiles.toml`.
 - [ ] Bazzite (atomic Fedora). Checked 2026-11-21 against Bazzite stable
       45.20261117.1, from source and in a container, not on a Bazzite device:
@@ -247,7 +247,14 @@ Not blocking the packaging spine; picked up as time allows.
       (AMD RX 9070, Hyprland 0.55.4): at saturation 0.0, gamma output sampled
       red as `(54,54,54)` while linear-light output sampled red as
       `(127,127,127)`, matching the expected sRGB transfer-function path.
-- [ ] Multi-monitor and per-output profiles.
+- [ ] Multi-monitor and per-output profiles. Released in v0.5.0 for KDE
+      Plasma: a value per output, game profiles limited to named outputs or to
+      the output the game is on, and reports on every other desktop that one
+      value applies to every output. Checked on headless KWin with two virtual
+      outputs, in pixels on KWin 6.7.3, 6.8.2 and 6.8.3, and on a real KWin
+      6.8.3 session with three monitors the focus script reported the window's
+      monitor as it moved. This item stays open until a different value on
+      each of several real monitors has been seen.
 - [x] Steam Deck: pick a game from a list of installed Steam games instead of
       typing its AppID, on the command line: `satur8 games` lists them and
       `satur8 profile add NAME SATURATION --steam-game NAME` adds a profile by
@@ -261,9 +268,25 @@ Not blocking the packaging spine; picked up as time allows.
       v0.4.0 look table only changes SDR content. First test with a game that
       presents HDR; so far only a game presenting SDR was run (ELDEN RING
       through Proton, where the look applied).
-- [ ] Steam Deck: a cold boot straight into Game Mode, to confirm the service
-      starts then too.
+- [x] Steam Deck: a cold boot straight into Game Mode, to confirm the service
+      starts then too. Done with v0.4.1 on 2026-11-22: after a restart, with
+      nobody touching the Deck, the service was running in Game Mode about ten
+      seconds after boot, Steam's color settings were unchanged, and a game
+      then got its table.
+- [x] Steam Deck: find out why gamescope sometimes aborts while Game Mode
+      shuts down for the switch to Desktop Mode. Done 2026-11-22: it happens
+      without Satur8 (a session that never had a Satur8 table aborted the same
+      way; 1 of 8 without a table, 2 of 6 with one). Every abort has the same
+      signature: two threads of gamescope 3.16.30.1 use the session's D-Bus
+      connection at once during shutdown. Nothing to change in Satur8.
+- [ ] Steam Deck: gamescope 3.16.30.1 does not close the table file after
+      loading it, so each table load leaves one file open in gamescope. Measure
+      whether a very long session with many focus changes can run into
+      gamescope's open-file limit.
 - [ ] Steam Deck: run the `steamos-6.8.2` effect on a Deck with SteamOS 3.10.
+      So far it was run headless only: in a KWin 6.8.2 session built from
+      Valve's SteamOS 3.10 packages it changed window colors by the same
+      values as the 6.7.3 effect.
 - [x] Steam Deck: make the KWin effect available on SteamOS Desktop Mode.
       Done in v0.4.1: the tarball bundles effects built against Valve's
       packages for SteamOS 3.9 (KWin 6.7.3) and SteamOS 3.10 (KWin 6.8.2), and
