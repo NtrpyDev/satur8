@@ -344,6 +344,8 @@ satur8 repair       # put back a KWin effect that fits the running KWin
 
 KWin only loads an effect built for its exact version, so a KWin update used to break Satur8 until you reinstalled it. The focus daemon now runs `satur8 repair` at every login. It first installs the matching effect from the set of prebuilt effects that came with Satur8 (copied to `~/.local/share/satur8/kwin-effects`), with no network; only when the set has none does it rebuild the effect from the installed source, which needs `cmake`, a C++ compiler, and the Qt 6 and KWin development files. It also checks the effect file on disk, so a wrong file is replaced even while KWin still uses a copy it loaded earlier, and it says plainly what it will do on a system that cannot build. `satur8 doctor` shows which KWin version each installed copy of the effect was built for and where the effect came from.
 
+On GNOME, `satur8 doctor` checks the Satur8 GNOME Shell extension instead: where it is installed, which GNOME versions it lists, the state GNOME Shell reports for it, and whether Satur8 can apply, and it ends with the one thing to do next. `satur8 status` shows the short form.
+
 Manage per-game profiles:
 
 ```sh
